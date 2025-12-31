@@ -69,6 +69,14 @@ class MainActivity : AppCompatActivity() {
     private var isSystemScrollActive = false
     private var allApps = listOf<ResolveInfo>()  // Store all apps for search filtering
 
+    // Dynamic debouncing for fast scrolling
+    private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var imageLoadRunnable: Runnable? = null
+    private var lastScrollTime = 0L
+    private val FAST_SCROLL_THRESHOLD = 300L // If scrolling faster than 300ms between changes, it's "fast"
+    private val FAST_SCROLL_DELAY = 250L // Delay for fast scrolling
+    private val SLOW_SCROLL_DELAY = 0L // No delay for slow/single scrolling
+
     // Broadcast receiver for app install/uninstall events
     private val appChangeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -209,9 +217,15 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
 
-        // Close app drawer and clear search when returning from a launched app
-        if (::bottomSheetBehavior.isInitialized) {
+        // Close drawer if it's open (user is returning from Settings or an app)
+        // This happens after Settings/app is visible, so no animation is seen
+        if (::bottomSheetBehavior.isInitialized &&
+            bottomSheetBehavior.state == BottomSheetBehavior.STATE_EXPANDED) {
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+        }
+
+        // Clear search bar
+        if (::appSearchBar.isInitialized) {
             appSearchBar.text.clear()
         }
 
@@ -593,7 +607,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSettingsButton() {
         settingsButton.setOnClickListener {
-            // Use the settings launcher instead of startActivity
+            // Don't close the drawer - just launch Settings over it
+            // The drawer will still be there when returning, but that's okay
             settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
     }
@@ -639,11 +654,11 @@ class MainActivity : AppCompatActivity() {
                             when (path) {
                                 "esde_system_scroll.txt" -> {
                                     android.util.Log.d("MainActivity", "System scroll detected")
-                                    loadSystemImage()
+                                    loadSystemImageDebounced()
                                 }
                                 "esde_game_scroll.txt" -> {
                                     android.util.Log.d("MainActivity", "Game scroll detected")
-                                    loadGameInfo()
+                                    loadGameInfoDebounced()
                                 }
                             }
                         }, 50) // 50ms delay to ensure file is written
@@ -671,6 +686,66 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         fileObserver?.stopWatching()
         unregisterReceiver(appChangeReceiver)
+        // Cancel any pending image loads
+        imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
+    }
+
+    /**
+     * Debounced wrapper for loadSystemImage - delays loading based on scroll speed
+     */
+    private fun loadSystemImageDebounced() {
+        // Calculate time since last scroll event
+        val currentTime = System.currentTimeMillis()
+        val timeSinceLastScroll = currentTime - lastScrollTime
+        lastScrollTime = currentTime
+
+        // Determine if user is fast scrolling
+        val isFastScrolling = timeSinceLastScroll < FAST_SCROLL_THRESHOLD
+        val delay = if (isFastScrolling) FAST_SCROLL_DELAY else SLOW_SCROLL_DELAY
+
+        // Cancel any pending image load
+        imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
+
+        // Schedule new image load with appropriate delay
+        imageLoadRunnable = Runnable {
+            loadSystemImage()
+        }
+
+        if (delay > 0) {
+            imageLoadHandler.postDelayed(imageLoadRunnable!!, delay)
+        } else {
+            // Load immediately for slow scrolling
+            imageLoadRunnable!!.run()
+        }
+    }
+
+    /**
+     * Debounced wrapper for loadGameInfo - delays loading based on scroll speed
+     */
+    private fun loadGameInfoDebounced() {
+        // Calculate time since last scroll event
+        val currentTime = System.currentTimeMillis()
+        val timeSinceLastScroll = currentTime - lastScrollTime
+        lastScrollTime = currentTime
+
+        // Determine if user is fast scrolling
+        val isFastScrolling = timeSinceLastScroll < FAST_SCROLL_THRESHOLD
+        val delay = if (isFastScrolling) FAST_SCROLL_DELAY else SLOW_SCROLL_DELAY
+
+        // Cancel any pending image load
+        imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
+
+        // Schedule new image load with appropriate delay
+        imageLoadRunnable = Runnable {
+            loadGameInfo()
+        }
+
+        if (delay > 0) {
+            imageLoadHandler.postDelayed(imageLoadRunnable!!, delay)
+        } else {
+            // Load immediately for slow scrolling
+            imageLoadRunnable!!.run()
+        }
     }
 
     private fun loadSystemImage() {
@@ -864,6 +939,10 @@ class MainActivity : AppCompatActivity() {
      */
     private fun launchApp(app: ResolveInfo) {
         val packageName = app.activityInfo?.packageName ?: return
+
+        // Don't close drawer - just launch the app
+        // Drawer will remain in its current state
+
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
 
         if (launchIntent != null) {
