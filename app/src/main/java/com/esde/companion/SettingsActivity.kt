@@ -1236,7 +1236,8 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_scroll.txt" &
                 AlertDialog.Builder(this)
                     .setTitle("Setup Complete! 🎉")
                     .setMessage("Your app is now configured and ready to use with ES-DE!\n\n" +
-                            "You can change these settings anytime from the cards below.")
+                            "You can change these settings anytime from the cards below.\n\n" +
+                            "It is recommended to use the Mjolnir app (https://github.com/blacksheepmvp/mjolnir) to run this companion app together with ES-DE as your home screens.")
                     .setPositiveButton("Done") { _, _ -> }
                     .show()
             }
