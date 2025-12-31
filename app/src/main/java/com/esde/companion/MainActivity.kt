@@ -19,6 +19,7 @@ import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.EditText
+import android.widget.TextView
 import android.widget.RelativeLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,6 +31,13 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
+import android.app.ActivityOptions
+import android.provider.Settings
+import android.net.Uri
+import androidx.appcompat.app.AlertDialog
 import java.io.File
 import kotlin.math.abs
 
@@ -47,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var settingsButton: ImageButton
     private lateinit var androidSettingsButton: ImageButton
     private lateinit var prefs: SharedPreferences
+    private lateinit var appLaunchPrefs: AppLaunchPreferences
 
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<View>
     private lateinit var gestureDetector: GestureDetectorCompat
@@ -98,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         prefs = getSharedPreferences("ESDESecondScreenPrefs", MODE_PRIVATE)
+        appLaunchPrefs = AppLaunchPreferences(this)
 
         rootLayout = findViewById(R.id.rootLayout)
         gameImageView = findViewById(R.id.gameImageView)
@@ -386,10 +396,14 @@ class MainActivity : AppCompatActivity() {
             .filter { !hiddenApps.contains(it.activityInfo?.packageName ?: "") }  // Filter out hidden apps
             .sortedBy { it.loadLabel(packageManager).toString().lowercase() }  // Case-insensitive sort
 
-        appRecyclerView.adapter = AppAdapter(allApps, packageManager) { app ->
-            val launchIntent = packageManager.getLaunchIntentForPackage(app.activityInfo?.packageName ?: "")
-            launchIntent?.let { startActivity(it) }
-        }
+        appRecyclerView.adapter = AppAdapter(allApps, packageManager,
+            onAppClick = { app ->
+                launchApp(app)
+            },
+            onAppLongClick = { app, view ->
+                showAppOptionsDialog(app)
+            }
+        )
 
         android.util.Log.d("MainActivity", "AppDrawer setup complete, initial state: ${bottomSheetBehavior.state}")
     }
@@ -418,10 +432,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                appRecyclerView.adapter = AppAdapter(filteredApps, packageManager) { app ->
-                    val launchIntent = packageManager.getLaunchIntentForPackage(app.activityInfo?.packageName ?: "")
-                    launchIntent?.let { startActivity(it) }
-                }
+                appRecyclerView.adapter = AppAdapter(filteredApps, packageManager,
+                    onAppClick = { app ->
+                        launchApp(app)
+                    },
+                    onAppLongClick = { app, view ->
+                        showAppOptionsDialog(app)
+                    }
+                )
             }
         })
     }
@@ -717,5 +735,146 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return null
+    }
+
+    /**
+     * Launch an app on the appropriate display based on user preferences
+     */
+    private fun launchApp(app: ResolveInfo) {
+        val packageName = app.activityInfo?.packageName ?: return
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+
+        if (launchIntent != null) {
+            // Check if app should launch on top or bottom display
+            if (appLaunchPrefs.shouldLaunchOnTop(packageName)) {
+                launchOnTopDisplay(launchIntent)
+            } else {
+                launchOnBottomDisplay(launchIntent)
+            }
+        }
+    }
+
+    /**
+     * Launch app on top display (display ID 0)
+     */
+    private fun launchOnTopDisplay(intent: Intent) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            try {
+                android.util.Log.d("MainActivity", "Launching on top display (ID: 0)")
+                val options = ActivityOptions.makeBasic()
+                options.launchDisplayId = 0  // Top display
+                startActivity(intent, options.toBundle())
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error launching on top display, using default", e)
+                startActivity(intent)
+            }
+        } else {
+            startActivity(intent)
+        }
+    }
+
+    /**
+     * Launch app on bottom display (display ID 1, or default if not available)
+     */
+    private fun launchOnBottomDisplay(intent: Intent) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            try {
+                val displayManager = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+                val displays = displayManager.displays
+
+                android.util.Log.d("MainActivity", "Available displays: ${displays.size}")
+                displays.forEachIndexed { index, display ->
+                    android.util.Log.d("MainActivity", "Display $index: ID=${display.displayId}, Name=${display.name}")
+                }
+
+                // Try to find the bottom display
+                // For dual-screen devices, the second display is usually ID 1
+                val bottomDisplay = displays.firstOrNull { it.displayId == 1 }
+
+                if (bottomDisplay != null) {
+                    android.util.Log.d("MainActivity", "Launching on bottom display (ID: ${bottomDisplay.displayId})")
+                    val options = ActivityOptions.makeBasic()
+                    options.launchDisplayId = bottomDisplay.displayId
+                    startActivity(intent, options.toBundle())
+                } else {
+                    // Fallback: if no secondary display, just launch normally
+                    android.util.Log.d("MainActivity", "No secondary display found, launching on default display")
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error launching on bottom display, using default", e)
+                // Fallback to default launch
+                startActivity(intent)
+            }
+        } else {
+            startActivity(intent)
+        }
+    }
+
+    /**
+     * Show app options dialog with launch position toggles
+     */
+    private fun showAppOptionsDialog(app: ResolveInfo) {
+        val packageName = app.activityInfo?.packageName ?: return
+        val appName = app.loadLabel(packageManager).toString()
+
+        // Inflate custom dialog layout
+        val dialogView = layoutInflater.inflate(R.layout.dialog_app_options, null)
+        val dialogAppName = dialogView.findViewById<TextView>(R.id.dialogAppName)
+        val btnAppInfo = dialogView.findViewById<MaterialButton>(R.id.btnAppInfo)
+        val chipGroup = dialogView.findViewById<ChipGroup>(R.id.launchPositionChipGroup)
+        val chipLaunchTop = dialogView.findViewById<Chip>(R.id.chipLaunchTop)
+        val chipLaunchBottom = dialogView.findViewById<Chip>(R.id.chipLaunchBottom)
+
+        // Set app name
+        dialogAppName.text = appName
+
+        // Get current launch position and set initial chip state
+        val currentPosition = appLaunchPrefs.getLaunchPosition(packageName)
+        if (currentPosition == AppLaunchPreferences.POSITION_TOP) {
+            chipLaunchTop.isChecked = true
+        } else {
+            chipLaunchBottom.isChecked = true
+        }
+
+        // Create dialog
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+
+        // App Info button click
+        btnAppInfo.setOnClickListener {
+            openAppInfo(packageName)
+            dialog.dismiss()
+        }
+
+        // Listen for chip selection changes
+        chipGroup.setOnCheckedStateChangeListener { group, checkedIds ->
+            when {
+                checkedIds.contains(R.id.chipLaunchTop) -> {
+                    appLaunchPrefs.setLaunchPosition(packageName, AppLaunchPreferences.POSITION_TOP)
+                    android.util.Log.d("MainActivity", "Set $appName to launch on TOP")
+                }
+                checkedIds.contains(R.id.chipLaunchBottom) -> {
+                    appLaunchPrefs.setLaunchPosition(packageName, AppLaunchPreferences.POSITION_BOTTOM)
+                    android.util.Log.d("MainActivity", "Set $appName to launch on BOTTOM")
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    /**
+     * Open system app info screen
+     */
+    private fun openAppInfo(packageName: String) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Failed to open app info", e)
+        }
     }
 }

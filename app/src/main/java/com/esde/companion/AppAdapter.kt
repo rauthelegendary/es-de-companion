@@ -12,7 +12,8 @@ import androidx.recyclerview.widget.RecyclerView
 class AppAdapter(
     private val apps: List<ResolveInfo>,
     private val packageManager: PackageManager,
-    private val onAppClick: (ResolveInfo) -> Unit
+    private val onAppClick: (ResolveInfo) -> Unit,
+    private val onAppLongClick: (ResolveInfo, View) -> Unit
 ) : RecyclerView.Adapter<AppAdapter.AppViewHolder>() {
 
     class AppViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -30,8 +31,16 @@ class AppAdapter(
         val app = apps[position]
         holder.appName.text = app.loadLabel(packageManager)
         holder.appIcon.setImageDrawable(app.loadIcon(packageManager))
+
+        // Regular click to launch app
         holder.itemView.setOnClickListener {
             onAppClick(app)
+        }
+
+        // Long click to show options menu
+        holder.itemView.setOnLongClickListener {
+            onAppLongClick(app, holder.itemView)
+            true
         }
     }
 
