@@ -754,6 +754,11 @@ class MainActivity : AppCompatActivity() {
             val systemFile = File(sdcard, "ES-DE/logs/esde_system_scroll.txt")
             if (!systemFile.exists()) return
 
+            // Clear marquee when loading system image (systems don't have marquees)
+            marqueeImageView.visibility = View.GONE
+            Glide.with(this).clear(marqueeImageView)
+            marqueeImageView.setImageDrawable(null)
+
             val systemName = systemFile.readText().trim()
             val imageFile = File(getSystemImagePath(), "$systemName.webp")
 
@@ -799,11 +804,9 @@ class MainActivity : AppCompatActivity() {
             if (imageToUse != null && imageToUse.exists()) {
                 isSystemScrollActive = true
                 loadImageWithAnimation(imageToUse, gameImageView)
-            } else {
-                isSystemScrollActive = false
-                Glide.with(this).clear(gameImageView)
-                gameImageView.setImageDrawable(null)
             }
+            // Don't clear image if not found - keep last image displayed
+            // This prevents black screen during ES-DE fast scroll
 
             if (marqueeToUse != null && marqueeToUse.exists()) {
                 val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
@@ -815,19 +818,12 @@ class MainActivity : AppCompatActivity() {
                     marqueeImageView.visibility = View.VISIBLE
                     loadImageWithAnimation(marqueeToUse, marqueeImageView)
                 }
-            } else {
-                val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
-                if (logoSize == "off") {
-                    marqueeImageView.visibility = View.GONE
-                }
-                Glide.with(this).clear(marqueeImageView)
-                marqueeImageView.setImageDrawable(null)
             }
+            // Marquee already cleared at start of method - only shown if fallback game image has one
 
         } catch (e: Exception) {
-            isSystemScrollActive = false
-            gameImageView.setImageDrawable(null)
-            marqueeImageView.setImageDrawable(null)
+            // Don't clear images on exception - keep last valid images
+            android.util.Log.e("MainActivity", "Error loading system image", e)
         }
     }
 
@@ -849,6 +845,7 @@ class MainActivity : AppCompatActivity() {
             val gameImage = findGameImage(sdcard, systemName, gameName, gameNameRaw)
                 ?: File(getSystemImagePath(), "$systemName.webp")
 
+            var gameImageLoaded = false
             if (!gameImage.exists()) {
                 val mediaBase = File(getMediaBasePath(), systemName)
                 val imagePref = prefs.getString("image_preference", "fanart") ?: "fanart"
@@ -868,37 +865,46 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (allImages.isNotEmpty()) {
                     loadImageWithAnimation(allImages.random(), gameImageView)
-                } else {
-                    Glide.with(this).clear(gameImageView)
-                    gameImageView.setImageDrawable(null)
+                    gameImageLoaded = true
                 }
+                // Don't clear if no images found - keep last image displayed
             } else {
                 loadImageWithAnimation(gameImage, gameImageView)
+                gameImageLoaded = true
             }
 
-            val marqueeFile = findMarqueeImage(sdcard, systemName, gameName, gameNameRaw)
-            if (marqueeFile != null && marqueeFile.exists()) {
-                val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
-                if (logoSize == "off") {
-                    marqueeImageView.visibility = View.GONE
-                    Glide.with(this).clear(marqueeImageView)
-                    marqueeImageView.setImageDrawable(null)
+            // Only update marquee if we successfully loaded game data
+            // This prevents clearing marquee during fast scroll when no data available
+            if (gameImageLoaded) {
+                val marqueeFile = findMarqueeImage(sdcard, systemName, gameName, gameNameRaw)
+                if (marqueeFile != null && marqueeFile.exists()) {
+                    val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
+                    if (logoSize == "off") {
+                        marqueeImageView.visibility = View.GONE
+                        Glide.with(this).clear(marqueeImageView)
+                        marqueeImageView.setImageDrawable(null)
+                    } else {
+                        marqueeImageView.visibility = View.VISIBLE
+                        loadImageWithAnimation(marqueeFile, marqueeImageView)
+                    }
                 } else {
-                    marqueeImageView.visibility = View.VISIBLE
-                    loadImageWithAnimation(marqueeFile, marqueeImageView)
+                    // Game has no marquee - clear it (don't show wrong marquee from previous game)
+                    val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
+                    if (logoSize != "off") {
+                        // Only clear if logo is supposed to be shown
+                        // If logo is off, it's already hidden
+                        Glide.with(this).clear(marqueeImageView)
+                        marqueeImageView.setImageDrawable(null)
+                    }
                 }
-            } else {
-                val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
-                if (logoSize == "off") {
-                    marqueeImageView.visibility = View.GONE
-                }
-                Glide.with(this).clear(marqueeImageView)
-                marqueeImageView.setImageDrawable(null)
             }
+            // If gameImageLoaded is false, we couldn't load new game data
+            // Keep last marquee displayed (prevents disappearing during fast scroll)
 
         } catch (e: Exception) {
-            gameImageView.setImageDrawable(null)
-            marqueeImageView.setImageDrawable(null)
+            // Don't clear images on exception - keep last valid images
+            // This prevents black screen during ES-DE fast scroll when no data available
+            android.util.Log.e("MainActivity", "Error loading game info", e)
         }
     }
 
