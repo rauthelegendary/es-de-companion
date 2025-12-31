@@ -1,0 +1,774 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0A0A0A">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Header -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Settings"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Customize your experience"
+            android:textColor="#999999"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Quick Setup Button -->
+        <Button
+            android:id="@+id/setupWizardButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🚀 Run Quick Setup"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:backgroundTint="#03DAC6"
+            android:padding="16dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 1. PATHS CARD -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1A1A1A"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <!-- Section Header -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@android:drawable/ic_menu_save"
+                        android:tint="#BB86FC"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="PATHS"
+                        android:textColor="#BB86FC"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+                </LinearLayout>
+
+                <!-- Media Path -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Downloaded Media Path"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/mediaPathText"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Default: /storage/emulated/0/ES-DE/downloaded_media"
+                        android:textColor="#999999"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/mediaStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="●"
+                        android:textSize="24sp"
+                        android:textColor="#666666"
+                        android:layout_marginStart="8dp" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/mediaStatusDescription"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Folder not found"
+                    android:textColor="#666666"
+                    android:textSize="12sp"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/selectMediaPathButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Select Directory"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#BB86FC"
+                    android:layout_marginBottom="24dp" />
+
+                <!-- System Path -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="System Images Path"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/systemPathText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Default: /storage/emulated/0/ES-DE/downloaded_media/systems"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ℹ️ User-supplied images. Filenames must match ES-DE system shortnames (e.g., snes.png). Falls back to random game image if not found."
+                    android:textColor="#666666"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/selectSystemPathButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Select Directory"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#BB86FC" />
+
+                <!-- Scripts Path -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ES-DE Scripts"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="24dp"
+                    android:layout_marginBottom="4dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/scriptsPathText"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Default: /storage/emulated/0/ES-DE/scripts"
+                        android:textColor="#999999"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/scriptsStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="●"
+                        android:textSize="24sp"
+                        android:textColor="#666666"
+                        android:layout_marginStart="8dp" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/scriptsStatusDescription"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Scripts not found"
+                    android:textColor="#666666"
+                    android:textSize="12sp"
+                    android:layout_marginBottom="12dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/selectScriptsPathButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Select Directory"
+                        android:textColor="#FFFFFF"
+                        android:backgroundTint="#BB86FC"
+                        android:layout_marginEnd="12dp" />
+
+                    <Button
+                        android:id="@+id/createScriptsButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Create Scripts"
+                        android:textColor="#FFFFFF"
+                        android:backgroundTint="#03DAC6" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- 2. IMAGE SETTINGS CARD -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1A1A1A"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <!-- Section Header -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@android:drawable/ic_menu_gallery"
+                        android:tint="#FFB74D"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="IMAGE SETTINGS"
+                        android:textColor="#FFB74D"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+                </LinearLayout>
+
+                <!-- Image Priority -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Background Image Priority"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Which image type to prefer for backgrounds"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="8dp" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/imagePreferenceChipGroup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="20dp"
+                    app:singleSelection="true"
+                    app:selectionRequired="true">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/imagePrefFanart"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Fanart"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/imagePrefScreenshot"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Screenshot"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                </com.google.android.material.chip.ChipGroup>
+
+                <!-- Crossfade -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Image Crossfade"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Smooth transition between images"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="8dp" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/crossfadeChipGroup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="20dp"
+                    app:singleSelection="true"
+                    app:selectionRequired="true">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/crossfadeOff"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Instant"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/crossfadeOn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Smooth"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                </com.google.android.material.chip.ChipGroup>
+
+                <!-- Logo Size -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@android:drawable/ic_menu_zoom"
+                        android:tint="#FFFFFF"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Logo Size"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/logoSizeText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Medium"
+                        android:textColor="#FFB74D"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:minWidth="70dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/logoSizeSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:thumbTint="#FFB74D"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:minHeight="32dp"
+                    android:max="3"
+                    android:progressDrawable="@drawable/slider_progress_orange"
+                    android:thumb="@drawable/slider_thumb"
+                    android:splitTrack="false"
+                    android:thumbOffset="0dp" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- 3. VISUAL EFFECTS CARD -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1A1A1A"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <!-- Section Header -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@android:drawable/ic_menu_view"
+                        android:tint="#03DAC6"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="VISUAL EFFECTS"
+                        android:textColor="#03DAC6"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+                </LinearLayout>
+
+                <!-- Background Dimming -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@android:drawable/ic_menu_day"
+                        android:tint="#FFFFFF"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Background Dimming"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/dimmingText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="20%"
+                        android:textColor="#03DAC6"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:minWidth="50dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ℹ️ Darkens background image which helps visibility of logo."
+                    android:textColor="#666666"
+                    android:textSize="11sp"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginBottom="8dp" />
+
+                <SeekBar
+                    android:id="@+id/dimmingSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginBottom="24dp"
+                    android:thumbTint="#03DAC6"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:minHeight="32dp"
+                    android:progressDrawable="@drawable/slider_progress_teal"
+                    android:thumb="@drawable/slider_thumb"
+                    android:splitTrack="false"
+                    android:thumbOffset="0dp" />
+
+                <!-- Background Blur -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@android:drawable/ic_menu_crop"
+                        android:tint="#FFFFFF"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Background Blur"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/blurText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Off"
+                        android:textColor="#03DAC6"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:minWidth="50dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ℹ️ Applies blur effect to background."
+                    android:textColor="#666666"
+                    android:textSize="11sp"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginBottom="8dp" />
+
+                <SeekBar
+                    android:id="@+id/blurSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:thumbTint="#03DAC6"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:minHeight="32dp"
+                    android:progressDrawable="@drawable/slider_progress_teal"
+                    android:thumb="@drawable/slider_thumb"
+                    android:splitTrack="false"
+                    android:thumbOffset="0dp" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- 4. APP DRAWER CARD -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#1A1A1A"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <!-- Section Header -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@android:drawable/ic_menu_sort_by_size"
+                        android:tint="#CF6679"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="APP DRAWER"
+                        android:textColor="#CF6679"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+                </LinearLayout>
+
+                <!-- App Visibility -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="App Visibility"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Choose which apps appear in the app drawer"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/hideAppsButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Manage Apps"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#CF6679"
+                    android:layout_marginBottom="24dp" />
+
+                <!-- Drawer Opacity -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@android:drawable/ic_menu_upload"
+                        android:tint="#FFFFFF"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Drawer Opacity"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/drawerTransparencyText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="67%"
+                        android:textColor="#CF6679"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:minWidth="50dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/drawerTransparencySeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginBottom="24dp"
+                    android:thumbTint="#CF6679"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:minHeight="32dp"
+                    android:progressDrawable="@drawable/slider_progress_pink"
+                    android:thumb="@drawable/slider_thumb"
+                    android:splitTrack="false"
+                    android:thumbOffset="0dp" />
+
+                <!-- Grid Columns -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@android:drawable/ic_menu_gallery"
+                        android:tint="#FFFFFF"
+                        android:layout_marginEnd="12dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Grid Columns"
+                        android:textColor="#FFFFFF"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/columnCountText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="4"
+                        android:textColor="#CF6679"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:minWidth="50dp"
+                        android:gravity="end" />
+                </LinearLayout>
+
+                <SeekBar
+                    android:id="@+id/columnCountSeekBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:thumbTint="#CF6679"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp"
+                    android:minHeight="32dp"
+                    android:progressDrawable="@drawable/slider_progress_pink"
+                    android:thumb="@drawable/slider_thumb"
+                    android:splitTrack="false"
+                    android:thumbOffset="0dp" />
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+    </LinearLayout>
+
+</ScrollView>
