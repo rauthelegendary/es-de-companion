@@ -11,7 +11,7 @@ A companion app for [ES-DE](https://es-de.org/) that displays beautiful game art
 ### Dynamic Display
 - **Real-time artwork display** - Shows game fanart, screenshots, and marquees as you browse in ES-DE
 - **System view support** - Displays custom system images or random game artwork when browsing systems
-- **Smooth transitions** - Configurable crossfade effects between images
+- **Smooth animations** - Configurable fade and scale effects with custom timing options
 - **Background customization** - Adjustable dimming and blur effects
 
 ### App Drawer
@@ -30,10 +30,10 @@ A companion app for [ES-DE](https://es-de.org/) that displays beautiful game art
 
 ### Visual Customization
 - **Background priority** - Choose between Fanart or Screenshot priority
-- **Image crossfade** - Instant or smooth transitions
+- **Animation styles** - Choose from None, Fade, Scale + Fade, or Custom with adjustable duration and scale
+- **Logo sizing** - Adjustable marquee/logo size
 - **Dimming control** - 0-100% background darkening
 - **Blur effects** - Optional background blur (Android 12+)
-- **Logo sizing** - Adjustable marquee/logo size
 - **Drawer opacity** - Customize app drawer transparency
 
 ## 📱 Requirements
@@ -62,7 +62,7 @@ For the best experience, use [Mjolnir](https://github.com/blacksheepmvp/mjolnir)
 ## ⚙️ Configuration
 
 ### Default Settings
-- **Image Crossfade**: Instant
+- **Animation Style**: Scale + Fade
 - **Background Dimming**: 25%
 - **Drawer Opacity**: 70%
 - **Background Priority**: Fanart
@@ -140,11 +140,13 @@ If you encounter any issues or have questions:
 
 ## 🔄 Changelog
 
-### Initial Release
+### Latest Release
+- ✨ Advanced animation system with 4 styles (None, Fade, Scale + Fade, Custom)
+- ⚙️ Custom animation controls (adjustable duration 100-500ms, scale amount 85-100%)
 - ✨ Added long-press menu in app drawer
 - 🎯 Per-app display launch preferences (top/bottom screen)
 - 🔧 Quick Setup wizard with ES-DE script configuration
-- 🎨 Customizable visual effects (dimming, blur, crossfade)
+- 🎨 Customizable visual effects (dimming, blur, animations)
 - 📱 App drawer with search and visibility controls
 - 🖼️ Real-time game artwork and marquee display
 - 🔍 Smart path detection and configuration
