@@ -25,6 +25,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.google.android.material.chip.ChipGroup
 
+import android.view.GestureDetector
+import android.view.MotionEvent
+import androidx.core.view.GestureDetectorCompat
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var prefs: SharedPreferences
@@ -232,6 +235,9 @@ class SettingsActivity : AppCompatActivity() {
         try {
             setContentView(R.layout.activity_settings)
             android.util.Log.d("SettingsActivity", "Layout inflated successfully")
+
+            // Setup swipe gesture to exit settings
+            setupSwipeGesture()
 
             prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
             android.util.Log.d("SettingsActivity", "Prefs initialized")
@@ -1604,6 +1610,59 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_scroll.txt" &
         val packageName: String,
         val icon: android.graphics.drawable.Drawable
     )
+
+    private fun setupSwipeGesture() {
+        val scrollView = findViewById<android.widget.ScrollView>(R.id.settingsScrollView)
+
+        val gestureDetector = GestureDetectorCompat(this, object : GestureDetector.SimpleOnGestureListener() {
+            private val SWIPE_THRESHOLD = 150
+            private val SWIPE_VELOCITY_THRESHOLD = 150
+
+            override fun onDown(e: MotionEvent): Boolean {
+                return true // Must return true to receive subsequent events
+            }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (e1 == null) return false
+
+                val diffX = e2.x - e1.x
+                val diffY = e2.y - e1.y
+
+                // Check if horizontal swipe is dominant
+                if (Math.abs(diffX) > Math.abs(diffY)) {
+                    // Check if swipe meets threshold requirements
+                    if (Math.abs(diffX) > SWIPE_THRESHOLD && Math.abs(velocityX) > SWIPE_VELOCITY_THRESHOLD) {
+                        if (diffX > 0) {
+                            // Right swipe - exit settings
+                            android.util.Log.d("SettingsActivity", "Right swipe detected - exiting")
+                            onBackPressedDispatcher.onBackPressed()
+                            return true
+                        }
+                    }
+                }
+                return false
+            }
+        })
+
+        // Custom touch listener that passes events to both gesture detector and ScrollView
+        scrollView.setOnTouchListener { view, event ->
+            val gestureHandled = gestureDetector.onTouchEvent(event)
+
+            // If gesture was handled (swipe detected), consume the event
+            if (gestureHandled) {
+                true
+            } else {
+                // Let ScrollView handle scrolling
+                view.onTouchEvent(event)
+                false
+            }
+        }
+    }
 
     companion object {
         const val PREFS_NAME = "ESDESecondScreenPrefs"
