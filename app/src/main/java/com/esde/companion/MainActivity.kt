@@ -137,6 +137,9 @@ class MainActivity : AppCompatActivity() {
         settingsButton = findViewById(R.id.settingsButton)
         androidSettingsButton = findViewById(R.id.androidSettingsButton)
 
+        // Log display information at startup
+        logDisplayInfo()
+
         setupAppDrawer()
         setupSearchBar()
         setupGestureDetector()  // Must be after setupAppDrawer so bottomSheetBehavior is initialized
@@ -634,6 +637,28 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupSettingsButton() {
         settingsButton.setOnClickListener {
+            // Log current display when settings is opened
+            val currentDisplay = getCurrentDisplayId()
+            android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            android.util.Log.d("MainActivity", "SETTINGS BUTTON CLICKED")
+            android.util.Log.d("MainActivity", "Companion currently on display: $currentDisplay")
+
+            // Also log all available displays
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                try {
+                    val displayManager = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+                    val displays = displayManager.displays
+                    android.util.Log.d("MainActivity", "All available displays:")
+                    displays.forEachIndexed { index, display ->
+                        android.util.Log.d("MainActivity", "  Display $index: ID=${display.displayId}, Name='${display.name}'")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Error listing displays", e)
+                }
+            }
+
+            android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
             // Don't close the drawer - just launch Settings over it
             // The drawer will still be there when returning, but that's okay
             settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
@@ -1120,6 +1145,72 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Get the display ID that this activity is currently running on
+     */
+    /**
+     * Log display information for debugging
+     */
+    private fun logDisplayInfo() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            try {
+                val displayManager = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+                val displays = displayManager.displays
+
+                android.util.Log.d("MainActivity", "═══════════════════════════════════")
+                android.util.Log.d("MainActivity", "DISPLAY INFORMATION AT STARTUP")
+                android.util.Log.d("MainActivity", "═══════════════════════════════════")
+                android.util.Log.d("MainActivity", "Total displays: ${displays.size}")
+                displays.forEachIndexed { index, display ->
+                    android.util.Log.d("MainActivity", "Display $index:")
+                    android.util.Log.d("MainActivity", "  - ID: ${display.displayId}")
+                    android.util.Log.d("MainActivity", "  - Name: ${display.name}")
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        android.util.Log.d("MainActivity", "  - State: ${display.state}")
+                    }
+                }
+
+                val currentDisplayId = getCurrentDisplayId()
+                android.util.Log.d("MainActivity", "Companion app is on display: $currentDisplayId")
+                android.util.Log.d("MainActivity", "═══════════════════════════════════")
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error logging display info", e)
+            }
+        }
+    }
+
+    private fun getCurrentDisplayId(): Int {
+        val displayId = try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                // Android 11+ - use display property
+                val id1 = display?.displayId ?: -1
+                android.util.Log.d("MainActivity", "  Method 1 (display): $id1")
+
+                // Also try getting from window
+                val id2 = window?.decorView?.display?.displayId ?: -1
+                android.util.Log.d("MainActivity", "  Method 2 (window.decorView.display): $id2")
+
+                // Use the non-negative one, prefer window method
+                if (id2 >= 0) id2 else id1
+            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                // Android 4.2+ - use windowManager
+                @Suppress("DEPRECATION")
+                val id = windowManager.defaultDisplay.displayId
+                android.util.Log.d("MainActivity", "  Method 3 (windowManager.defaultDisplay): $id")
+                id
+            } else {
+                android.util.Log.d("MainActivity", "  Method 4 (fallback to 0)")
+                0
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error getting display ID", e)
+            0
+        }
+
+        android.util.Log.d("MainActivity", "getCurrentDisplayId() FINAL returning: $displayId (SDK: ${android.os.Build.VERSION.SDK_INT})")
+        return if (displayId < 0) 0 else displayId
+    }
+
+    /**
      * Launch an app on the appropriate display based on user preferences
      */
     private fun launchApp(app: ResolveInfo) {
@@ -1131,12 +1222,82 @@ class MainActivity : AppCompatActivity() {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
 
         if (launchIntent != null) {
-            // Check if app should launch on top or bottom display
-            if (appLaunchPrefs.shouldLaunchOnTop(packageName)) {
-                launchOnTopDisplay(launchIntent)
+            val currentDisplayId = getCurrentDisplayId()
+            val shouldLaunchOnTop = appLaunchPrefs.shouldLaunchOnTop(packageName)
+
+            android.util.Log.d("MainActivity", "═══ LAUNCH REQUEST ═══")
+            android.util.Log.d("MainActivity", "Companion detected on display: $currentDisplayId")
+            android.util.Log.d("MainActivity", "User preference: ${if (shouldLaunchOnTop) "THIS screen" else "OTHER screen"}")
+
+            // Get all available displays
+            val targetDisplayId = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                try {
+                    val displayManager = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+                    val displays = displayManager.displays
+
+                    if (shouldLaunchOnTop) {
+                        // Launch on THIS screen (same as companion)
+                        android.util.Log.d("MainActivity", "Targeting THIS screen (display $currentDisplayId)")
+                        currentDisplayId
+                    } else {
+                        // Launch on OTHER screen (find the display that's NOT current)
+                        val otherDisplay = displays.firstOrNull { it.displayId != currentDisplayId }
+                        if (otherDisplay != null) {
+                            android.util.Log.d("MainActivity", "Targeting OTHER screen (display ${otherDisplay.displayId})")
+                            otherDisplay.displayId
+                        } else {
+                            android.util.Log.w("MainActivity", "No other display found! Using current display")
+                            currentDisplayId
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Error finding target display", e)
+                    currentDisplayId
+                }
             } else {
-                launchOnBottomDisplay(launchIntent)
+                currentDisplayId
             }
+
+            android.util.Log.d("MainActivity", "FINAL target: Display $targetDisplayId")
+            android.util.Log.d("MainActivity", "═════════════════════")
+
+            launchOnDisplay(launchIntent, targetDisplayId)
+        }
+    }
+
+    /**
+     * Launch app on a specific display ID
+     */
+    private fun launchOnDisplay(intent: Intent, displayId: Int) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            try {
+                val displayManager = getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+                val displays = displayManager.displays
+
+                android.util.Log.d("MainActivity", "launchOnDisplay: Requesting display $displayId")
+                android.util.Log.d("MainActivity", "launchOnDisplay: Available displays: ${displays.size}")
+                displays.forEachIndexed { index, display ->
+                    android.util.Log.d("MainActivity", "  Display $index: ID=${display.displayId}, Name=${display.name}")
+                }
+
+                val targetDisplay = displays.firstOrNull { it.displayId == displayId }
+
+                if (targetDisplay != null) {
+                    android.util.Log.d("MainActivity", "✓ Found target display $displayId - Launching now")
+                    val options = ActivityOptions.makeBasic()
+                    options.launchDisplayId = displayId
+                    startActivity(intent, options.toBundle())
+                } else {
+                    android.util.Log.w("MainActivity", "✗ Display $displayId not found! Launching on default")
+                    startActivity(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error launching on display $displayId, using default", e)
+                startActivity(intent)
+            }
+        } else {
+            android.util.Log.d("MainActivity", "SDK < O, launching on default display")
+            startActivity(intent)
         }
     }
 
@@ -1199,6 +1360,8 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Show app options dialog with launch position toggles
+     * Note: "Top" now means "This screen" (same as companion)
+     *       "Bottom" now means "Other screen" (opposite of companion)
      */
     private fun showAppOptionsDialog(app: ResolveInfo) {
         val packageName = app.activityInfo?.packageName ?: return
@@ -1209,8 +1372,8 @@ class MainActivity : AppCompatActivity() {
         val dialogAppName = dialogView.findViewById<TextView>(R.id.dialogAppName)
         val btnAppInfo = dialogView.findViewById<MaterialButton>(R.id.btnAppInfo)
         val chipGroup = dialogView.findViewById<ChipGroup>(R.id.launchPositionChipGroup)
-        val chipLaunchTop = dialogView.findViewById<Chip>(R.id.chipLaunchTop)
-        val chipLaunchBottom = dialogView.findViewById<Chip>(R.id.chipLaunchBottom)
+        val chipLaunchTop = dialogView.findViewById<Chip>(R.id.chipLaunchTop)  // "This screen"
+        val chipLaunchBottom = dialogView.findViewById<Chip>(R.id.chipLaunchBottom)  // "Other screen"
 
         // Set app name
         dialogAppName.text = appName
@@ -1218,9 +1381,9 @@ class MainActivity : AppCompatActivity() {
         // Get current launch position and set initial chip state
         val currentPosition = appLaunchPrefs.getLaunchPosition(packageName)
         if (currentPosition == AppLaunchPreferences.POSITION_TOP) {
-            chipLaunchTop.isChecked = true
+            chipLaunchTop.isChecked = true  // "This screen"
         } else {
-            chipLaunchBottom.isChecked = true
+            chipLaunchBottom.isChecked = true  // "Other screen"
         }
 
         // Create dialog
@@ -1238,12 +1401,14 @@ class MainActivity : AppCompatActivity() {
         chipGroup.setOnCheckedStateChangeListener { group, checkedIds ->
             when {
                 checkedIds.contains(R.id.chipLaunchTop) -> {
+                    // TOP = "This screen" (same display as companion)
                     appLaunchPrefs.setLaunchPosition(packageName, AppLaunchPreferences.POSITION_TOP)
-                    android.util.Log.d("MainActivity", "Set $appName to launch on TOP")
+                    android.util.Log.d("MainActivity", "Set $appName to launch on THIS screen")
                 }
                 checkedIds.contains(R.id.chipLaunchBottom) -> {
+                    // BOTTOM = "Other screen" (opposite display from companion)
                     appLaunchPrefs.setLaunchPosition(packageName, AppLaunchPreferences.POSITION_BOTTOM)
-                    android.util.Log.d("MainActivity", "Set $appName to launch on BOTTOM")
+                    android.util.Log.d("MainActivity", "Set $appName to launch on OTHER screen")
                 }
             }
         }
