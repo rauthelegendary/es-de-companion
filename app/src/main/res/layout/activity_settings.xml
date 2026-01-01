@@ -912,41 +912,6 @@
                     android:backgroundTint="#BB86FC"
                     android:layout_marginBottom="24dp" />
 
-                <!-- System Path -->
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="System Images Path"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="4dp" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="User-supplied images. Filenames must match ES-DE system shortnames (e.g., snes.png). Falls back to random game image if not found"
-                    android:textColor="#999999"
-                    android:textSize="13sp"
-                    android:layout_marginBottom="8dp" />
-
-                <TextView
-                    android:id="@+id/systemPathText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Default: /storage/emulated/0/ES-DE/downloaded_media/systems"
-                    android:textColor="#999999"
-                    android:textSize="13sp"
-                    android:layout_marginBottom="12dp" />
-
-                <Button
-                    android:id="@+id/selectSystemPathButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Select Directory"
-                    android:textColor="#FFFFFF"
-                    android:backgroundTint="#BB86FC" />
-
                 <!-- Scripts Path -->
                 <TextView
                     android:layout_width="match_parent"
@@ -955,7 +920,6 @@
                     android:textColor="#FFFFFF"
                     android:textSize="16sp"
                     android:textStyle="bold"
-                    android:layout_marginTop="24dp"
                     android:layout_marginBottom="4dp" />
 
                 <TextView
@@ -1024,6 +988,78 @@
                         android:backgroundTint="#03DAC6" />
 
                 </LinearLayout>
+
+                <!-- System Images Path -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="System Images Path (Optional)"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="24dp"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Custom system images (PNG, JPG, WebP) to override game image files. Filenames must match ES-DE system shortnames (e.g., snes.webp)"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/systemPathText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Default: /storage/emulated/0/ES-DE/downloaded_media/system_images"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/selectSystemPathButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Select Directory"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#BB86FC"
+                    android:layout_marginBottom="24dp" />
+
+                <!-- System Logos Path -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="System Logos Path (Optional)"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Additional logos (SVG, PNG, JPG, WebP) to supplement built-in logos. Filenames must match ES-DE system shortnames (e.g., snes.svg, snes.png)"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/systemLogosPathText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Default: /storage/emulated/0/ES-DE/downloaded_media/system_logos"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/selectSystemLogosPathButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Select Directory"
+                    android:textColor="#FFFFFF"
+                    android:backgroundTint="#BB86FC" />
 
             </LinearLayout>
         </androidx.cardview.widget.CardView>

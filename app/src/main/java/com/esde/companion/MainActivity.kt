@@ -323,10 +323,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun getSystemImagePath(): String {
         val customPath = prefs.getString("system_path", null)
-        val path = customPath ?: "${Environment.getExternalStorageDirectory()}/esdesecondscreen/systems"
+        val path = customPath ?: "${Environment.getExternalStorageDirectory()}/ES-DE/downloaded_media/system_images"
         android.util.Log.d("ESDESecondScreen", "System image path: $path")
         return path
     }
+    private fun getSystemLogosPath(): String {
+        val customPath = prefs.getString("system_logos_path", null)
+        val path = customPath ?: "${Environment.getExternalStorageDirectory()}/ES-DE/downloaded_media/system_logos"
+        android.util.Log.d("ESDESecondScreen", "System logos path: $path")
+        return path
+    }
+
 
     private fun getCrossfadeDuration(): Int {
         return when (prefs.getString("crossfade", "off")) {
@@ -756,20 +763,52 @@ class MainActivity : AppCompatActivity() {
     private fun loadSystemLogoFromAssets(systemName: String): android.graphics.drawable.Drawable? {
         return try {
             // Handle ES-DE auto-collections
-            val svgFileName = when (systemName.lowercase()) {
-                "allgames" -> "auto-allgames.svg"
-                "favorites" -> "auto-favorites.svg"
-                "lastplayed" -> "auto-lastplayed.svg"
-                else -> "${systemName.lowercase()}.svg"
+            val baseFileName = when (systemName.lowercase()) {
+                "allgames" -> "auto-allgames"
+                "favorites" -> "auto-favorites"
+                "lastplayed" -> "auto-lastplayed"
+                else -> systemName.lowercase()
             }
 
-            val svgPath = "system_logos/$svgFileName"
+            // First check user-provided system logos path with multiple format support
+            val userLogosDir = File(getSystemLogosPath())
+            if (userLogosDir.exists() && userLogosDir.isDirectory) {
+                // Check formats in priority order: SVG (best quality) -> PNG -> JPG -> WebP
+                val extensions = listOf("svg", "png", "jpg", "jpeg", "webp")
+
+                for (ext in extensions) {
+                    val logoFile = File(userLogosDir, "$baseFileName.$ext")
+                    if (logoFile.exists()) {
+                        android.util.Log.d("MainActivity", "Loading logo from user path: $logoFile")
+
+                        return when (ext) {
+                            "svg" -> {
+                                // Load SVG
+                                val svg = com.caverock.androidsvg.SVG.getFromInputStream(logoFile.inputStream())
+                                android.graphics.drawable.PictureDrawable(svg.renderToPicture())
+                            }
+                            else -> {
+                                // Load bitmap formats (PNG, JPG, WebP)
+                                val bitmap = android.graphics.BitmapFactory.decodeFile(logoFile.absolutePath)
+                                android.graphics.drawable.BitmapDrawable(resources, bitmap)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fall back to built-in SVG assets
+            val svgPath = "system_logos/$baseFileName.svg"
             val svg = com.caverock.androidsvg.SVG.getFromAsset(assets, svgPath)
             android.graphics.drawable.PictureDrawable(svg.renderToPicture())
         } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to load logo for $systemName", e)
             null
         }
     }
+
+
+
 
     /**
      * Create a text drawable for system name when no logo exists

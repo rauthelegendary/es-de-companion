@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import android.widget.LinearLayout
 import android.widget.RadioGroup
 import android.view.View
@@ -33,7 +34,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var mediaStatusDescription: TextView
     private lateinit var selectMediaPathButton: Button
     private lateinit var systemPathText: TextView
+    private lateinit var systemLogosPathText: TextView
     private lateinit var selectSystemPathButton: Button
+    private lateinit var selectSystemLogosPathButton: Button
     private lateinit var scriptsPathText: TextView
     private lateinit var selectScriptsPathButton: Button
     private lateinit var createScriptsButton: Button
@@ -68,7 +71,7 @@ class SettingsActivity : AppCompatActivity() {
     private var pathSelectionType = PathSelection.MEDIA
 
     enum class PathSelection {
-        MEDIA, SYSTEM, SCRIPTS
+        MEDIA, SYSTEM, SCRIPTS, SYSTEM_LOGOS
     }
 
     private var isInSetupWizard = false
@@ -128,6 +131,11 @@ class SettingsActivity : AppCompatActivity() {
                             continueSetupWizard()
                         }
                     }
+                }
+                PathSelection.SYSTEM_LOGOS -> {
+                    prefs.edit().putString("system_logos_path", path).apply()
+                    systemLogosPathText.text = path
+                    Toast.makeText(this, "System logos path updated", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -243,7 +251,9 @@ class SettingsActivity : AppCompatActivity() {
             mediaStatusDescription = findViewById(R.id.mediaStatusDescription)
             selectMediaPathButton = findViewById(R.id.selectMediaPathButton)
             systemPathText = findViewById(R.id.systemPathText)
+            systemLogosPathText = findViewById(R.id.systemLogosPathText)
             selectSystemPathButton = findViewById(R.id.selectSystemPathButton)
+            selectSystemLogosPathButton = findViewById(R.id.selectSystemLogosPathButton)
             scriptsPathText = findViewById(R.id.scriptsPathText)
             selectScriptsPathButton = findViewById(R.id.selectScriptsPathButton)
             createScriptsButton = findViewById(R.id.createScriptsButton)
@@ -293,6 +303,11 @@ class SettingsActivity : AppCompatActivity() {
 
             selectScriptsPathButton.setOnClickListener {
                 pathSelectionType = PathSelection.SCRIPTS
+                directoryPicker.launch(null)
+            }
+
+            selectSystemLogosPathButton.setOnClickListener {
+                pathSelectionType = PathSelection.SYSTEM_LOGOS
                 directoryPicker.launch(null)
             }
 
@@ -719,7 +734,14 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun updateSystemPathDisplay() {
         val path = prefs.getString(SYSTEM_PATH_KEY, null)
-        systemPathText.text = path ?: "Default: /storage/emulated/0/ES-DE/downloaded_media/systems"
+        systemPathText.text = path ?: "Default: /storage/emulated/0/ES-DE/downloaded_media/system_images"
+
+        // Setup System Logos Path
+        val systemLogosPath = prefs.getString(
+            "system_logos_path",
+            "${Environment.getExternalStorageDirectory()}/ES-DE/downloaded_media/system_logos"
+        )
+        systemLogosPathText.text = systemLogosPath ?: "Default: /storage/emulated/0/ES-DE/downloaded_media/system_logos"
     }
 
     private fun getPathFromUri(uri: Uri): String {
@@ -1196,8 +1218,7 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_scroll.txt" &
                     "2. Select ES-DE scripts folder\n" +
                     "3. Create script files\n" +
                     "4. Select downloaded media folder\n" +
-                    "5. Select system images folder\n" +
-                    "6. Enable scripts in ES-DE\n\n" +
+                    "5. Enable scripts in ES-DE\n\n" +
                     "Ready to begin?")
             .setPositiveButton("Start Setup") { _, _ ->
                 continueSetupWizard()
@@ -1313,33 +1334,9 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_scroll.txt" &
                 )
             }
             5 -> {
-                // Step 5: Select system images
-                showCustomWizardDialog(
-                    title = "Step 5: System Images Folder (Optional)",
-                    message = "Finally, select an optional folder with system images to display in system view.\n\n" +
-                            "Note: These are user-supplied images that you provide. Image filenames should match ES-DE system shortnames (e.g., 'snes.png', 'arcade.png').\n\n" +
-                            "If a system image is not found, the app will show a random game from that system instead.\n\n" +
-                            "Default location:\n/storage/emulated/0/ES-DE/downloaded_media/systems\n\n" +
-                            "Click 'Select Folder' to choose, or 'Use Default' if you want to use the default path.",
-                    topRightText = "Use Default",
-                    bottomRightText = "Select Folder",
-                    onCancel = { isInSetupWizard = false },
-                    onTopRight = {
-                        // Use default system images path
-                        prefs.edit().putString(SYSTEM_PATH_KEY, "/storage/emulated/0/ES-DE/downloaded_media/systems").apply()
-                        updateSystemPathDisplay()
-                        continueSetupWizard()
-                    },
-                    onBottomRight = {
-                        pathSelectionType = PathSelection.SYSTEM
-                        directoryPicker.launch(null)
-                    }
-                )
-            }
-            6 -> {
-                // Step 6: Enable scripts in ES-DE
+                // Step 5: Enable scripts in ES-DE
                 showWizardDialogRequired(
-                    "Step 6: Enable Scripts in ES-DE",
+                    "Step 5: Enable Scripts in ES-DE",
                     "Final step! You need to enable custom scripts in ES-DE:\n\n" +
                             "1. Open ES-DE\n" +
                             "2. Press START to open Main Menu\n" +
@@ -1353,7 +1350,7 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_scroll.txt" &
                     continueSetupWizard()
                 }
             }
-            7 -> {
+            6 -> {
                 // Setup complete!
                 isInSetupWizard = false
 
