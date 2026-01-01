@@ -1,5 +1,8 @@
 # ES-DE Second Screen Companion
 
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Android](https://img.shields.io/badge/Android-10%2B-green)
+
 A companion app for [ES-DE](https://es-de.org/) that displays beautiful game artwork and marquees on a secondary display, transforming your dual-screen device into an immersive retro gaming interface.
 
 > **Note**: This app is **not officially affiliated with ES-DE**. It is an independent, community-created companion application.
@@ -131,7 +134,7 @@ If you encounter any issues or have questions:
 
 ## 🔄 Changelog
 
-### Latest Release
+### [0.1.0] - 2026-01-02 - Initial Release
 - ✨ Added built-in system logos for all supported ES-DE systems (SVG format)
 - 🔧 Separate on/off controls for system and game logos
 - 📏 Shared logo size control (Small/Medium/Large)
@@ -140,6 +143,7 @@ If you encounter any issues or have questions:
 - ⚙️ Custom animation controls (adjustable duration 100-500ms, scale amount 85-100%)
 - ✨ Added long-press menu in app drawer
 - 🎯 Per-app display launch preferences (top/bottom screen)
+- 🚀 App drawer auto-closes after launching apps
 - 🔧 Quick Setup wizard with ES-DE script configuration
 - 🎨 Customizable visual effects (dimming, blur, animations)
 - 📱 App drawer with search and visibility controls
