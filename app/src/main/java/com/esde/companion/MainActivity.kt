@@ -1262,6 +1262,11 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("MainActivity", "═════════════════════")
 
             launchOnDisplay(launchIntent, targetDisplayId)
+
+            // Close the app drawer after launching
+            if (::bottomSheetBehavior.isInitialized) {
+                bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
+            }
         }
     }
 
