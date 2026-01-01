@@ -122,7 +122,7 @@ This project is open source and available under the [MIT License](LICENSE).
 - Works best in a dual home sceen set up using [Mjolnir](https://github.com/blacksheepmvp/mjolnir) home screen manager
 - Uses [Glide](https://github.com/bumptech/glide) for efficient image loading
 - Uses [AndroidSVG](https://github.com/BigBadaboom/androidsvg) for SVG rendering
-- 
+
 ## 📞 Support
 
 If you encounter any issues or have questions:
