@@ -245,7 +245,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateMarqueeSize() {
-        val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
+        val logoSize = if (isSystemScrollActive) { prefs.getString("system_logo_size", "medium") ?: "medium" } else { prefs.getString("game_logo_size", "medium") ?: "medium" }
         val layoutParams = marqueeImageView.layoutParams
 
         when (logoSize) {
@@ -748,6 +748,83 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Load a built-in system logo SVG from assets folder
+     * Handles both regular systems and ES-DE auto-collections
+     * Returns drawable if found, null otherwise
+     */
+    private fun loadSystemLogoFromAssets(systemName: String): android.graphics.drawable.Drawable? {
+        return try {
+            // Handle ES-DE auto-collections
+            val svgFileName = when (systemName.lowercase()) {
+                "allgames" -> "auto-allgames.svg"
+                "favorites" -> "auto-favorites.svg"
+                "lastplayed" -> "auto-lastplayed.svg"
+                else -> "${systemName.lowercase()}.svg"
+            }
+
+            val svgPath = "system_logos/$svgFileName"
+            val svg = com.caverock.androidsvg.SVG.getFromAsset(assets, svgPath)
+            android.graphics.drawable.PictureDrawable(svg.renderToPicture())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Create a text drawable for system name when no logo exists
+     * Size is based on logo size setting
+     */
+    private fun createTextDrawable(systemName: String, logoSize: String): android.graphics.drawable.Drawable {
+        // Determine text size based on logo size setting
+        val textSizePx = when (logoSize) {
+            "small" -> 48f
+            "medium" -> 72f
+            "large" -> 96f
+            else -> 72f // default to medium
+        }
+
+        // Create bitmap to draw text on
+        val paint = android.graphics.Paint().apply {
+            color = android.graphics.Color.WHITE
+            textSize = textSizePx
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+
+        // Format system name (capitalize, replace underscores)
+        val displayName = systemName
+            .replace("_", " ")
+            .split(" ")
+            .joinToString(" ") { word ->
+                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            }
+
+        // Measure text
+        val textBounds = android.graphics.Rect()
+        paint.getTextBounds(displayName, 0, displayName.length, textBounds)
+
+        val width = textBounds.width() + 100 // Add padding
+        val height = textBounds.height() + 50
+
+        // Create bitmap and draw text
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            width.coerceAtLeast(200),
+            height.coerceAtLeast(100),
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
+
+        val canvas = android.graphics.Canvas(bitmap)
+        val x = bitmap.width / 2f
+        val y = (bitmap.height / 2f) - ((paint.descent() + paint.ascent()) / 2f)
+
+        canvas.drawText(displayName, x, y, paint)
+
+        return android.graphics.drawable.BitmapDrawable(resources, bitmap)
+    }
+
+
     private fun loadSystemImage() {
         try {
             val sdcard = Environment.getExternalStorageDirectory()
@@ -763,7 +840,6 @@ class MainActivity : AppCompatActivity() {
             val imageFile = File(getSystemImagePath(), "$systemName.webp")
 
             var imageToUse: File? = imageFile
-            var marqueeToUse: File? = null
 
             if (!imageFile.exists()) {
                 val mediaBase = File(getMediaBasePath(), systemName)
@@ -786,40 +862,57 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                if (imageToUse != null) {
-                    val baseName = imageToUse.nameWithoutExtension
-                    val marqueeDir = File(mediaBase, "marquees")
-                    if (marqueeDir.exists() && marqueeDir.isDirectory) {
-                        val matchingMarquees = marqueeDir.listFiles { f ->
-                            f.extension.lowercase() in listOf("jpg", "png", "webp") &&
-                                    f.nameWithoutExtension == baseName
-                        } ?: emptyArray()
-                        if (matchingMarquees.isNotEmpty()) {
-                            marqueeToUse = matchingMarquees[0]
-                        }
-                    }
-                }
+                // Don't look for game marquee - we'll use built-in system logo instead
             }
 
             if (imageToUse != null && imageToUse.exists()) {
                 isSystemScrollActive = true
                 loadImageWithAnimation(imageToUse, gameImageView)
-            }
-            // Don't clear image if not found - keep last image displayed
-            // This prevents black screen during ES-DE fast scroll
 
-            if (marqueeToUse != null && marqueeToUse.exists()) {
-                val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
-                if (logoSize == "off") {
-                    marqueeImageView.visibility = View.GONE
-                    Glide.with(this).clear(marqueeImageView)
-                    marqueeImageView.setImageDrawable(null)
+                // Use built-in system logo as marquee overlay
+                val logoSize = prefs.getString("system_logo_size", "medium") ?: "medium"
+                if (logoSize != "off") {
+                    val logoDrawable = loadSystemLogoFromAssets(systemName)
+                    if (logoDrawable != null) {
+                        marqueeImageView.visibility = View.VISIBLE
+                        marqueeImageView.setImageDrawable(logoDrawable)
+                    }
+                }
+            } else {
+                // No custom image and no game images found
+                // Show built-in logo centered on solid background
+                val logoDrawable = loadSystemLogoFromAssets(systemName)
+                if (logoDrawable != null) {
+                    isSystemScrollActive = true
+
+                    // Set solid background color
+                    gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
+                    gameImageView.setImageDrawable(null) // Clear any background image
+
+                    // Show logo as overlay (respects logo size setting)
+                    val logoSize = prefs.getString("system_logo_size", "medium") ?: "medium"
+                    if (logoSize != "off") {
+                        marqueeImageView.visibility = View.VISIBLE
+                        marqueeImageView.setImageDrawable(logoDrawable)
+                    }
                 } else {
-                    marqueeImageView.visibility = View.VISIBLE
-                    loadImageWithAnimation(marqueeToUse, marqueeImageView)
+                    // No built-in logo found - show system name as text
+                    val logoSize = prefs.getString("system_logo_size", "medium") ?: "medium"
+                    if (logoSize != "off") {
+                        isSystemScrollActive = true
+
+                        // Set solid background color
+                        gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
+                        gameImageView.setImageDrawable(null)
+
+                        // Create text drawable with system name
+                        val textDrawable = createTextDrawable(systemName, logoSize)
+                        marqueeImageView.visibility = View.VISIBLE
+                        marqueeImageView.setImageDrawable(textDrawable)
+                    }
+                    // else: logo size is "off" - keep last image displayed
                 }
             }
-            // Marquee already cleared at start of method - only shown if fallback game image has one
 
         } catch (e: Exception) {
             // Don't clear images on exception - keep last valid images
@@ -878,7 +971,7 @@ class MainActivity : AppCompatActivity() {
             if (gameImageLoaded) {
                 val marqueeFile = findMarqueeImage(sdcard, systemName, gameName, gameNameRaw)
                 if (marqueeFile != null && marqueeFile.exists()) {
-                    val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
+                    val logoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
                     if (logoSize == "off") {
                         marqueeImageView.visibility = View.GONE
                         Glide.with(this).clear(marqueeImageView)
@@ -889,7 +982,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     // Game has no marquee - clear it (don't show wrong marquee from previous game)
-                    val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
+                    val logoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
                     if (logoSize != "off") {
                         // Only clear if logo is supposed to be shown
                         // If logo is off, it's already hidden

@@ -48,8 +48,10 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var blurText: TextView
     private lateinit var drawerTransparencySeekBar: SeekBar
     private lateinit var drawerTransparencyText: TextView
-    private lateinit var logoSizeSeekBar: SeekBar
-    private lateinit var logoSizeText: TextView
+    private lateinit var systemLogoSizeSeekBar: SeekBar
+    private lateinit var gameLogoSizeSeekBar: SeekBar
+    private lateinit var systemLogoSizeText: TextView
+    private lateinit var gameLogoSizeText: TextView
     private lateinit var animationStyleChipGroup: ChipGroup
     private lateinit var imagePreferenceChipGroup: ChipGroup
     private lateinit var customAnimationSettings: LinearLayout
@@ -259,8 +261,10 @@ class SettingsActivity : AppCompatActivity() {
             blurText = findViewById(R.id.blurText)
             drawerTransparencySeekBar = findViewById(R.id.drawerTransparencySeekBar)
             drawerTransparencyText = findViewById(R.id.drawerTransparencyText)
-            logoSizeSeekBar = findViewById(R.id.logoSizeSeekBar)
-            logoSizeText = findViewById(R.id.logoSizeText)
+            systemLogoSizeSeekBar = findViewById(R.id.systemLogoSizeSeekBar)
+            gameLogoSizeText = findViewById(R.id.gameLogoSizeText)
+            systemLogoSizeText = findViewById(R.id.systemLogoSizeText)
+            gameLogoSizeSeekBar = findViewById(R.id.gameLogoSizeSeekBar)
             android.util.Log.d("SettingsActivity", "All views found")
 
             animationStyleChipGroup = findViewById<ChipGroup>(R.id.animationStyleChipGroup)
@@ -483,10 +487,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupLogoSizeSlider() {
-        val currentSize = prefs.getString(LOGO_SIZE_KEY, "medium") ?: "medium"
-
-        // Convert string to slider position (0=off, 1=small, 2=medium, 3=large)
-        val position = when (currentSize) {
+        // Setup System Logo Size
+        val currentSystemSize = prefs.getString("system_logo_size", "medium") ?: "medium"
+        val systemPosition = when (currentSystemSize) {
             "off" -> 0
             "small" -> 1
             "medium" -> 2
@@ -494,10 +497,10 @@ class SettingsActivity : AppCompatActivity() {
             else -> 2
         }
 
-        logoSizeSeekBar.min = 0
-        logoSizeSeekBar.max = 3
-        logoSizeSeekBar.progress = position
-        logoSizeText.text = when (position) {
+        systemLogoSizeSeekBar.min = 0
+        systemLogoSizeSeekBar.max = 3
+        systemLogoSizeSeekBar.progress = systemPosition
+        systemLogoSizeText.text = when (systemPosition) {
             0 -> "Off"
             1 -> "Small"
             2 -> "Medium"
@@ -505,9 +508,9 @@ class SettingsActivity : AppCompatActivity() {
             else -> "Medium"
         }
 
-        logoSizeSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        systemLogoSizeSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                logoSizeText.text = when (progress) {
+                systemLogoSizeText.text = when (progress) {
                     0 -> "Off"
                     1 -> "Small"
                     2 -> "Medium"
@@ -527,11 +530,60 @@ class SettingsActivity : AppCompatActivity() {
                         3 -> "large"
                         else -> "medium"
                     }
-                    prefs.edit().putString(LOGO_SIZE_KEY, size).apply()
+                    prefs.edit().putString("system_logo_size", size).apply()
+                }
+            }
+        })
+
+        // Setup Game Logo Size
+        val currentGameSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+        val gamePosition = when (currentGameSize) {
+            "off" -> 0
+            "small" -> 1
+            "medium" -> 2
+            "large" -> 3
+            else -> 2
+        }
+
+        gameLogoSizeSeekBar.min = 0
+        gameLogoSizeSeekBar.max = 3
+        gameLogoSizeSeekBar.progress = gamePosition
+        gameLogoSizeText.text = when (gamePosition) {
+            0 -> "Off"
+            1 -> "Small"
+            2 -> "Medium"
+            3 -> "Large"
+            else -> "Medium"
+        }
+
+        gameLogoSizeSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                gameLogoSizeText.text = when (progress) {
+                    0 -> "Off"
+                    1 -> "Small"
+                    2 -> "Medium"
+                    3 -> "Large"
+                    else -> "Medium"
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                seekBar?.let {
+                    val size = when (it.progress) {
+                        0 -> "off"
+                        1 -> "small"
+                        2 -> "medium"
+                        3 -> "large"
+                        else -> "medium"
+                    }
+                    prefs.edit().putString("game_logo_size", size).apply()
                 }
             }
         })
     }
+
 
     private fun setupAnimationStyleChips() {
         val currentStyle = prefs.getString("animation_style", "scale_fade") ?: "scale_fade"
