@@ -77,8 +77,8 @@ class MainActivity : AppCompatActivity() {
     private var imageLoadRunnable: Runnable? = null
     private var lastScrollTime = 0L
     private val FAST_SCROLL_THRESHOLD = 250L // If scrolling faster than 250ms between changes, it's "fast"
-    private val FAST_SCROLL_DELAY = 250L // Delay for fast scrolling (balanced)
-    private val SLOW_SCROLL_DELAY = 0L // Small delay for slow scrolling to prevent jitter
+    private val FAST_SCROLL_DELAY = 0L // No delay for fast scrolling
+    private val SLOW_SCROLL_DELAY = 0L // No delay for slow scrolling
 
     // Broadcast receiver for app install/uninstall events
     private val appChangeReceiver = object : BroadcastReceiver() {
