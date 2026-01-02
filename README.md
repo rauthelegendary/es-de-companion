@@ -1,6 +1,6 @@
 # ES-DE Second Screen Companion
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.1.1-blue)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
 
 A companion app for [ES-DE](https://es-de.org/) that displays beautiful game artwork and marquees on a secondary display, transforming your dual-screen device into an immersive retro gaming interface.
@@ -13,6 +13,10 @@ A companion app for [ES-DE](https://es-de.org/) that displays beautiful game art
 
 ### Dynamic Display
 - **Real-time artwork display** - Shows game fanart, screenshots, and marquees as you browse in ES-DE
+- **Video playback support** - Play game videos (MP4, MKV, AVI, WMV, MOV, WebM) when browsing games
+  - Configurable delay (instant to 5 seconds) before video starts
+  - Optional audio control (muted by default)
+  - Respects animation settings (fade, scale+fade, custom)
 - **System view support** - Displays built-in system logos, custom images, or random game artwork when browsing systems
 - **Smooth animations** - Configurable fade and scale effects with custom timing options
 - **Background customization** - Adjustable dimming and blur effects
@@ -71,8 +75,11 @@ For the best experience, use [Mjolnir](https://github.com/blacksheepmvp/mjolnir)
 - **Background Priority**: Fanart
 - **Grid Columns**: 4
 - **System Logo**: On
-- **Game Logo**: On
+- **Game Marquee**: On
 - **Logo Size**: Medium
+- **Video Playback**: Off
+- **Video Audio**: Off (when video enabled)
+- **App Launch Display**: This Screen
 
 All settings can be customized in the Settings screen.
 
@@ -83,6 +90,7 @@ The app uses these default paths (configurable in settings):
 | Path | Default Location | Purpose |
 |------|-----------------|---------|
 | **Downloaded Media** | `/storage/emulated/0/ES-DE/downloaded_media` | Game artwork - fanart, screenshots, marquees |
+| **Videos** | `/storage/emulated/0/ES-DE/downloaded_media/{system}/videos` | Game videos (optional) |
 | **System Images** | `/storage/emulated/0/ES-DE/downloaded_media/systems` | Custom system images (optional override) |
 | **Scripts** | `/storage/emulated/0/ES-DE/scripts` | Integration scripts |
 
@@ -92,6 +100,18 @@ To override random game artwork in system view with your own images:
 1. Place custom images in the system images folder
 2. Use filenames matching ES-DE system shortnames: `snes.webp`, `arcade.png`, `psx.jpg`, etc.
 3. These will take priority over built-in logos
+
+### Game Videos (Optional)
+
+To add video playback support:
+1. Place video files in the videos folder within each system's directory:
+   - `/downloaded_media/{system}/videos/{gamename}.mp4`
+   - Example: `/downloaded_media/snes/videos/Super Mario World.mp4`
+2. Supported formats: MP4, MKV, AVI, WMV, MOV, WebM
+3. Enable video playback in Settings → Media Settings → Video Playback
+4. Configure delay and audio preferences as desired
+
+**Note**: Videos are resource-intensive. Use moderate resolutions (1080p or lower) for best performance.
 
 ## 🎨 How It Works
 
@@ -125,6 +145,7 @@ This project is open source and available under the [MIT License](LICENSE).
 - Works best in a dual home sceen set up using [Mjolnir](https://github.com/blacksheepmvp/mjolnir) home screen manager
 - Uses [Glide](https://github.com/bumptech/glide) for efficient image loading
 - Uses [AndroidSVG](https://github.com/BigBadaboom/androidsvg) for SVG rendering
+- Uses [ExoPlayer](https://github.com/google/ExoPlayer) for video playback
 
 ## 📞 Support
 
@@ -133,6 +154,27 @@ If you encounter any issues or have questions:
 2. Create a new issue with details about your problem
 
 ## 🔄 Changelog
+
+### [0.1.1] - 2026-01-03 - Video Playback Release
+- 🎬 **Video playback support** - Play game videos (MP4, MKV, AVI, WMV, MOV, WebM)
+  - Configurable video delay (instant to 5 seconds)
+  - Optional audio control (muted by default)
+  - Videos respect animation settings
+  - Smart video/image transitions
+- 🎨 **UI improvements**
+  - Renamed "Game Logo" to "Game Marquee" for clarity
+  - Simplified custom animation settings (removed redundant Effect Type selector)
+  - Added helpful descriptions for animation settings
+  - Cleaned up settings layout with grouped video controls
+  - Logo Size slider now hidden when both logos are disabled
+- 🔧 **App launch improvements**
+  - Changed default app launch to "This Screen" instead of secondary display
+  - Apps now launch on primary screen by default (configurable per-app)
+- ⚡ **Performance optimizations**
+  - Video only reloads when video settings change
+  - Smooth resume when returning from settings with no changes
+  - Proper video timer cancellation when opening settings
+  - Marquee content pre-loads for smooth video transitions
 
 ### [0.1.0] - 2026-01-02 - Initial Release
 - ✨ Added built-in system logos for all supported ES-DE systems (SVG format)
