@@ -77,6 +77,7 @@ class SettingsActivity : AppCompatActivity() {
     private var initialBlur: Int = 0
     private var initialDrawerTransparency: Int = 0
     private var videoSettingsChanged: Boolean = false
+    private var logoSizeChanged: Boolean = false
 
     private var pathSelectionType = PathSelection.MEDIA
 
@@ -408,6 +409,10 @@ class SettingsActivity : AppCompatActivity() {
                     if (videoSettingsChanged) {
                         intent.putExtra("VIDEO_SETTINGS_CHANGED", true)
                     }
+                    // Signal if logo size changed
+                    if (logoSizeChanged) {
+                        intent.putExtra("LOGO_SIZE_CHANGED", true)
+                    }
                     // Always signal to close drawer when returning from settings
                     intent.putExtra("CLOSE_DRAWER", true)
                     setResult(Activity.RESULT_OK, intent)
@@ -608,6 +613,8 @@ class SettingsActivity : AppCompatActivity() {
                         else -> "medium"
                     }
                     prefs.edit().putString("logo_size", size).apply()
+                    // Mark that logo size changed
+                    logoSizeChanged = true
                 }
             }
         })

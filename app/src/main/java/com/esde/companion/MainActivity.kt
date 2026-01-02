@@ -16,6 +16,7 @@ import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.EditText
@@ -88,6 +89,9 @@ class MainActivity : AppCompatActivity() {
     // Flag to skip reload in onResume (used when returning from settings with no changes)
     private var skipNextReload = false
 
+    // Flag to track if marquee is showing text drawable (needs WRAP_CONTENT)
+    private var marqueeShowingText = false
+
     // Dynamic debouncing for fast scrolling
     private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var imageLoadRunnable: Runnable? = null
@@ -119,6 +123,7 @@ class MainActivity : AppCompatActivity() {
             val appsHiddenChanged = result.data?.getBooleanExtra("APPS_HIDDEN_CHANGED", false) ?: false
             val closeDrawer = result.data?.getBooleanExtra("CLOSE_DRAWER", false) ?: false
             val videoSettingsChanged = result.data?.getBooleanExtra("VIDEO_SETTINGS_CHANGED", false) ?: false
+            val logoSizeChanged = result.data?.getBooleanExtra("LOGO_SIZE_CHANGED", false) ?: false
 
             // Close drawer if requested (before recreate to avoid visual glitch)
             if (closeDrawer && ::bottomSheetBehavior.isInitialized) {
@@ -131,9 +136,13 @@ class MainActivity : AppCompatActivity() {
             } else if (appsHiddenChanged) {
                 // Refresh app drawer to apply hidden apps changes
                 setupAppDrawer()
-            } else if (videoSettingsChanged) {
-                // Video enabled/disabled or delay changed - reload game info
-                loadGameInfo()
+            } else if (videoSettingsChanged || logoSizeChanged) {
+                // Video settings or logo size changed - reload to apply changes
+                if (isSystemScrollActive) {
+                    loadSystemImage()
+                } else {
+                    loadGameInfo()
+                }
             } else {
                 // No settings changed that require reload - skip the reload in onResume
                 skipNextReload = true
@@ -281,6 +290,14 @@ class MainActivity : AppCompatActivity() {
 
         // Update marquee size based on logo size setting
         updateMarqueeSize()
+
+        // If marquee is showing text drawable, restore WRAP_CONTENT
+        if (marqueeShowingText) {
+            val layoutParams = marqueeImageView.layoutParams
+            layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+            layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            marqueeImageView.layoutParams = layoutParams
+        }
 
         // Reload images based on current state (don't change modes)
         // Skip reload if returning from settings with no changes
@@ -905,19 +922,26 @@ class MainActivity : AppCompatActivity() {
     private fun createTextDrawable(systemName: String, logoSize: String): android.graphics.drawable.Drawable {
         // Determine text size based on logo size setting
         val textSizePx = when (logoSize) {
-            "small" -> 48f
-            "medium" -> 72f
-            "large" -> 96f
-            else -> 72f // default to medium
+            "small" -> 60f
+            "medium" -> 80f
+            "large" -> 100f
+            else -> 80f // default to medium
         }
 
-        // Create bitmap to draw text on
-        val paint = android.graphics.Paint().apply {
+        // Define max width wider than logo container sizes to reduce wrapping
+        val maxWidthDp = when (logoSize) {
+            "small" -> 400
+            "large" -> 600
+            else -> 500  // medium
+        }
+        val maxWidth = (maxWidthDp * resources.displayMetrics.density).toInt()
+
+        // Create paint for text
+        val textPaint = android.text.TextPaint().apply {
             color = android.graphics.Color.WHITE
             textSize = textSizePx
             typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
             isAntiAlias = true
-            textAlign = android.graphics.Paint.Align.CENTER
         }
 
         // Format system name (capitalize, replace underscores)
@@ -928,25 +952,55 @@ class MainActivity : AppCompatActivity() {
                 word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
             }
 
-        // Measure text
-        val textBounds = android.graphics.Rect()
-        paint.getTextBounds(displayName, 0, displayName.length, textBounds)
+        // Create StaticLayout for multi-line text support
+        val staticLayout = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            android.text.StaticLayout.Builder.obtain(
+                displayName,
+                0,
+                displayName.length,
+                textPaint,
+                maxWidth
+            )
+                .setAlignment(android.text.Layout.Alignment.ALIGN_CENTER)
+                .setLineSpacing(8f, 1.0f) // Add some line spacing (8px extra)
+                .setIncludePad(true)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            android.text.StaticLayout(
+                displayName,
+                textPaint,
+                maxWidth,
+                android.text.Layout.Alignment.ALIGN_CENTER,
+                1.0f,
+                8f,
+                true
+            )
+        }
 
-        val width = textBounds.width() + 100 // Add padding
-        val height = textBounds.height() + 50
+        // Calculate bitmap dimensions with generous padding
+        val horizontalPadding = 100
+        val verticalPadding = 60
+        val width = staticLayout.width + (horizontalPadding * 2)
+        val height = staticLayout.height + (verticalPadding * 2)
 
         // Create bitmap and draw text
         val bitmap = android.graphics.Bitmap.createBitmap(
-            width.coerceAtLeast(200),
-            height.coerceAtLeast(100),
+            width,
+            height,
             android.graphics.Bitmap.Config.ARGB_8888
         )
 
         val canvas = android.graphics.Canvas(bitmap)
-        val x = bitmap.width / 2f
-        val y = (bitmap.height / 2f) - ((paint.descent() + paint.ascent()) / 2f)
 
-        canvas.drawText(displayName, x, y, paint)
+        // Center the text layout on the canvas
+        canvas.save()
+        canvas.translate(
+            horizontalPadding.toFloat(),
+            verticalPadding.toFloat()
+        )
+        staticLayout.draw(canvas)
+        canvas.restore()
 
         return android.graphics.drawable.BitmapDrawable(resources, bitmap)
     }
@@ -1009,8 +1063,12 @@ class MainActivity : AppCompatActivity() {
                 if (prefs.getBoolean("system_logo_enabled", true)) {
                     val logoDrawable = loadSystemLogoFromAssets(systemName)
                     if (logoDrawable != null) {
+                        // Restore fixed size for actual logo images
+                        updateMarqueeSize()
+
                         marqueeImageView.visibility = View.VISIBLE
                         marqueeImageView.setImageDrawable(logoDrawable)
+                        marqueeShowingText = false
                     }
                 }
             } else {
@@ -1026,8 +1084,12 @@ class MainActivity : AppCompatActivity() {
                     // Show logo as overlay (respects logo size setting)
                     val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
                     if (prefs.getBoolean("system_logo_enabled", true)) {
+                        // Restore fixed size for actual logo images
+                        updateMarqueeSize()
+
                         marqueeImageView.visibility = View.VISIBLE
                         marqueeImageView.setImageDrawable(logoDrawable)
+                        marqueeShowingText = false
                     }
                 } else {
                     // No built-in logo found - show fallback with or without text
@@ -1038,11 +1100,20 @@ class MainActivity : AppCompatActivity() {
                     if (prefs.getBoolean("system_logo_enabled", true)) {
                         // Logo enabled - show text overlay
                         val textDrawable = createTextDrawable(systemName, logoSize)
+
+                        // Use WRAP_CONTENT for text to show at full size
+                        val layoutParams = marqueeImageView.layoutParams
+                        layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                        layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        marqueeImageView.layoutParams = layoutParams
+
                         marqueeImageView.visibility = View.VISIBLE
                         marqueeImageView.setImageDrawable(textDrawable)
+                        marqueeShowingText = true
                     } else {
                         // Logo disabled - just show fallback, no overlay
                         marqueeImageView.visibility = View.GONE
+                        marqueeShowingText = false
                     }
                 }
             }
@@ -1103,9 +1174,13 @@ class MainActivity : AppCompatActivity() {
 
                     // Load marquee content (even if video is playing - just keep it hidden)
                     if (prefs.getBoolean("game_logo_enabled", true)) {
+                        // Restore fixed size for actual marquee images
+                        updateMarqueeSize()
+
                         loadImageWithAnimation(marqueeFile, marqueeImageView)
                         // Only show if video is NOT playing
                         marqueeImageView.visibility = if (isVideoPlaying()) View.GONE else View.VISIBLE
+                        marqueeShowingText = false
                     }
                     gameImageLoaded = true
                 } else {
@@ -1118,12 +1193,20 @@ class MainActivity : AppCompatActivity() {
                         val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
                         val textDrawable = createTextDrawable(displayName, logoSize)
 
+                        // Use WRAP_CONTENT for text to show at full size
+                        val layoutParams = marqueeImageView.layoutParams
+                        layoutParams.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                        layoutParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                        marqueeImageView.layoutParams = layoutParams
+
                         marqueeImageView.setImageDrawable(textDrawable)
                         // Only show if video is NOT playing
                         marqueeImageView.visibility = if (isVideoPlaying()) View.GONE else View.VISIBLE
+                        marqueeShowingText = true
                     } else {
                         // Logo disabled - just show fallback, no text
                         marqueeImageView.visibility = View.GONE
+                        marqueeShowingText = false
                     }
                     gameImageLoaded = true
                 }
@@ -1137,10 +1220,14 @@ class MainActivity : AppCompatActivity() {
                         Glide.with(this).clear(marqueeImageView)
                         marqueeImageView.setImageDrawable(null)
                     } else {
+                        // Restore fixed size for actual marquee images
+                        updateMarqueeSize()
+
                         // Load marquee content
                         loadImageWithAnimation(marqueeFile, marqueeImageView)
                         // Only show if video is NOT playing
                         marqueeImageView.visibility = if (isVideoPlaying()) View.GONE else View.VISIBLE
+                        marqueeShowingText = false
                     }
                 } else {
                     // Game has no marquee - clear it (don't show wrong marquee from previous game)
