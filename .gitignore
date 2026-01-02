@@ -1,17 +1,24 @@
-*.iml
-.gradle
-/local.properties
-.idea/
-.kotlin/
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
+# Gradle build files
 /build
-/captures
-.externalNativeBuild
-.cxx
+.gradle/
+build/
+
+# Local configuration
 local.properties
+
+# Keystore files - NEVER commit these!
+*.jks
+*.keystore
+keystore.properties
+
+# IDE files
+*.iml
+.idea/
+.DS_Store
+
+# APK files
+*.apk
+*.aab
+
+# Logs
+*.log
