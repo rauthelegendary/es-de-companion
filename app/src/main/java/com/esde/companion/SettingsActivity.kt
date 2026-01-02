@@ -79,6 +79,8 @@ class SettingsActivity : AppCompatActivity() {
     private var videoSettingsChanged: Boolean = false
     private var logoSizeChanged: Boolean = false
     private var mediaPathChanged: Boolean = false
+    private var imagePreferenceChanged: Boolean = false
+    private var logoTogglesChanged: Boolean = false
 
     private var pathSelectionType = PathSelection.MEDIA
 
@@ -431,6 +433,14 @@ class SettingsActivity : AppCompatActivity() {
                     if (mediaPathChanged) {
                         intent.putExtra("MEDIA_PATH_CHANGED", true)
                     }
+                    // Signal if image preference changed
+                    if (imagePreferenceChanged) {
+                        intent.putExtra("IMAGE_PREFERENCE_CHANGED", true)
+                    }
+                    // Signal if logo toggles changed
+                    if (logoTogglesChanged) {
+                        intent.putExtra("LOGO_TOGGLES_CHANGED", true)
+                    }
                     // Always signal to close drawer when returning from settings
                     intent.putExtra("CLOSE_DRAWER", true)
                     setResult(Activity.RESULT_OK, intent)
@@ -572,6 +582,8 @@ class SettingsActivity : AppCompatActivity() {
                 val enabled = checkedIds[0] == R.id.systemLogoOn
                 prefs.edit().putBoolean("system_logo_enabled", enabled).apply()
                 updateLogoSizeVisibility()
+                // Mark that logo toggles changed
+                logoTogglesChanged = true
             }
         }
 
@@ -585,6 +597,8 @@ class SettingsActivity : AppCompatActivity() {
                 val enabled = checkedIds[0] == R.id.gameLogoOn
                 prefs.edit().putBoolean("game_logo_enabled", enabled).apply()
                 updateLogoSizeVisibility()
+                // Mark that logo toggles changed
+                logoTogglesChanged = true
             }
         }
 
@@ -768,6 +782,8 @@ class SettingsActivity : AppCompatActivity() {
                     else -> "fanart"
                 }
                 prefs.edit().putString(IMAGE_PREFERENCE_KEY, preference).apply()
+                // Mark that image preference changed
+                imagePreferenceChanged = true
             }
         }
     }
