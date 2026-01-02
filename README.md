@@ -13,7 +13,7 @@ A companion app for [ES-DE](https://es-de.org/) that displays beautiful game art
 
 ### Dynamic Display
 - **Real-time artwork display** - Shows game fanart, screenshots, and marquees as you browse in ES-DE
-- **Video playback support** - Play game videos (MP4, MKV, AVI, WMV, MOV, WebM) when browsing games
+- **Video playback support** - Play game videos when browsing games
   - Configurable delay (instant to 5 seconds) before video starts
   - Optional audio control (muted by default)
   - Respects animation settings (fade, scale+fade, custom)
@@ -68,21 +68,6 @@ For the best experience, use [Mjolnir](https://github.com/blacksheepmvp/mjolnir)
 
 ## ⚙️ Configuration
 
-### Default Settings
-- **Animation Style**: Scale + Fade
-- **Background Dimming**: 25%
-- **Drawer Opacity**: 70%
-- **Background Priority**: Fanart
-- **Grid Columns**: 4
-- **System Logo**: On
-- **Game Marquee**: On
-- **Logo Size**: Medium
-- **Video Playback**: Off
-- **Video Audio**: Off (when video enabled)
-- **App Launch Display**: This Screen
-
-All settings can be customized in the Settings screen.
-
 ### File Paths
 
 The app uses these default paths (configurable in settings):
@@ -90,8 +75,8 @@ The app uses these default paths (configurable in settings):
 | Path | Default Location | Purpose |
 |------|-----------------|---------|
 | **Downloaded Media** | `/storage/emulated/0/ES-DE/downloaded_media` | Game artwork - fanart, screenshots, marquees |
-| **Videos** | `/storage/emulated/0/ES-DE/downloaded_media/{system}/videos` | Game videos (optional) |
-| **System Images** | `/storage/emulated/0/ES-DE/downloaded_media/systems` | Custom system images (optional override) |
+| **System Images** | `/storage/emulated/0/ES-DE/downloaded_media/system_images` | Custom system images (optional override) |
+| **System Logos** | `/storage/emulated/0/ES-DE/downloaded_media/system_logos` | Custom system logos (optional override) |
 | **Scripts** | `/storage/emulated/0/ES-DE/scripts` | Integration scripts |
 
 ### Custom System Images (Optional Override)
@@ -99,19 +84,14 @@ The app uses these default paths (configurable in settings):
 To override random game artwork in system view with your own images:
 1. Place custom images in the system images folder
 2. Use filenames matching ES-DE system shortnames: `snes.webp`, `arcade.png`, `psx.jpg`, etc.
+3. These will override the random game art displayed
+
+### Custom System Logos (Optional Override)
+
+To add additional system logos or override built-in system logos in system view with your own images:
+1. Place custom images in the system logos folder
+2. Use filenames matching ES-DE system shortnames: `snes.webp`, `arcade.png`, `psx.jpg`, etc.
 3. These will take priority over built-in logos
-
-### Game Videos (Optional)
-
-To add video playback support:
-1. Place video files in the videos folder within each system's directory:
-   - `/downloaded_media/{system}/videos/{gamename}.mp4`
-   - Example: `/downloaded_media/snes/videos/Super Mario World.mp4`
-2. Supported formats: MP4, MKV, AVI, WMV, MOV, WebM
-3. Enable video playback in Settings → Media Settings → Video Playback
-4. Configure delay and audio preferences as desired
-
-**Note**: Videos are resource-intensive. Use moderate resolutions (1080p or lower) for best performance.
 
 ## 🎨 How It Works
 
@@ -154,6 +134,21 @@ If you encounter any issues or have questions:
 2. Create a new issue with details about your problem
 
 ## 🔄 Changelog
+
+### [0.2.0] - 2026-01-04 - UX Improvements Release
+- 🎓 **Enhanced onboarding** - Comprehensive tutorial dialog at end of setup wizard
+  - Explains key gestures and features
+  - Highlights app drawer and settings access
+  - Provides ES-DE usage tips
+  - Recommends Mjolnir for optimal setup
+- 💡 **Settings discoverability** - Visual pulse animation on settings button
+  - Triggers on app drawer open (3 times max)
+  - Helpful toast message guides users to settings
+  - Only shows after setup is completed
+- ⚡ **Performance optimizations** - Separate debouncing for systems and games
+  - System scrolling: Smoother with 250ms fast scroll delay, 150ms slow scroll delay
+  - Game scrolling: Instant response with no delay for snappy browsing
+  - Independent tracking prevents interference between navigation modes
 
 ### [0.1.2] - 2026-01-03 - Various Presentation and Bug Fixes
 
