@@ -93,9 +93,6 @@ class MainActivity : AppCompatActivity() {
     // Flag to track if marquee is showing text drawable (needs WRAP_CONTENT)
     private var marqueeShowingText = false
 
-    // Flag to track if settings hint has been shown this session
-    private var hasShownDrawerHint = false
-
     // Dynamic debouncing for fast scrolling - separate tracking for systems and games
     private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var imageLoadRunnable: Runnable? = null
@@ -686,14 +683,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Show pulsing animation on settings button when drawer opens for first time
+     * Show pulsing animation on settings button when drawer opens
+     * Only shows the first 3 times the drawer is opened (total, not per session)
      */
     private fun showSettingsPulseHint() {
-        // Only show once per session and only if user has completed setup
-        if (hasShownDrawerHint) return
+        // Only show if user has completed setup
         if (!prefs.getBoolean("setup_completed", false)) return
 
-        hasShownDrawerHint = true
+        // Check how many times hint has been shown (max 3 times total)
+        val hintCount = prefs.getInt("settings_hint_count", 0)
+        if (hintCount >= 3) return
+
+        // Increment the hint counter
+        prefs.edit().putInt("settings_hint_count", hintCount + 1).apply()
 
         // Delay slightly so drawer animation completes first
         Handler(Looper.getMainLooper()).postDelayed({
