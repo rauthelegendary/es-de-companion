@@ -22,6 +22,7 @@ import android.widget.ImageView
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.RelativeLayout
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -91,6 +92,9 @@ class MainActivity : AppCompatActivity() {
 
     // Flag to track if marquee is showing text drawable (needs WRAP_CONTENT)
     private var marqueeShowingText = false
+
+    // Flag to track if settings hint has been shown this session
+    private var hasShownDrawerHint = false
 
     // Dynamic debouncing for fast scrolling
     private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -629,6 +633,20 @@ class MainActivity : AppCompatActivity() {
         bottomSheetBehavior.isHideable = true
         bottomSheetBehavior.skipCollapsed = true  // Skip collapsed state, go straight to expanded
 
+        // Add callback to detect drawer state changes
+        bottomSheetBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(bottomSheet: View, newState: Int) {
+                if (newState == BottomSheetBehavior.STATE_EXPANDED) {
+                    // Drawer just opened - show hint if first time
+                    showSettingsPulseHint()
+                }
+            }
+
+            override fun onSlide(bottomSheet: View, slideOffset: Float) {
+                // Not needed
+            }
+        })
+
         // Post to ensure view is laid out before setting state
         appDrawer.post {
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
@@ -657,6 +675,60 @@ class MainActivity : AppCompatActivity() {
         )
 
         android.util.Log.d("MainActivity", "AppDrawer setup complete, initial state: ${bottomSheetBehavior.state}")
+    }
+
+    /**
+     * Show pulsing animation on settings button when drawer opens for first time
+     */
+    private fun showSettingsPulseHint() {
+        // Only show once per session and only if user has completed setup
+        if (hasShownDrawerHint) return
+        if (!prefs.getBoolean("setup_completed", false)) return
+
+        hasShownDrawerHint = true
+
+        // Delay slightly so drawer animation completes first
+        Handler(Looper.getMainLooper()).postDelayed({
+            // Create pulsing animation (3 pulses)
+            val pulseCount = 3
+            var currentPulse = 0
+
+            fun doPulse() {
+                if (currentPulse >= pulseCount) return
+
+                settingsButton.animate()
+                    .scaleX(1.3f)
+                    .scaleY(1.3f)
+                    .setDuration(400)
+                    .withEndAction {
+                        settingsButton.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(400)
+                            .withEndAction {
+                                currentPulse++
+                                if (currentPulse < pulseCount) {
+                                    // Small delay between pulses
+                                    Handler(Looper.getMainLooper()).postDelayed({
+                                        doPulse()
+                                    }, 200)
+                                }
+                            }
+                            .start()
+                    }
+                    .start()
+            }
+
+            doPulse()
+
+            // Show a subtle toast as well
+            Toast.makeText(
+                this,
+                "Tip: Tap ☰ to customize your experience",
+                Toast.LENGTH_LONG
+            ).show()
+
+        }, 800) // Wait for drawer to fully open
     }
 
     private fun setupSearchBar() {

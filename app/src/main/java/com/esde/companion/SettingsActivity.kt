@@ -1518,13 +1518,8 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_name.txt" &
                 // Mark setup as completed
                 prefs.edit().putBoolean("setup_completed", true).apply()
 
-                AlertDialog.Builder(this)
-                    .setTitle("Setup Complete! 🎉")
-                    .setMessage("Your app is now configured and ready to use with ES-DE!\n\n" +
-                            "You can change these settings anytime from the cards below.\n\n" +
-                            "It is recommended to use the Mjolnir app (https://github.com/blacksheepmvp/mjolnir) to run this companion app together with ES-DE as your home screens.")
-                    .setPositiveButton("Done") { _, _ -> }
-                    .show()
+                // Show comprehensive tutorial dialog
+                showPostSetupTutorial()
             }
         }
     }
@@ -1817,6 +1812,79 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_name.txt" &
                 false
             }
         }
+    }
+
+    private fun showPostSetupTutorial() {
+        // Create custom title view with emoji
+        val titleContainer = android.widget.LinearLayout(this)
+        titleContainer.orientation = android.widget.LinearLayout.HORIZONTAL
+        titleContainer.setPadding(60, 40, 60, 20)
+        titleContainer.gravity = android.view.Gravity.CENTER
+
+        val titleText = android.widget.TextView(this)
+        titleText.text = "Setup Complete! 🎉"
+        titleText.textSize = 24f
+        titleText.setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+        titleText.gravity = android.view.Gravity.CENTER
+
+        titleContainer.addView(titleText)
+
+        // Create scrollable message view
+        val scrollView = android.widget.ScrollView(this)
+        val messageText = android.widget.TextView(this)
+        messageText.text = """
+Your ES-DE Companion is now configured and ready to use!
+
+🎮 Quick Tips:
+
+• Swipe up anywhere to open the app drawer
+• Tap the hamburger button (☰) to access the app settings
+• Long-press any app to choose which screen it launches on
+• Swipe right in settings to quickly close it
+
+📱 Using with ES-DE:
+
+• Browse games in ES-DE to see artwork on this screen
+• Game videos will play if enabled in settings
+• System logos appear when browsing systems
+
+🏠 Recommended Setup:
+
+For the best dual-screen experience, use Mjolnir home screen manager to run this app alongside ES-DE:
+
+https://github.com/blacksheepmvp/mjolnir
+
+You can always re-run this setup from the settings screen.
+
+Enjoy your enhanced retro gaming experience! ✨
+        """.trimIndent()
+
+        messageText.setPadding(60, 20, 60, 40)
+        messageText.textSize = 15f
+        messageText.setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+        messageText.setLineSpacing(8f, 1.0f)
+
+        scrollView.addView(messageText)
+
+        // Set max height for scroll view
+        val displayMetrics = resources.displayMetrics
+        val maxHeight = (displayMetrics.heightPixels * 0.5).toInt()
+        val params = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.height = maxHeight
+        scrollView.layoutParams = params
+
+        AlertDialog.Builder(this)
+            .setCustomTitle(titleContainer)
+            .setView(scrollView)
+            .setPositiveButton("Got it!") { _, _ ->
+                // Close settings and return to MainActivity
+                finish()
+            }
+            .setCancelable(false)
+            .show()
     }
 
     companion object {
