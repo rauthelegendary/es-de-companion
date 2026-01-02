@@ -20,5 +20,11 @@ keystore.properties
 *.apk
 *.aab
 
+# Build artifacts
+app/release/
+app/debug/
+*/output-metadata.json
+*/baselineProfiles/
+
 # Logs
 *.log
