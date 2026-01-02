@@ -96,13 +96,21 @@ class MainActivity : AppCompatActivity() {
     // Flag to track if settings hint has been shown this session
     private var hasShownDrawerHint = false
 
-    // Dynamic debouncing for fast scrolling
+    // Dynamic debouncing for fast scrolling - separate tracking for systems and games
     private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var imageLoadRunnable: Runnable? = null
-    private var lastScrollTime = 0L
-    private val FAST_SCROLL_THRESHOLD = 250L // If scrolling faster than 250ms between changes, it's "fast"
-    private val FAST_SCROLL_DELAY = 0L // No delay for fast scrolling
-    private val SLOW_SCROLL_DELAY = 0L // No delay for slow scrolling
+    private var lastSystemScrollTime = 0L
+    private var lastGameScrollTime = 0L
+
+    // System scrolling: Enable debouncing to reduce rapid updates
+    private val SYSTEM_FAST_SCROLL_THRESHOLD = 250L // If scrolling faster than 250ms between changes, it's "fast"
+    private val SYSTEM_FAST_SCROLL_DELAY = 250L // 150ms delay for fast system scrolling
+    private val SYSTEM_SLOW_SCROLL_DELAY = 50L // 50ms delay for slow system scrolling
+
+    // Game scrolling: No debouncing for instant response
+    private val GAME_FAST_SCROLL_THRESHOLD = 250L
+    private val GAME_FAST_SCROLL_DELAY = 0L // No delay for games
+    private val GAME_SLOW_SCROLL_DELAY = 0L // No delay for games
 
     // Broadcast receiver for app install/uninstall events
     private val appChangeReceiver = object : BroadcastReceiver() {
@@ -879,16 +887,17 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Debounced wrapper for loadSystemImage - delays loading based on scroll speed
+     * Systems use debouncing to reduce rapid updates when scrolling quickly
      */
     private fun loadSystemImageDebounced() {
-        // Calculate time since last scroll event
+        // Calculate time since last system scroll event
         val currentTime = System.currentTimeMillis()
-        val timeSinceLastScroll = currentTime - lastScrollTime
-        lastScrollTime = currentTime
+        val timeSinceLastScroll = currentTime - lastSystemScrollTime
+        lastSystemScrollTime = currentTime
 
-        // Determine if user is fast scrolling
-        val isFastScrolling = timeSinceLastScroll < FAST_SCROLL_THRESHOLD
-        val delay = if (isFastScrolling) FAST_SCROLL_DELAY else SLOW_SCROLL_DELAY
+        // Determine if user is fast scrolling systems
+        val isFastScrolling = timeSinceLastScroll < SYSTEM_FAST_SCROLL_THRESHOLD
+        val delay = if (isFastScrolling) SYSTEM_FAST_SCROLL_DELAY else SYSTEM_SLOW_SCROLL_DELAY
 
         // Cancel any pending image load
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
@@ -901,28 +910,29 @@ class MainActivity : AppCompatActivity() {
         if (delay > 0) {
             imageLoadHandler.postDelayed(imageLoadRunnable!!, delay)
         } else {
-            // Load immediately for slow scrolling
+            // Load immediately if no delay configured
             imageLoadRunnable!!.run()
         }
     }
 
     /**
-     * Debounced wrapper for loadGameInfo - delays loading based on scroll speed
+     * Debounced wrapper for loadGameInfo - loads immediately with no delay
+     * Games use instant loading for responsive browsing experience
      */
     private fun loadGameInfoDebounced() {
-        // Calculate time since last scroll event
+        // Calculate time since last game scroll event
         val currentTime = System.currentTimeMillis()
-        val timeSinceLastScroll = currentTime - lastScrollTime
-        lastScrollTime = currentTime
+        val timeSinceLastScroll = currentTime - lastGameScrollTime
+        lastGameScrollTime = currentTime
 
-        // Determine if user is fast scrolling
-        val isFastScrolling = timeSinceLastScroll < FAST_SCROLL_THRESHOLD
-        val delay = if (isFastScrolling) FAST_SCROLL_DELAY else SLOW_SCROLL_DELAY
+        // Determine if user is fast scrolling games
+        val isFastScrolling = timeSinceLastScroll < GAME_FAST_SCROLL_THRESHOLD
+        val delay = if (isFastScrolling) GAME_FAST_SCROLL_DELAY else GAME_SLOW_SCROLL_DELAY
 
         // Cancel any pending image load
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
 
-        // Schedule new image load with appropriate delay
+        // Schedule new image load with appropriate delay (0 for games = instant)
         imageLoadRunnable = Runnable {
             loadGameInfo()
         }
@@ -930,7 +940,7 @@ class MainActivity : AppCompatActivity() {
         if (delay > 0) {
             imageLoadHandler.postDelayed(imageLoadRunnable!!, delay)
         } else {
-            // Load immediately for slow scrolling
+            // Load immediately for games (default behavior)
             imageLoadRunnable!!.run()
         }
     }
