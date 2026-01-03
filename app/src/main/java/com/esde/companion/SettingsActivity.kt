@@ -69,6 +69,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var videoDelaySeekBar: SeekBar
     private lateinit var videoDelayText: TextView
     private lateinit var videoAudioChipGroup: ChipGroup
+    private lateinit var gameLaunchBehaviorChipGroup: ChipGroup
 
     private var initialDimming: Int = 0
     private var initialBlur: Int = 0
@@ -324,6 +325,7 @@ class SettingsActivity : AppCompatActivity() {
             videoDelaySeekBar = findViewById(R.id.videoDelaySeekBar)
             videoDelayText = findViewById(R.id.videoDelayText)
             videoAudioChipGroup = findViewById(R.id.videoAudioChipGroup)
+            gameLaunchBehaviorChipGroup = findViewById(R.id.gameLaunchBehaviorChipGroup)
             android.util.Log.d("SettingsActivity", "Video settings found")
 
             // Initialize version text
@@ -378,6 +380,8 @@ class SettingsActivity : AppCompatActivity() {
             android.util.Log.d("SettingsActivity", "Image preference chips setup")
             setupVideoSettings()
             android.util.Log.d("SettingsActivity", "Video settings setup")
+            setupGameLaunchBehavior()
+            android.util.Log.d("SettingsActivity", "Game launch behavior setup")
 
             updateMediaPathDisplay()
             updateSystemPathDisplay()
@@ -851,6 +855,31 @@ class SettingsActivity : AppCompatActivity() {
             "Instant"
         } else {
             String.format("%.1fs", delaySeconds)
+        }
+    }
+
+    private fun setupGameLaunchBehavior() {
+        // Load saved game launch behavior (default: "default_image")
+        val gameLaunchBehavior = prefs.getString(GAME_LAUNCH_BEHAVIOR_KEY, "default_image") ?: "default_image"
+
+        // Set initial chip selection
+        val chipToCheck = when (gameLaunchBehavior) {
+            "game_image" -> R.id.gameLaunchGameImage
+            "black_screen" -> R.id.gameLaunchBlackScreen
+            else -> R.id.gameLaunchDefaultImage
+        }
+        gameLaunchBehaviorChipGroup.check(chipToCheck)
+
+        // Setup listener
+        gameLaunchBehaviorChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val behavior = when (checkedIds[0]) {
+                    R.id.gameLaunchGameImage -> "game_image"
+                    R.id.gameLaunchBlackScreen -> "black_screen"
+                    else -> "default_image"
+                }
+                prefs.edit().putString(GAME_LAUNCH_BEHAVIOR_KEY, behavior).apply()
+            }
         }
     }
 
@@ -2041,5 +2070,6 @@ Enjoy your enhanced retro gaming experience! ✨
         const val VIDEO_ENABLED_KEY = "video_enabled"
         const val VIDEO_DELAY_KEY = "video_delay"
         const val VIDEO_AUDIO_ENABLED_KEY = "video_audio_enabled"
+        const val GAME_LAUNCH_BEHAVIOR_KEY = "game_launch_behavior"
     }
 }

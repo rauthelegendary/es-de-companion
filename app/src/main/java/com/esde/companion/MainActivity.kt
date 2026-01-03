@@ -78,6 +78,9 @@ class MainActivity : AppCompatActivity() {
     private var currentGameFilename: String? = null  // Filename
     private var currentSystemName: String? = null  // Current system
     private var allApps = listOf<ResolveInfo>()  // Store all apps for search filtering
+    private var hasWindowFocus = true  // Track if app has window focus (is on top)
+    private var isGamePlaying = false  // Track if game is running on other screen
+    private var playingGameFilename: String? = null  // Filename of currently playing game
 
     // Video playback variables
     private var player: ExoPlayer? = null
@@ -926,7 +929,8 @@ class MainActivity : AppCompatActivity() {
             private var lastEventTime = 0L
 
             override fun onEvent(event: Int, path: String?) {
-                if (path != null && (path == "esde_game_filename.txt" || path == "esde_system_name.txt")) {
+                if (path != null && (path == "esde_game_filename.txt" || path == "esde_system_name.txt" ||
+                            path == "esde_gamestart_filename.txt" || path == "esde_gameend_filename.txt")) {
                     // Debounce: ignore events that happen too quickly
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - lastEventTime < 100) {
@@ -937,15 +941,45 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         // Small delay to ensure file is fully written
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            // Determine which mode based on which file was modified
                             when (path) {
                                 "esde_system_name.txt" -> {
                                     android.util.Log.d("MainActivity", "System scroll detected")
                                     loadSystemImageDebounced()
                                 }
                                 "esde_game_filename.txt" -> {
+                                    // Read the game filename
+                                    val gameFile = File(watchDir, "esde_game_filename.txt")
+                                    if (gameFile.exists()) {
+                                        val gameFilename = gameFile.readText().trim()
+
+                                        // Ignore if this is the same game that's currently playing
+                                        if (isGamePlaying && gameFilename == playingGameFilename) {
+                                            android.util.Log.d("MainActivity", "Game scroll ignored - same as playing game: $gameFilename")
+                                            return@postDelayed
+                                        }
+                                    }
+
                                     android.util.Log.d("MainActivity", "Game scroll detected")
                                     loadGameInfoDebounced()
+                                }
+                                "esde_gamestart_filename.txt" -> {
+                                    // Read which game started
+                                    val gameStartFile = File(watchDir, "esde_gamestart_filename.txt")
+                                    if (gameStartFile.exists()) {
+                                        playingGameFilename = gameStartFile.readText().trim()
+                                        android.util.Log.d("MainActivity", "Game start detected: $playingGameFilename")
+                                    } else {
+                                        android.util.Log.d("MainActivity", "Game start detected (filename unknown)")
+                                    }
+
+                                    isGamePlaying = true
+                                    handleGameStart()
+                                }
+                                "esde_gameend_filename.txt" -> {
+                                    android.util.Log.d("MainActivity", "Game end detected")
+                                    isGamePlaying = false
+                                    playingGameFilename = null  // Clear playing game
+                                    handleGameEnd()
                                 }
                             }
                         }, 50) // 50ms delay to ensure file is written
@@ -979,6 +1013,19 @@ class MainActivity : AppCompatActivity() {
         // Release video player
         releasePlayer()
         videoDelayHandler = null
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        hasWindowFocus = hasFocus
+
+        if (hasFocus) {
+            android.util.Log.d("MainActivity", "Window focus gained - app is on top")
+        } else {
+            android.util.Log.d("MainActivity", "Window focus lost - something is on top of app")
+            // Stop any videos when app loses focus
+            releasePlayer()
+        }
     }
 
     /**
@@ -1701,6 +1748,63 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ========== GAME STATE FUNCTIONS ==========
+
+    /**
+     * Handle game start event (game launched on other screen)
+     */
+    private fun handleGameStart() {
+        // Update display based on user preference
+        val gameLaunchBehavior = prefs.getString("game_launch_behavior", "default_image") ?: "default_image"
+
+        when (gameLaunchBehavior) {
+            "game_image" -> {
+                // Show current game image and marquee (based on settings)
+                gameImageView.visibility = View.VISIBLE
+                videoView.visibility = View.GONE
+
+                if (prefs.getBoolean("game_logo_enabled", true)) {
+                    marqueeImageView.visibility = View.VISIBLE
+                }
+            }
+            "black_screen" -> {
+                // Show plain black screen - no logos or images
+                gameImageView.setImageDrawable(null)
+                gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
+                gameImageView.visibility = View.VISIBLE
+
+                // Clear and hide marquee completely
+                marqueeImageView.setImageDrawable(null)
+                marqueeImageView.visibility = View.GONE
+                Glide.with(this).clear(marqueeImageView)
+
+                videoView.visibility = View.GONE
+            }
+            else -> { // "default_image"
+                // Show default fallback image
+                loadFallbackBackground()
+                gameImageView.visibility = View.VISIBLE
+                marqueeImageView.visibility = View.GONE
+                videoView.visibility = View.GONE
+            }
+        }
+
+        // Stop any videos
+        releasePlayer()
+    }
+
+    /**
+     * Handle game end event - return to normal browsing display
+     */
+    private fun handleGameEnd() {
+        // Return to normal display - reload the current game/system
+        if (isSystemScrollActive) {
+            loadSystemImage()
+        } else {
+            loadGameInfo()
+        }
+    }
+
     // ========== VIDEO PLAYBACK FUNCTIONS ==========
 
     /**
@@ -1906,6 +2010,21 @@ class MainActivity : AppCompatActivity() {
         // Cancel any pending video load
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
 
+        // Don't play videos if:
+        // 1. App doesn't have window focus (game launched on top of companion)
+        // 2. Game is playing on other screen
+        if (!hasWindowFocus) {
+            android.util.Log.d("MainActivity", "Video blocked - app doesn't have focus (game on top)")
+            releasePlayer()
+            return
+        }
+
+        if (isGamePlaying) {
+            android.util.Log.d("MainActivity", "Video blocked - game playing on other screen")
+            releasePlayer()
+            return
+        }
+
         if (!isVideoEnabled()) {
             releasePlayer()
             return
@@ -1930,7 +2049,12 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 videoDelayRunnable = Runnable {
-                    loadVideo(videoPath)
+                    // Double-check focus and game state before loading video
+                    if (hasWindowFocus && !isGamePlaying) {
+                        loadVideo(videoPath)
+                    } else {
+                        android.util.Log.d("MainActivity", "Video delayed load cancelled - focus lost or game playing")
+                    }
                 }
 
                 videoDelayHandler?.postDelayed(videoDelayRunnable!!, delay)
