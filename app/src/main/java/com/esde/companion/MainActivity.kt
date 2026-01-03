@@ -263,8 +263,14 @@ class MainActivity : AppCompatActivity() {
             else -> true
         }
 
-        // If setup not complete or missing permissions, launch settings with wizard
-        if (!hasCompletedSetup || !hasPermission) {
+        // Check if all 7 scripts are present with correct names
+        val hasCorrectScripts = checkForCorrectScripts()
+
+        // Launch setup wizard if:
+        // 1. Setup not completed, OR
+        // 2. Missing permissions, OR
+        // 3. Scripts are missing/outdated
+        if (!hasCompletedSetup || !hasPermission || !hasCorrectScripts) {
             // Delay slightly to let UI settle
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 val intent = Intent(this, SettingsActivity::class.java)
@@ -272,6 +278,80 @@ class MainActivity : AppCompatActivity() {
                 settingsLauncher.launch(intent)
             }, 1000)
         }
+    }
+
+    private fun checkForCorrectScripts(): Boolean {
+        // Get scripts path (return false if not set)
+        val scriptsPath = prefs.getString("scripts_path", null) ?: return false
+        val scriptsDir = File(scriptsPath)
+
+        // Define required scripts with their expected content signatures
+        val requiredScripts = mapOf(
+            "game-select/esdecompanion-game-select.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_game_filename.txt",
+                "esde_game_name.txt",
+                "esde_game_system.txt"
+            ),
+            "system-select/esdecompanion-system-select.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_system_name.txt"
+            ),
+            "game-start/esdecompanion-game-start.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_gamestart_filename.txt",
+                "esde_gamestart_name.txt",
+                "esde_gamestart_system.txt"
+            ),
+            "game-end/esdecompanion-game-end.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_gameend_filename.txt",
+                "esde_gameend_name.txt",
+                "esde_gameend_system.txt"
+            ),
+            "screensaver-start/esdecompanion-screensaver-start.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_screensaver_start.txt"
+            ),
+            "screensaver-end/esdecompanion-screensaver-end.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_screensaver_end.txt"
+            ),
+            "screensaver-game-select/esdecompanion-screensaver-game-select.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_screensavergameselect_filename.txt",
+                "esde_screensavergameselect_name.txt",
+                "esde_screensavergameselect_system.txt"
+            )
+        )
+
+        // Check each script exists and contains expected content
+        for ((scriptPath, expectedContent) in requiredScripts) {
+            val scriptFile = File(scriptsDir, scriptPath)
+
+            // Check if file exists
+            if (!scriptFile.exists()) {
+                return false
+            }
+
+            // Read and validate content
+            try {
+                val content = scriptFile.readText()
+
+                // Check if all expected strings are present in the content
+                for (expected in expectedContent) {
+                    if (!content.contains(expected)) {
+                        return false
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error reading script: $scriptPath", e)
+                return false
+            }
+        }
+
+        // All scripts exist with correct content
+        return true
     }
 
     override fun onPause() {
@@ -427,7 +507,7 @@ class MainActivity : AppCompatActivity() {
     private fun getLogsPath(): String {
         // Always use fixed internal storage location for logs
         // This ensures FileObserver works reliably (doesn't work well on SD card)
-        val path = "/storage/emulated/0/Android/ES-DE/logs"
+        val path = "/storage/emulated/0/ES-DE Companion/logs"
         android.util.Log.d("MainActivity", "Logs path: $path")
         return path
     }

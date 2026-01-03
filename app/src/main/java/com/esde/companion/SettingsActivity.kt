@@ -941,39 +941,110 @@ class SettingsActivity : AppCompatActivity() {
         val path = prefs.getString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts") ?: "/storage/emulated/0/ES-DE/scripts"
         scriptsPathText.text = path
 
-        // Check if both scripts exist
         val scriptsDir = java.io.File(path)
-        val gameSelectScript = java.io.File(scriptsDir, "game-select/game-select.sh")
-        val systemSelectScript = java.io.File(scriptsDir, "system-select/system-select.sh")
 
-        val gameExists = gameSelectScript.exists()
-        val systemExists = systemSelectScript.exists()
+        // Define required scripts with their expected content signatures
+        val requiredScripts = mapOf(
+            "game-select/esdecompanion-game-select.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_game_filename.txt",
+                "esde_game_name.txt",
+                "esde_game_system.txt"
+            ),
+            "system-select/esdecompanion-system-select.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_system_name.txt"
+            ),
+            "game-start/esdecompanion-game-start.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_gamestart_filename.txt",
+                "esde_gamestart_name.txt",
+                "esde_gamestart_system.txt"
+            ),
+            "game-end/esdecompanion-game-end.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_gameend_filename.txt",
+                "esde_gameend_name.txt",
+                "esde_gameend_system.txt"
+            ),
+            "screensaver-start/esdecompanion-screensaver-start.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_screensaver_start.txt"
+            ),
+            "screensaver-end/esdecompanion-screensaver-end.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_screensaver_end.txt"
+            ),
+            "screensaver-game-select/esdecompanion-screensaver-game-select.sh" to listOf(
+                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
+                "esde_screensavergameselect_filename.txt",
+                "esde_screensavergameselect_name.txt",
+                "esde_screensavergameselect_system.txt"
+            )
+        )
 
+        // Validate each script
+        var validScripts = 0
+        var invalidScripts = mutableListOf<String>()
+        var missingScripts = mutableListOf<String>()
+
+        for ((scriptPath, expectedContent) in requiredScripts) {
+            val scriptFile = java.io.File(scriptsDir, scriptPath)
+            val scriptName = scriptPath.substringAfterLast("/")
+
+            if (!scriptFile.exists()) {
+                missingScripts.add(scriptName)
+            } else {
+                // Check content
+                try {
+                    val content = scriptFile.readText()
+                    val isValid = expectedContent.all { content.contains(it) }
+
+                    if (isValid) {
+                        validScripts++
+                    } else {
+                        invalidScripts.add(scriptName)
+                    }
+                } catch (e: Exception) {
+                    invalidScripts.add(scriptName)
+                }
+            }
+        }
+
+        // Update status based on validation results
         when {
-            gameExists && systemExists -> {
-                // Both scripts exist - green indicator
+            validScripts == 7 -> {
+                // All 7 scripts exist with correct content - green indicator
                 scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
                 scriptsStatusText.text = "●"
                 scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                scriptsStatusDescription.text = "✓ Both scripts found"
+                scriptsStatusDescription.text = "✓ All 7 scripts valid"
             }
-            gameExists || systemExists -> {
-                // Only one script exists - yellow indicator
+            validScripts > 0 -> {
+                // Some scripts valid - yellow indicator
                 scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#FFC107"))
                 scriptsStatusText.text = "●"
                 scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#FFC107"))
-                scriptsStatusDescription.text = if (gameExists) {
-                    "⚠ Only game-select.sh found"
-                } else {
-                    "⚠ Only system-select.sh found"
-                }
+
+                val issues = mutableListOf<String>()
+                if (missingScripts.isNotEmpty()) issues.add("${missingScripts.size} missing")
+                if (invalidScripts.isNotEmpty()) issues.add("${invalidScripts.size} invalid")
+
+                scriptsStatusDescription.text = "⚠ $validScripts/7 valid (${issues.joinToString(", ")})"
             }
             else -> {
-                // No scripts found - gray indicator
-                scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#666666"))
+                // No valid scripts - gray/red indicator
+                scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
                 scriptsStatusText.text = "●"
-                scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#666666"))
-                scriptsStatusDescription.text = "Scripts not found"
+                scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+
+                if (missingScripts.size == 7) {
+                    scriptsStatusDescription.text = "Scripts not found"
+                } else if (invalidScripts.isNotEmpty()) {
+                    scriptsStatusDescription.text = "⚠ Scripts found but invalid/outdated"
+                } else {
+                    scriptsStatusDescription.text = "Scripts missing or invalid"
+                }
             }
         }
     }
@@ -1053,7 +1124,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun showScriptsMissingWarning() {
         AlertDialog.Builder(this)
             .setTitle("Scripts Not Found")
-            .setMessage("Warning: The script files were not found in the selected folder.\n\n" +
+            .setMessage("Warning: All 7 script files were not found in the selected folder.\n\n" +
                     "Without these scripts, ES-DE will not be able to communicate game selections to this app, and game media will not be displayed.\n\n" +
                     "You can:\n" +
                     "• Go back and create the scripts\n" +
@@ -1201,24 +1272,33 @@ class SettingsActivity : AppCompatActivity() {
         try {
             val scriptsDir = java.io.File(scriptsPath)
 
-            // Check if scripts already exist
-            val gameSelectScript = java.io.File(scriptsDir, "game-select/game-select.sh")
-            val systemSelectScript = java.io.File(scriptsDir, "system-select/system-select.sh")
+            // Check if any scripts already exist
+            val scriptFiles = listOf(
+                java.io.File(scriptsDir, "game-select/esdecompanion-game-select.sh"),
+                java.io.File(scriptsDir, "system-select/esdecompanion-system-select.sh"),
+                java.io.File(scriptsDir, "game-start/esdecompanion-game-start.sh"),
+                java.io.File(scriptsDir, "game-end/esdecompanion-game-end.sh"),
+                java.io.File(scriptsDir, "screensaver-start/esdecompanion-screensaver-start.sh"),
+                java.io.File(scriptsDir, "screensaver-end/esdecompanion-screensaver-end.sh"),
+                java.io.File(scriptsDir, "screensaver-game-select/esdecompanion-screensaver-game-select.sh")
+            )
 
-            if (gameSelectScript.exists() || systemSelectScript.exists()) {
+            val existingScripts = scriptFiles.filter { it.exists() }
+
+            if (existingScripts.isNotEmpty()) {
                 // Scripts exist, show warning
-                val existingScripts = mutableListOf<String>()
-                if (gameSelectScript.exists()) existingScripts.add("game-select.sh")
-                if (systemSelectScript.exists()) existingScripts.add("system-select.sh")
+                val scriptNames = existingScripts.map { it.name }
 
                 AlertDialog.Builder(this)
                     .setTitle("Scripts Already Exist")
                     .setMessage("The following script files already exist:\n\n" +
-                            existingScripts.joinToString("\n") { "• $it" } +
+                            scriptNames.joinToString("\n") { "• $it" } +
                             "\n\nOverwriting them will replace any custom modifications you may have made.\n\n" +
                             "Do you want to overwrite the existing scripts?")
                     .setPositiveButton("Overwrite") { _, _ ->
                         // User confirmed, proceed with creation
+                        val gameSelectScript = java.io.File(scriptsDir, "game-select/esdecompanion-game-select.sh")
+                        val systemSelectScript = java.io.File(scriptsDir, "system-select/esdecompanion-system-select.sh")
                         writeScriptFiles(scriptsDir, gameSelectScript, systemSelectScript)
                     }
                     .setNegativeButton("Cancel") { _, _ ->
@@ -1238,6 +1318,8 @@ class SettingsActivity : AppCompatActivity() {
                     .show()
             } else {
                 // No existing scripts, create them
+                val gameSelectScript = java.io.File(scriptsDir, "game-select/esdecompanion-game-select.sh")
+                val systemSelectScript = java.io.File(scriptsDir, "system-select/esdecompanion-system-select.sh")
                 writeScriptFiles(scriptsDir, gameSelectScript, systemSelectScript)
             }
 
@@ -1254,42 +1336,160 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun writeScriptFiles(scriptsDir: java.io.File, gameSelectScript: java.io.File, systemSelectScript: java.io.File) {
         try {
-            // Create game-select subfolder
+            // First, check for and delete old-style scripts (only the original 2)
+            val oldScripts = listOf(
+                java.io.File(scriptsDir, "game-select/game-select.sh"),
+                java.io.File(scriptsDir, "system-select/system-select.sh")
+            )
+
+            var deletedOldScripts = 0
+            var failedToDelete = mutableListOf<String>()
+
+            for (oldScript in oldScripts) {
+                if (oldScript.exists()) {
+                    try {
+                        if (oldScript.delete()) {
+                            deletedOldScripts++
+                        } else {
+                            failedToDelete.add(oldScript.name)
+                            android.util.Log.w("SettingsActivity", "Failed to delete old script: ${oldScript.name}")
+                        }
+                    } catch (e: Exception) {
+                        failedToDelete.add(oldScript.name)
+                        android.util.Log.e("SettingsActivity", "Exception deleting old script: ${oldScript.name}", e)
+                    }
+                }
+            }
+
+            // Create all script subdirectories
             val gameSelectDir = java.io.File(scriptsDir, "game-select")
-            gameSelectDir.mkdirs()
-
-            // Create system-select subfolder
             val systemSelectDir = java.io.File(scriptsDir, "system-select")
-            systemSelectDir.mkdirs()
+            val gameStartDir = java.io.File(scriptsDir, "game-start")
+            val gameEndDir = java.io.File(scriptsDir, "game-end")
+            val screensaverStartDir = java.io.File(scriptsDir, "screensaver-start")
+            val screensaverEndDir = java.io.File(scriptsDir, "screensaver-end")
+            val screensaverGameSelectDir = java.io.File(scriptsDir, "screensaver-game-select")
 
-            // Create game-select.sh script
-            // Create game-select.sh script
-            gameSelectScript.writeText("""#!/bin/bash
-LOG_DIR="/storage/emulated/0/Android/ES-DE/logs"
+            gameSelectDir.mkdirs()
+            systemSelectDir.mkdirs()
+            gameStartDir.mkdirs()
+            gameEndDir.mkdirs()
+            screensaverStartDir.mkdirs()
+            screensaverEndDir.mkdirs()
+            screensaverGameSelectDir.mkdirs()
+
+            // 1. esdecompanion-game-select.sh
+            val gameSelectScriptFile = java.io.File(gameSelectDir, "esdecompanion-game-select.sh")
+            gameSelectScriptFile.writeText("""#!/bin/bash
+
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
 mkdir -p "${'$'}LOG_DIR"
+
 filename="${'$'}(basename "${'$'}1")"
+
 echo -n "${'$'}filename" > "${'$'}LOG_DIR/esde_game_filename.txt"
 echo -n "${'$'}2"        > "${'$'}LOG_DIR/esde_game_name.txt"
 echo -n "${'$'}3"        > "${'$'}LOG_DIR/esde_game_system.txt"
 """)
+            gameSelectScriptFile.setExecutable(true)
 
-            // Make executable
-            gameSelectScript.setExecutable(true)
+            // 2. esdecompanion-system-select.sh
+            val systemSelectScriptFile = java.io.File(systemSelectDir, "esdecompanion-system-select.sh")
+            systemSelectScriptFile.writeText("""#!/bin/bash
 
-            // Create system-select.sh script
-            systemSelectScript.writeText("""#!/bin/bash
-LOG_DIR="/storage/emulated/0/Android/ES-DE/logs"
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
 mkdir -p "${'$'}LOG_DIR"
+
 printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_name.txt" &
 """)
+            systemSelectScriptFile.setExecutable(true)
 
-            // Make executable
-            systemSelectScript.setExecutable(true)
+            // 3. esdecompanion-game-start.sh
+            val gameStartScriptFile = java.io.File(gameStartDir, "esdecompanion-game-start.sh")
+            gameStartScriptFile.writeText("""#!/bin/bash
 
-            // Show success message
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
+mkdir -p "${'$'}LOG_DIR"
+
+filename="${'$'}(basename "${'$'}1")"
+clean_filename="${'$'}{filename//\\/}"
+
+echo -n "${'$'}clean_filename" 	> "${'$'}LOG_DIR/esde_gamestart_filename.txt"
+echo -n "${'$'}2"        		> "${'$'}LOG_DIR/esde_gamestart_name.txt"
+echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_gamestart_system.txt"
+""")
+            gameStartScriptFile.setExecutable(true)
+
+            // 4. esdecompanion-game-end.sh
+            val gameEndScriptFile = java.io.File(gameEndDir, "esdecompanion-game-end.sh")
+            gameEndScriptFile.writeText("""#!/bin/bash
+
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
+mkdir -p "${'$'}LOG_DIR"
+
+filename="${'$'}(basename "${'$'}1")"
+clean_filename="${'$'}{filename//\\/}"
+
+echo -n "${'$'}clean_filename" 	> "${'$'}LOG_DIR/esde_gameend_filename.txt"
+echo -n "${'$'}2"        		> "${'$'}LOG_DIR/esde_gameend_name.txt"
+echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_gameend_system.txt"""")
+            gameEndScriptFile.setExecutable(true)
+
+            // 5. esdecompanion-screensaver-start.sh
+            val screensaverStartScriptFile = java.io.File(screensaverStartDir, "esdecompanion-screensaver-start.sh")
+            screensaverStartScriptFile.writeText("""#!/bin/bash
+
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
+mkdir -p "${'$'}LOG_DIR"
+
+echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_screensaver_start.txt"
+
+""")
+            screensaverStartScriptFile.setExecutable(true)
+
+            // 6. esdecompanion-screensaver-end.sh
+            val screensaverEndScriptFile = java.io.File(screensaverEndDir, "esdecompanion-screensaver-end.sh")
+            screensaverEndScriptFile.writeText("""#!/bin/bash
+
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
+mkdir -p "${'$'}LOG_DIR"
+
+echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_screensaver_end.txt"
+
+""")
+            screensaverEndScriptFile.setExecutable(true)
+
+            // 7. esdecompanion-screensaver-game-select.sh
+            val screensaverGameSelectScriptFile = java.io.File(screensaverGameSelectDir, "esdecompanion-screensaver-game-select.sh")
+            screensaverGameSelectScriptFile.writeText("""#!/bin/bash
+
+LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
+mkdir -p "${'$'}LOG_DIR"
+
+filename="${'$'}(basename "${'$'}1")"
+clean_filename="${'$'}{filename//\\/}"
+
+echo -n "${'$'}clean_filename" 	> "${'$'}LOG_DIR/esde_screensavergameselect_filename.txt"
+echo -n "${'$'}2"        		> "${'$'}LOG_DIR/esde_screensavergameselect_name.txt"
+echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
+""")
+            screensaverGameSelectScriptFile.setExecutable(true)
+
+            // Show success message with cleanup info
+            val successMessage = when {
+                deletedOldScripts > 0 && failedToDelete.isEmpty() ->
+                    "All 7 scripts created successfully!\n\nCleaned up $deletedOldScripts old script(s)."
+                deletedOldScripts > 0 && failedToDelete.isNotEmpty() ->
+                    "All 7 scripts created successfully!\n\nCleaned up $deletedOldScripts old script(s).\n\nWarning: Could not delete ${failedToDelete.joinToString()}"
+                failedToDelete.isNotEmpty() ->
+                    "All 7 scripts created successfully!\n\nWarning: Could not delete old scripts: ${failedToDelete.joinToString()}"
+                else ->
+                    "All 7 scripts created successfully!"
+            }
+
             android.widget.Toast.makeText(
                 this,
-                "Scripts created successfully!",
+                successMessage,
                 android.widget.Toast.LENGTH_LONG
             ).show()
 
@@ -1455,14 +1655,23 @@ printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_name.txt" &
                     bottomRightText = "Create Scripts",
                     onCancel = { isInSetupWizard = false },
                     onTopRight = {
-                        // Check if scripts exist
+                        // Check if all 7 scripts exist
                         val scriptsPath = prefs.getString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts") ?: "/storage/emulated/0/ES-DE/scripts"
                         val scriptsDir = java.io.File(scriptsPath)
-                        val gameSelectScript = java.io.File(scriptsDir, "game-select/game-select.sh")
-                        val systemSelectScript = java.io.File(scriptsDir, "system-select/system-select.sh")
+                        val scriptFiles = listOf(
+                            java.io.File(scriptsDir, "game-select/esdecompanion-game-select.sh"),
+                            java.io.File(scriptsDir, "system-select/esdecompanion-system-select.sh"),
+                            java.io.File(scriptsDir, "game-start/esdecompanion-game-start.sh"),
+                            java.io.File(scriptsDir, "game-end/esdecompanion-game-end.sh"),
+                            java.io.File(scriptsDir, "screensaver-start/esdecompanion-screensaver-start.sh"),
+                            java.io.File(scriptsDir, "screensaver-end/esdecompanion-screensaver-end.sh"),
+                            java.io.File(scriptsDir, "screensaver-game-select/esdecompanion-screensaver-game-select.sh")
+                        )
 
-                        if (gameSelectScript.exists() && systemSelectScript.exists()) {
-                            // Both scripts exist, continue
+                        val allExist = scriptFiles.all { it.exists() }
+
+                        if (allExist) {
+                            // All 7 scripts exist, continue
                             continueSetupWizard()
                         } else {
                             // Scripts missing, show warning
