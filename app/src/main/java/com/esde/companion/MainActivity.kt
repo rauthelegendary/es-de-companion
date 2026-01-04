@@ -1841,37 +1841,114 @@ class MainActivity : AppCompatActivity() {
         val isSameGame = playingGameFilename == screensaverGameFilename
 
         if (cameFromScreensaver && isSameGame) {
-            android.util.Log.d("MainActivity", "Game start from screensaver - same game, skipping image reload")
-            // The screensaver game image is already showing, just apply game launch behavior
-            // For "game_image" mode, the image is already correct
-            // For "default_image" and "black_screen", update as needed
+            android.util.Log.d("MainActivity", "Game start from screensaver - same game")
 
+            // Check if screensaver behavior matches game launch behavior
+            val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
             val gameLaunchBehavior = prefs.getString("game_launch_behavior", "default_image") ?: "default_image"
 
-            when (gameLaunchBehavior) {
-                "game_image" -> {
-                    // Image already showing from screensaver - perfect!
-                    android.util.Log.d("MainActivity", "Game launch behavior: game_image - keeping screensaver image")
-                    gameImageView.visibility = View.VISIBLE
-                    videoView.visibility = View.GONE
-                }
-                "black_screen" -> {
-                    // Change to black screen
-                    gameImageView.setImageDrawable(null)
-                    gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
-                    gameImageView.visibility = View.VISIBLE
+            // If behaviors match, we can skip reloading the image
+            if (screensaverBehavior == gameLaunchBehavior) {
+                android.util.Log.d("MainActivity", "Behaviors match ($screensaverBehavior) - keeping current display")
+                gameImageView.visibility = View.VISIBLE
+                videoView.visibility = View.GONE
+            } else {
+                // Behaviors don't match - need to update the display
+                android.util.Log.d("MainActivity", "Behaviors differ (screensaver: $screensaverBehavior, launch: $gameLaunchBehavior) - updating display")
 
-                    marqueeImageView.setImageDrawable(null)
-                    marqueeImageView.visibility = View.GONE
-                    Glide.with(this).clear(marqueeImageView)
+                when (gameLaunchBehavior) {
+                    "game_image" -> {
+                        // Load the game's image (screensaver might have been showing default/black)
+                        // Use playingGameFilename first (the actual game being launched)
+                        // Then screensaverGameFilename (for slideshow/video modes if playing wasn't set yet)
+                        // Finally currentGameFilename (browsing state before screensaver)
+                        val filename = playingGameFilename ?: screensaverGameFilename ?: currentGameFilename
+                        // Use screensaverSystemName first (correct for the launching game)
+                        // Fall back to currentSystemName only if screensaver didn't provide it
+                        val systemName = screensaverSystemName ?: currentSystemName
 
-                    videoView.visibility = View.GONE
-                }
-                else -> { // "default_image"
-                    // Change to fallback background but keep marquee
-                    loadFallbackBackground()
-                    gameImageView.visibility = View.VISIBLE
-                    videoView.visibility = View.GONE
+                        android.util.Log.d("MainActivity", "game_image case - DEBUG:")
+                        android.util.Log.d("MainActivity", "  playingGameFilename: $playingGameFilename")
+                        android.util.Log.d("MainActivity", "  screensaverGameFilename: $screensaverGameFilename")
+                        android.util.Log.d("MainActivity", "  currentGameFilename: $currentGameFilename")
+                        android.util.Log.d("MainActivity", "  currentSystemName: $currentSystemName")
+                        android.util.Log.d("MainActivity", "  screensaverSystemName: $screensaverSystemName")
+                        android.util.Log.d("MainActivity", "  FINAL filename: $filename")
+                        android.util.Log.d("MainActivity", "  FINAL systemName: $systemName")
+
+                        if (filename != null) {
+                            if (systemName != null) {
+                                val gameName = filename.substringBeforeLast('.')
+                                android.util.Log.d("MainActivity", "  Searching for game image: system=$systemName, game=$gameName, filename=$filename")
+                                val gameImage = findGameImage(systemName, gameName, filename)
+                                android.util.Log.d("MainActivity", "  findGameImage result: ${gameImage?.absolutePath ?: "NULL"}")
+                                if (gameImage != null) {
+                                    Glide.with(this)
+                                        .load(gameImage)
+                                        .into(gameImageView)
+                                } else {
+                                    loadFallbackBackground()
+                                }
+
+                                // Load marquee
+                                if (prefs.getBoolean("game_logo_enabled", true)) {
+                                    val marqueeImage = findMarqueeImage(systemName, gameName, filename)
+                                    if (marqueeImage != null) {
+                                        Glide.with(this)
+                                            .load(marqueeImage)
+                                            .into(marqueeImageView)
+                                        marqueeImageView.visibility = View.VISIBLE
+                                    } else {
+                                        marqueeImageView.visibility = View.GONE
+                                    }
+                                } else {
+                                    marqueeImageView.visibility = View.GONE
+                                }
+                            }
+                        }
+                        gameImageView.visibility = View.VISIBLE
+                        videoView.visibility = View.GONE
+                    }
+                    "black_screen" -> {
+                        // Change to black screen
+                        gameImageView.setImageDrawable(null)
+                        gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
+                        gameImageView.visibility = View.VISIBLE
+
+                        marqueeImageView.setImageDrawable(null)
+                        marqueeImageView.visibility = View.GONE
+                        Glide.with(this).clear(marqueeImageView)
+
+                        videoView.visibility = View.GONE
+                    }
+                    else -> { // "default_image"
+                        // Change to fallback background
+                        loadFallbackBackground()
+                        gameImageView.visibility = View.VISIBLE
+                        videoView.visibility = View.GONE
+
+                        // Load marquee if enabled
+                        if (prefs.getBoolean("game_logo_enabled", true)) {
+                            val filename = currentGameFilename ?: screensaverGameFilename ?: playingGameFilename
+                            val systemName = screensaverSystemName ?: currentSystemName
+                            if (filename != null && systemName != null) {
+                                val gameName = filename.substringBeforeLast('.')
+                                val marqueeImage = findMarqueeImage(systemName, gameName, filename)
+                                if (marqueeImage != null) {
+                                    Glide.with(this)
+                                        .load(marqueeImage)
+                                        .into(marqueeImageView)
+                                    marqueeImageView.visibility = View.VISIBLE
+                                } else {
+                                    marqueeImageView.visibility = View.GONE
+                                }
+                            } else {
+                                marqueeImageView.visibility = View.GONE
+                            }
+                        } else {
+                            marqueeImageView.visibility = View.GONE
+                        }
+                    }
                 }
             }
 
@@ -1975,6 +2052,18 @@ class MainActivity : AppCompatActivity() {
 
         // Stop any videos
         releasePlayer()
+
+        // Update browsing state to the game that's now playing
+        // This ensures when the game ends, we return to the correct game
+        if (playingGameFilename != null) {
+            currentGameFilename = playingGameFilename
+            currentGameName = null  // Will be updated by next game-select event
+            isSystemScrollActive = false  // We're now in game view
+        }
+        if (screensaverSystemName != null) {
+            currentSystemName = screensaverSystemName
+        }
+
         // Clear screensaver launch flag
         isLaunchingFromScreensaver = false
         // Clear screensaver game variables
