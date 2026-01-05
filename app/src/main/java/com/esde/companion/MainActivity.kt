@@ -662,10 +662,11 @@ class MainActivity : AppCompatActivity() {
 
         when (animationStyle) {
             "none" -> {
-                // No animation - instant display
+                // No animation - instant display with crossfade disabled
                 Glide.with(this)
                     .load(imageFile)
                     .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .dontAnimate()  // Disable all transitions
                     .listener(object : RequestListener<Drawable> {
                         override fun onLoadFailed(
                             e: GlideException?,
@@ -691,10 +692,11 @@ class MainActivity : AppCompatActivity() {
                     .into(targetView)
             }
             "fade" -> {
-                // Fade only - no scale
+                // Use Glide's built-in crossfade transition
                 Glide.with(this)
                     .load(imageFile)
                     .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(duration))
                     .listener(object : RequestListener<Drawable> {
                         override fun onLoadFailed(
                             e: GlideException?,
@@ -713,26 +715,18 @@ class MainActivity : AppCompatActivity() {
                             dataSource: DataSource,
                             isFirstResource: Boolean
                         ): Boolean {
-                            // Apply fade-in animation only
-                            targetView.alpha = 0f
-                            targetView.animate()
-                                .alpha(1f)
-                                .setDuration(duration.toLong())
-                                .setInterpolator(DecelerateInterpolator())
-                                .withEndAction {
-                                    onComplete?.invoke()
-                                }
-                                .start()
+                            onComplete?.invoke()
                             return false
                         }
                     })
                     .into(targetView)
             }
             else -> {
-                // "scale_fade" - default with scale + fade
+                // "scale_fade" - Use Glide crossfade + custom scale animation
                 Glide.with(this)
                     .load(imageFile)
                     .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(duration))
                     .listener(object : RequestListener<Drawable> {
                         override fun onLoadFailed(
                             e: GlideException?,
@@ -751,12 +745,10 @@ class MainActivity : AppCompatActivity() {
                             dataSource: DataSource,
                             isFirstResource: Boolean
                         ): Boolean {
-                            // Apply scale + fade-in animation
-                            targetView.alpha = 0f
+                            // Apply scale animation on top of Glide's crossfade
                             targetView.scaleX = scaleAmount
                             targetView.scaleY = scaleAmount
                             targetView.animate()
-                                .alpha(1f)
                                 .scaleX(1f)
                                 .scaleY(1f)
                                 .setDuration(duration.toLong())
