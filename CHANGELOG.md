@@ -1,7 +1,7 @@
 # 🔄 Changelog
 
-## [0.2.3] - TBC
-- Improved screensaver transitions for all event types
+## [0.2.3] - 2026-01-05
+- Improved screensaver transitions for all screensaver event types
 - Fix for https://github.com/RobZombie9043/es-de-companion/issues/5 - App crash with custom images
 - Fix for png/jpg custom system images not loading
 - Fix for https://github.com/RobZombie9043/es-de-companion/issues/4 - SD card not mounting on boot triggering quick setup
