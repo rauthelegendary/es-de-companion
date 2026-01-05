@@ -2077,6 +2077,10 @@ class MainActivity : AppCompatActivity() {
      * Handle game end event - return to normal browsing display
      */
     private fun handleGameEnd() {
+        // Update browsing state to game view since we're returning from a game
+        // This ensures we don't show system images when game ends
+        isSystemScrollActive = false
+
         // Delay reload slightly to check if screensaver is about to start
         // This prevents a flash of the browsing image before screensaver appears
         Handler(Looper.getMainLooper()).postDelayed({
@@ -2086,13 +2090,9 @@ class MainActivity : AppCompatActivity() {
                 return@postDelayed
             }
 
-            // Normal game end - return to browsing state
-            android.util.Log.d("MainActivity", "Game end - returning to browsing state")
-            if (isSystemScrollActive) {
-                loadSystemImage()
-            } else {
-                loadGameInfo()
-            }
+            // Normal game end - return to game browsing state
+            android.util.Log.d("MainActivity", "Game end - returning to game browsing state")
+            loadGameInfo()
         }, 150)  // 150ms delay to check for screensaver start
     }
 
