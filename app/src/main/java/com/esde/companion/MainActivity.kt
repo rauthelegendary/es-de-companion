@@ -1205,8 +1205,8 @@ class MainActivity : AppCompatActivity() {
                                 android.graphics.drawable.PictureDrawable(svg.renderToPicture())
                             }
                             else -> {
-                                // Load bitmap formats (PNG, JPG, WebP)
-                                val bitmap = android.graphics.BitmapFactory.decodeFile(logoFile.absolutePath)
+                                // Load bitmap formats (PNG, JPG, WebP) with downscaling
+                                val bitmap = loadScaledBitmap(logoFile.absolutePath, 800, 1000)
                                 android.graphics.drawable.BitmapDrawable(resources, bitmap)
                             }
                         }
@@ -1224,7 +1224,52 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Load a scaled bitmap to prevent out-of-memory errors with large images
+     * @param imagePath Path to the image file
+     * @param maxWidth Maximum width in pixels
+     * @param maxHeight Maximum height in pixels
+     * @return Scaled bitmap
+     */
+    private fun loadScaledBitmap(imagePath: String, maxWidth: Int, maxHeight: Int): android.graphics.Bitmap? {
+        try {
+            // First decode with inJustDecodeBounds=true to check dimensions
+            val options = android.graphics.BitmapFactory.Options()
+            options.inJustDecodeBounds = true
+            android.graphics.BitmapFactory.decodeFile(imagePath, options)
 
+            // Calculate inSampleSize
+            val imageHeight = options.outHeight
+            val imageWidth = options.outWidth
+            var inSampleSize = 1
+
+            if (imageHeight > maxHeight || imageWidth > maxWidth) {
+                val halfHeight = imageHeight / 2
+                val halfWidth = imageWidth / 2
+
+                // Calculate the largest inSampleSize value that is a power of 2 and keeps both
+                // height and width larger than the requested height and width.
+                while ((halfHeight / inSampleSize) >= maxHeight && (halfWidth / inSampleSize) >= maxWidth) {
+                    inSampleSize *= 2
+                }
+            }
+
+            android.util.Log.d("MainActivity", "Loading image: $imagePath")
+            android.util.Log.d("MainActivity", "  Original size: ${imageWidth}x${imageHeight}")
+            android.util.Log.d("MainActivity", "  Sample size: $inSampleSize")
+            android.util.Log.d("MainActivity", "  Target size: ~${imageWidth/inSampleSize}x${imageHeight/inSampleSize}")
+
+            // Decode bitmap with inSampleSize set
+            options.inJustDecodeBounds = false
+            options.inSampleSize = inSampleSize
+            options.inPreferredConfig = android.graphics.Bitmap.Config.RGB_565 // Use less memory
+
+            return android.graphics.BitmapFactory.decodeFile(imagePath, options)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error loading scaled bitmap: $imagePath", e)
+            return null
+        }
+    }
 
 
     /**
@@ -1338,11 +1383,20 @@ class MainActivity : AppCompatActivity() {
             currentSystemName = systemName
             currentGameName = null  // Clear game info when in system view
             currentGameFilename = null
-            val imageFile = File(getSystemImagePath(), "$systemName.webp")
+            // Check for custom system image with multiple format support
+            var imageToUse: File? = null
+            val systemImagePath = getSystemImagePath()
+            val imageExtensions = listOf("webp", "png", "jpg", "jpeg")
 
-            var imageToUse: File? = imageFile
+            for (ext in imageExtensions) {
+                val imageFile = File(systemImagePath, "$systemName.$ext")
+                if (imageFile.exists()) {
+                    imageToUse = imageFile
+                    break
+                }
+            }
 
-            if (!imageFile.exists()) {
+            if (imageToUse == null) {
                 val mediaBase = File(getMediaBasePath(), systemName)
                 val imagePref = prefs.getString("image_preference", "fanart") ?: "fanart"
                 val prioritizedFolders = if (imagePref == "screenshot") {
@@ -1368,7 +1422,26 @@ class MainActivity : AppCompatActivity() {
 
             if (imageToUse != null && imageToUse.exists()) {
                 isSystemScrollActive = true
-                loadImageWithAnimation(imageToUse, gameImageView)
+
+                // Check if this is a custom system image (from system_images folder)
+                val isCustomSystemImage = imageToUse.absolutePath.contains(getSystemImagePath())
+
+                if (isCustomSystemImage) {
+                    // Load custom system image with downscaling to prevent OOM
+                    android.util.Log.d("MainActivity", "Loading custom system image with downscaling")
+                    val bitmap = loadScaledBitmap(imageToUse.absolutePath, 1920, 1080)
+                    if (bitmap != null) {
+                        val drawable = android.graphics.drawable.BitmapDrawable(resources, bitmap)
+                        gameImageView.setImageDrawable(drawable)
+                        android.util.Log.d("MainActivity", "Custom system image loaded successfully")
+                    } else {
+                        android.util.Log.e("MainActivity", "Failed to load custom system image, using fallback")
+                        loadFallbackBackground()
+                    }
+                } else {
+                    // Normal game artwork - use Glide with animation
+                    loadImageWithAnimation(imageToUse, gameImageView)
+                }
 
                 // Use built-in system logo as marquee overlay
                 if (prefs.getBoolean("system_logo_enabled", true)) {
