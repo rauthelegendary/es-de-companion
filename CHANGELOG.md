@@ -1,5 +1,8 @@
 # 🔄 Changelog
 
+## [0.2.4] - 2026-01-06
+- Updated to use Glide's built-in cross-fade to handle the fade animations which results in smoother transitions with no black screens
+
 ## [0.2.3] - 2026-01-05
 - Improved screensaver transitions for all screensaver event types
 - Fix for https://github.com/RobZombie9043/es-de-companion/issues/5 - App crash with custom images
