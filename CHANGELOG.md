@@ -1,5 +1,8 @@
 # 🔄 Changelog
 
+## [0.2.5] - TBC
+- Back Button Fix to prevent cycling through recent apps instead of staying on the home screen
+
 ## [0.2.4] - 2026-01-06
 - Updated to use Glide's built-in cross-fade to handle the fade animations which results in smoother transitions with no black screens
 
