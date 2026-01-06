@@ -42,6 +42,7 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import android.app.ActivityOptions
 import android.provider.Settings
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import androidx.appcompat.app.AlertDialog
 import java.io.File
@@ -297,6 +298,7 @@ class MainActivity : AppCompatActivity() {
 
         // Register volume change listener for real-time updates
         registerVolumeListener()
+        registerSecondaryVolumeObserver()
     }
 
     private fun checkAndLaunchSetupWizard() {
@@ -1441,6 +1443,7 @@ class MainActivity : AppCompatActivity() {
         fileObserver?.stopWatching()
         unregisterReceiver(appChangeReceiver)
         unregisterVolumeListener()
+        unregisterSecondaryVolumeObserver()
         // Cancel any pending image loads
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
         // Release video player
@@ -2823,6 +2826,10 @@ class MainActivity : AppCompatActivity() {
     /**
      * Update video volume based on system volume for the current display
      * This respects per-display volume controls on devices like Ayn Thor
+     *
+     * Ayn Thor uses:
+     * - Standard STREAM_MUSIC volume for top screen (display 0)
+     * - Settings.System "secondary_screen_volume_level" for bottom screen (display 1)
      */
     private fun updateVideoVolume() {
         if (player == null) return
@@ -2840,21 +2847,60 @@ class MainActivity : AppCompatActivity() {
             // Get the audio manager
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
 
-            // Get current volume for STREAM_MUSIC (which videos use)
-            val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-            val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+            // Determine which display we're on
+            val currentDisplayId = getCurrentDisplayId()
 
-            // Calculate normalized volume (0.0 to 1.0)
-            val normalizedVolume = if (maxVolume > 0) {
-                currentVolume.toFloat() / maxVolume.toFloat()
+            var normalizedVolume: Float
+
+            if (currentDisplayId == 0) {
+                // Primary display (top screen) - use standard STREAM_MUSIC volume
+                val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+
+                normalizedVolume = if (maxVolume > 0) {
+                    currentVolume.toFloat() / maxVolume.toFloat()
+                } else {
+                    1f
+                }
+
+                android.util.Log.d("MainActivity", "Top screen - Using STREAM_MUSIC: $currentVolume/$maxVolume = $normalizedVolume")
+
             } else {
-                1f
+                // Secondary display (bottom screen) - use secondary_screen_volume_level
+                try {
+                    val secondaryVolume = Settings.System.getInt(
+                        contentResolver,
+                        "secondary_screen_volume_level"
+                    )
+                    val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+
+                    normalizedVolume = if (maxVolume > 0) {
+                        secondaryVolume.toFloat() / maxVolume.toFloat()
+                    } else {
+                        1f
+                    }
+
+                    android.util.Log.d("MainActivity", "Bottom screen - Using secondary_screen_volume_level: $secondaryVolume/$maxVolume = $normalizedVolume")
+
+                } catch (e: Settings.SettingNotFoundException) {
+                    // Setting not found - fallback to standard volume
+                    android.util.Log.w("MainActivity", "secondary_screen_volume_level not found, using STREAM_MUSIC")
+
+                    val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                    val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+
+                    normalizedVolume = if (maxVolume > 0) {
+                        currentVolume.toFloat() / maxVolume.toFloat()
+                    } else {
+                        1f
+                    }
+                }
             }
 
-            // Apply the system volume to the video player
+            // Apply the calculated volume to the video player
             player?.volume = normalizedVolume
 
-            android.util.Log.d("MainActivity", "Video volume updated: $normalizedVolume (system: $currentVolume/$maxVolume)")
+            android.util.Log.d("MainActivity", "Video volume updated: $normalizedVolume (display: $currentDisplayId)")
 
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error updating video volume", e)
@@ -2865,16 +2911,30 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Register listener for system volume changes
+     * Listens for both standard volume and Ayn Thor's secondary screen volume
      */
     private fun registerVolumeListener() {
         volumeChangeReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                // Update video volume when system volume changes
-                updateVideoVolume()
+                when (intent?.action) {
+                    "android.media.VOLUME_CHANGED_ACTION" -> {
+                        // Standard volume changed (top screen)
+                        android.util.Log.d("MainActivity", "Volume change detected - updating video volume")
+                        updateVideoVolume()
+                    }
+                    Settings.ACTION_SOUND_SETTINGS -> {
+                        // Sound settings changed (might include secondary screen volume)
+                        android.util.Log.d("MainActivity", "Sound settings changed - updating video volume")
+                        updateVideoVolume()
+                    }
+                }
             }
         }
 
-        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
+        val filter = IntentFilter().apply {
+            addAction("android.media.VOLUME_CHANGED_ACTION")
+            // Note: Settings.System changes don't broadcast reliably, so we also check in onResume
+        }
         registerReceiver(volumeChangeReceiver, filter)
         android.util.Log.d("MainActivity", "Volume change listener registered")
     }
@@ -2892,6 +2952,50 @@ class MainActivity : AppCompatActivity() {
             }
         }
         volumeChangeReceiver = null
+    }
+
+    // Add this variable at the top of MainActivity class
+    private var secondaryVolumeObserver: android.database.ContentObserver? = null
+
+// Add this function near the volume functions
+    /**
+     * Register observer for secondary screen volume changes (Ayn Thor)
+     */
+    private fun registerSecondaryVolumeObserver() {
+        try {
+            secondaryVolumeObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    android.util.Log.d("MainActivity", "Secondary screen volume changed - updating video volume")
+                    updateVideoVolume()
+                }
+            }
+
+            // Observe the secondary_screen_volume_level setting
+            contentResolver.registerContentObserver(
+                Settings.System.getUriFor("secondary_screen_volume_level"),
+                false,
+                secondaryVolumeObserver!!
+            )
+
+            android.util.Log.d("MainActivity", "Secondary volume observer registered")
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Could not register secondary volume observer (not an Ayn Thor?)", e)
+        }
+    }
+
+    /**
+     * Unregister secondary volume observer
+     */
+    private fun unregisterSecondaryVolumeObserver() {
+        secondaryVolumeObserver?.let {
+            try {
+                contentResolver.unregisterContentObserver(it)
+                android.util.Log.d("MainActivity", "Secondary volume observer unregistered")
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error unregistering secondary volume observer", e)
+            }
+        }
+        secondaryVolumeObserver = null
     }
 
     /**
