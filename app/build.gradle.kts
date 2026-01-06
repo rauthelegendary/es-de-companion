@@ -14,8 +14,8 @@ android {
         applicationId = "com.esde.companion"
         minSdk = 29  // Android 10+ required
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.2.6"
+        versionCode = 8
+        versionName = "0.2.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
