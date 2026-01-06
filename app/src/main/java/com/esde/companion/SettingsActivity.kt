@@ -71,6 +71,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var videoAudioChipGroup: ChipGroup
     private lateinit var gameLaunchBehaviorChipGroup: ChipGroup
     private lateinit var screensaverBehaviorChipGroup: ChipGroup
+    private lateinit var blackOverlayChipGroup: ChipGroup
 
     private var initialDimming: Int = 0
     private var initialBlur: Int = 0
@@ -334,6 +335,7 @@ class SettingsActivity : AppCompatActivity() {
             videoAudioChipGroup = findViewById(R.id.videoAudioChipGroup)
             gameLaunchBehaviorChipGroup = findViewById(R.id.gameLaunchBehaviorChipGroup)
             screensaverBehaviorChipGroup = findViewById(R.id.screensaverBehaviorChipGroup)
+            blackOverlayChipGroup = findViewById(R.id.blackOverlayChipGroup)
             android.util.Log.d("SettingsActivity", "Video settings found")
 
             // Initialize version text
@@ -391,6 +393,7 @@ class SettingsActivity : AppCompatActivity() {
             setupGameLaunchBehavior()
             android.util.Log.d("SettingsActivity", "Game launch behavior setup")
             setupScreensaverBehavior()
+            setupBlackOverlay()
             android.util.Log.d("SettingsActivity", "Screensaver behavior setup")
 
             updateMediaPathDisplay()
@@ -926,6 +929,23 @@ class SettingsActivity : AppCompatActivity() {
                 prefs.edit().putString(SCREENSAVER_BEHAVIOR_KEY, behavior).apply()
                 // Mark as changed
                 screensaverBehaviorChanged = true
+            }
+        }
+    }
+
+    private fun setupBlackOverlay() {
+        // Load saved black overlay enabled state (default: false/off)
+        val blackOverlayEnabled = prefs.getBoolean(BLACK_OVERLAY_ENABLED_KEY, false)
+
+        // Set initial chip selection
+        val chipToCheck = if (blackOverlayEnabled) R.id.blackOverlayOn else R.id.blackOverlayOff
+        blackOverlayChipGroup.check(chipToCheck)
+
+        // Setup listener
+        blackOverlayChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.blackOverlayOn
+                prefs.edit().putBoolean(BLACK_OVERLAY_ENABLED_KEY, enabled).apply()
             }
         }
     }
@@ -2172,5 +2192,6 @@ Enjoy your enhanced retro gaming experience! ✨
         const val VIDEO_AUDIO_ENABLED_KEY = "video_audio_enabled"
         const val GAME_LAUNCH_BEHAVIOR_KEY = "game_launch_behavior"
         const val SCREENSAVER_BEHAVIOR_KEY = "screensaver_behavior"
+        const val BLACK_OVERLAY_ENABLED_KEY = "black_overlay_enabled"
     }
 }

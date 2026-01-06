@@ -71,7 +71,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var blackOverlay: View
     private var isBlackOverlayShown = false
-    private var blackOverlayStartY = 0f
 
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<View>
     private lateinit var gestureDetector: GestureDetectorCompat
@@ -104,6 +103,11 @@ class MainActivity : AppCompatActivity() {
 
     // Flag to track if marquee is showing text drawable (needs WRAP_CONTENT)
     private var marqueeShowingText = false
+
+    // Double-tap detection variables
+    private var tapCount = 0
+    private var lastTapTime = 0L
+    private val DOUBLE_TAP_TIMEOUT = 300L // 300ms window for double-tap
 
     // Scripts verification
     private var isWaitingForScriptVerification = false
@@ -838,78 +842,73 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Show the black overlay with animation
+     * Show the black overlay instantly (no animation)
      */
     private fun showBlackOverlay() {
         android.util.Log.d("MainActivity", "Showing black overlay")
         isBlackOverlayShown = true
 
+        // Stop video immediately
+        releasePlayer()
+
+        // Show overlay instantly without animation
         blackOverlay.visibility = View.VISIBLE
-        blackOverlay.animate()
-            .translationY(0f)
-            .setDuration(300)
-            .setInterpolator(android.view.animation.DecelerateInterpolator())
-            .withEndAction {
-                // Stop video AFTER overlay animation completes (prevents flash)
-                releasePlayer()
-            }
-            .start()
+        blackOverlay.translationY = 0f
     }
 
     /**
-     * Hide the black overlay with animation
+     * Hide the black overlay instantly (no animation)
      */
     private fun hideBlackOverlay() {
         android.util.Log.d("MainActivity", "Hiding black overlay")
         isBlackOverlayShown = false
 
-        val displayHeight = resources.displayMetrics.heightPixels.toFloat()
-        blackOverlay.animate()
-            .translationY(-displayHeight)
-            .setDuration(300)
-            .setInterpolator(android.view.animation.AccelerateInterpolator())
-            .withEndAction {
-                blackOverlay.visibility = View.GONE
+        // Hide overlay instantly without animation
+        blackOverlay.visibility = View.GONE
 
-                // Only reload video if applicable (don't reload images)
-                if (!isSystemScrollActive && currentGameFilename != null && currentSystemName != null) {
-                    val gameName = currentGameFilename!!.substringBeforeLast('.')
-                    handleVideoForGame(currentSystemName, gameName, currentGameFilename)
-                }
-            }
-            .start()
+        val displayHeight = resources.displayMetrics.heightPixels.toFloat()
+        blackOverlay.translationY = -displayHeight
+
+        // Reload video if applicable (don't reload images)
+        if (!isSystemScrollActive && currentGameFilename != null && currentSystemName != null) {
+            val gameName = currentGameFilename!!.substringBeforeLast('.')
+            handleVideoForGame(currentSystemName, gameName, currentGameFilename)
+        }
     }
 
-
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // Check if black overlay feature is enabled
+        val blackOverlayEnabled = prefs.getBoolean("black_overlay_enabled", false)
+
         // Check drawer state first
         val drawerState = bottomSheetBehavior.state
         val isDrawerOpen = drawerState == BottomSheetBehavior.STATE_EXPANDED ||
                 drawerState == BottomSheetBehavior.STATE_SETTLING
 
-        // Handle black overlay touch events ONLY when drawer is closed
-        if (!isDrawerOpen) {
-            when (ev.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    blackOverlayStartY = ev.y
+        // Handle black overlay double-tap detection ONLY when drawer is closed and feature is enabled
+        if (!isDrawerOpen && blackOverlayEnabled) {
+            if (ev.action == MotionEvent.ACTION_DOWN) {
+                val currentTime = System.currentTimeMillis()
+
+                // Reset tap count if too much time has passed
+                if (currentTime - lastTapTime > DOUBLE_TAP_TIMEOUT) {
+                    tapCount = 0
                 }
 
-                MotionEvent.ACTION_UP -> {
-                    val deltaY = ev.y - blackOverlayStartY
-                    val distance = Math.abs(deltaY)
+                tapCount++
+                lastTapTime = currentTime
 
-                    // If overlay is showing, check for swipe up to dismiss
-                    if (isBlackOverlayShown && deltaY < -100) {
+                // Check for triple-tap
+                if (tapCount >= 2) {
+                    tapCount = 0 // Reset counter
+
+                    // Toggle black overlay
+                    if (isBlackOverlayShown) {
                         hideBlackOverlay()
-                        return true
-                    }
-
-                    // If starting from top edge and swiping down, show overlay
-                    if (!isBlackOverlayShown && blackOverlayStartY < 200 && deltaY > 100 && distance > 200) {
-                        android.util.Log.d("MainActivity", "Black overlay: Swipe down from top detected (y=$blackOverlayStartY, delta=$deltaY)")
+                    } else {
                         showBlackOverlay()
-                        return true
                     }
+                    return true
                 }
             }
         }
