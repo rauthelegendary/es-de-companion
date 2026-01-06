@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
     private var videoDelayHandler: Handler? = null
     private var videoDelayRunnable: Runnable? = null
     private var currentVideoPath: String? = null
+    private var volumeChangeReceiver: BroadcastReceiver? = null
 
     // Flag to skip reload in onResume (used when returning from settings with no changes)
     private var skipNextReload = false
@@ -289,6 +290,9 @@ class MainActivity : AppCompatActivity() {
 
         // Auto-launch setup wizard if needed
         checkAndLaunchSetupWizard()
+
+        // Register volume change listener for real-time updates
+        registerVolumeListener()
     }
 
     private fun checkAndLaunchSetupWizard() {
@@ -505,9 +509,8 @@ class MainActivity : AppCompatActivity() {
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
 
-        // Update video volume in case audio setting changed
-        val audioEnabled = prefs.getBoolean("video_audio_enabled", false)
-        player?.volume = if (audioEnabled) 1f else 0f
+        // Update video volume based on current system volume
+        updateVideoVolume()
 
         // Resume video playback if paused
         player?.play()
@@ -1438,6 +1441,7 @@ class MainActivity : AppCompatActivity() {
         currentErrorDialog?.dismiss()
         fileObserver?.stopWatching()
         unregisterReceiver(appChangeReceiver)
+        unregisterVolumeListener()
         // Cancel any pending image loads
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
         // Release video player
@@ -2818,6 +2822,80 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Update video volume based on system volume for the current display
+     * This respects per-display volume controls on devices like Ayn Thor
+     */
+    private fun updateVideoVolume() {
+        if (player == null) return
+
+        val audioEnabled = prefs.getBoolean("video_audio_enabled", false)
+
+        if (!audioEnabled) {
+            // User has disabled video audio - mute completely
+            player?.volume = 0f
+            android.util.Log.d("MainActivity", "Video audio disabled by user - volume: 0")
+            return
+        }
+
+        try {
+            // Get the audio manager
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+
+            // Get current volume for STREAM_MUSIC (which videos use)
+            val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+
+            // Calculate normalized volume (0.0 to 1.0)
+            val normalizedVolume = if (maxVolume > 0) {
+                currentVolume.toFloat() / maxVolume.toFloat()
+            } else {
+                1f
+            }
+
+            // Apply the system volume to the video player
+            player?.volume = normalizedVolume
+
+            android.util.Log.d("MainActivity", "Video volume updated: $normalizedVolume (system: $currentVolume/$maxVolume)")
+
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error updating video volume", e)
+            // Fallback to full volume if there's an error
+            player?.volume = 1f
+        }
+    }
+
+    /**
+     * Register listener for system volume changes
+     */
+    private fun registerVolumeListener() {
+        volumeChangeReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                // Update video volume when system volume changes
+                updateVideoVolume()
+            }
+        }
+
+        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
+        registerReceiver(volumeChangeReceiver, filter)
+        android.util.Log.d("MainActivity", "Volume change listener registered")
+    }
+
+    /**
+     * Unregister volume listener
+     */
+    private fun unregisterVolumeListener() {
+        volumeChangeReceiver?.let {
+            try {
+                unregisterReceiver(it)
+                android.util.Log.d("MainActivity", "Volume change listener unregistered")
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error unregistering volume listener", e)
+            }
+        }
+        volumeChangeReceiver = null
+    }
+
+    /**
      * Check if video is currently playing
      */
     private fun isVideoPlaying(): Boolean {
@@ -2888,10 +2966,8 @@ class MainActivity : AppCompatActivity() {
             player = ExoPlayer.Builder(this).build()
             videoView.player = player
 
-            // Set volume based on settings
-            val audioEnabled = prefs.getBoolean("video_audio_enabled", false)
-            player?.volume = if (audioEnabled) 1f else 0f
-            android.util.Log.d("MainActivity", "Video audio: ${if (audioEnabled) "ON" else "OFF"}")
+            // Set volume based on system volume
+            updateVideoVolume()
 
             // Create media item
             val mediaItem = MediaItem.fromUri(videoPath)
