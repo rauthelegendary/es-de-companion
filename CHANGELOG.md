@@ -1,6 +1,7 @@
 # 🔄 Changelog
 
-## [0.2.5] - TBC
+## [0.2.5] - 2026-01-06
+- Added enhanced script setup safety checks to avoid incorrect setups leading to black screen
 - Back Button Fix to prevent cycling through recent apps instead of staying on the home screen
 
 ## [0.2.4] - 2026-01-06
