@@ -1,5 +1,9 @@
 # 🔄 Changelog
 
+## [0.2.6] - 2026-01-07
+- Added an optional double tap shortcut to show/hide black overlay
+- Volume control fixes
+
 ## [0.2.5] - 2026-01-06
 - Added enhanced script setup safety checks to avoid incorrect setups leading to black screen
 - Back Button Fix to prevent cycling through recent apps instead of staying on the home screen
