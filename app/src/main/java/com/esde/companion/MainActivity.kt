@@ -100,6 +100,14 @@ class MainActivity : AppCompatActivity() {
     // Flag to track if marquee is showing text drawable (needs WRAP_CONTENT)
     private var marqueeShowingText = false
 
+    // Scripts verification
+    private var isWaitingForScriptVerification = false
+    private var scriptVerificationHandler: Handler? = null
+    private var scriptVerificationRunnable: Runnable? = null
+    private var currentVerificationDialog: AlertDialog? = null
+    private var currentErrorDialog: AlertDialog? = null
+    private val SCRIPT_VERIFICATION_TIMEOUT = 15000L  // 15 seconds
+
     // Dynamic debouncing for fast scrolling - separate tracking for systems and games
     private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var imageLoadRunnable: Runnable? = null
@@ -145,6 +153,7 @@ class MainActivity : AppCompatActivity() {
             val logoTogglesChanged = result.data?.getBooleanExtra("LOGO_TOGGLES_CHANGED", false) ?: false
             val gameLaunchBehaviorChanged = result.data?.getBooleanExtra("GAME_LAUNCH_BEHAVIOR_CHANGED", false) ?: false
             val screensaverBehaviorChanged = result.data?.getBooleanExtra("SCREENSAVER_BEHAVIOR_CHANGED", false) ?: false
+            val startVerification = result.data?.getBooleanExtra("START_SCRIPT_VERIFICATION", false) ?: false
 
             // Close drawer if requested (before recreate to avoid visual glitch)
             if (closeDrawer && ::bottomSheetBehavior.isInitialized) {
@@ -179,6 +188,14 @@ class MainActivity : AppCompatActivity() {
                 skipNextReload = true
             }
             // Note: Video audio changes are handled automatically in onResume
+
+            // Start script verification if requested
+            if (startVerification) {
+                // Delay slightly to let UI settle
+                Handler(Looper.getMainLooper()).postDelayed({
+                    startScriptVerification()
+                }, 500)
+            }
         }
     }
 
@@ -1040,6 +1057,17 @@ class MainActivity : AppCompatActivity() {
                     runOnUiThread {
                         // Small delay to ensure file is fully written
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            // Check if we're waiting for script verification OR error dialog is showing
+                            if (isWaitingForScriptVerification) {
+                                stopScriptVerification(true)  // Success!
+                            } else if (currentErrorDialog != null) {
+                                // User was looking at error dialog when they browsed in ES-DE
+                                // Dismiss error dialog and show success
+                                currentErrorDialog?.dismiss()
+                                currentErrorDialog = null
+                                onScriptVerificationSuccess()
+                            }
+
                             when (path) {
                                 "esde_system_name.txt" -> {
                                     // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
@@ -1169,8 +1197,159 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    /**
+     * Start waiting for script activity after configuration
+     * Shows a "waiting" dialog and watches for first log update
+     */
+    fun startScriptVerification() {
+        isWaitingForScriptVerification = true
+
+        // Show "waiting" dialog
+        showScriptVerificationDialog()
+
+        // Set timeout
+        if (scriptVerificationHandler == null) {
+            scriptVerificationHandler = Handler(Looper.getMainLooper())
+        }
+
+        scriptVerificationRunnable = Runnable {
+            if (isWaitingForScriptVerification) {
+                // Timeout - scripts not working
+                onScriptVerificationFailed()
+            }
+        }
+
+        scriptVerificationHandler?.postDelayed(scriptVerificationRunnable!!, SCRIPT_VERIFICATION_TIMEOUT)
+        android.util.Log.d("MainActivity", "Started script verification (15s timeout)")
+    }
+
+    /**
+     * Stop verification (call when first log update detected)
+     */
+    private fun stopScriptVerification(success: Boolean) {
+        scriptVerificationRunnable?.let {
+            scriptVerificationHandler?.removeCallbacks(it)
+        }
+        isWaitingForScriptVerification = false
+
+        // Dismiss waiting dialog if showing
+        currentVerificationDialog?.dismiss()
+        currentVerificationDialog = null
+
+        // Dismiss error dialog if showing (user browsed while error was visible)
+        currentErrorDialog?.dismiss()
+        currentErrorDialog = null
+
+        if (success) {
+            onScriptVerificationSuccess()
+        }
+    }
+
+    /**
+     * Show dialog while waiting for script activity
+     */
+    private fun showScriptVerificationDialog() {
+        currentVerificationDialog = AlertDialog.Builder(this)
+            .setTitle("🔍 Checking Connection...")
+            .setMessage("Waiting for ES-DE to send data...\n\n" +
+                    "Please browse to a game or system in ES-DE now.\n\n" +
+                    "This verifies that ES-DE scripts are working correctly.")
+            .setCancelable(false)
+            .setNegativeButton("Skip Check") { dialog, _ ->
+                stopScriptVerification(false)
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /**
+     * Called when first log update is detected during verification
+     */
+    private fun onScriptVerificationSuccess() {
+        runOnUiThread {
+            Toast.makeText(
+                this,
+                "✓ Connection successful! ES-DE is communicating properly.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    /**
+     * Called when verification times out (no log updates)
+     */
+    private fun onScriptVerificationFailed() {
+        runOnUiThread {
+            currentVerificationDialog?.dismiss()
+
+            // Create custom title view with X button
+            val titleContainer = android.widget.LinearLayout(this)
+            titleContainer.orientation = android.widget.LinearLayout.HORIZONTAL
+            titleContainer.setPadding(60, 40, 20, 20)
+            titleContainer.gravity = android.view.Gravity.CENTER_VERTICAL
+
+            val titleText = android.widget.TextView(this)
+            titleText.text = "⚠️ No Data Received"
+            titleText.textSize = 20f
+            titleText.setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+            titleText.layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+
+            val closeButton = android.widget.ImageButton(this)
+            closeButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            closeButton.background = null
+            closeButton.setPadding(20, 20, 20, 20)
+
+            titleContainer.addView(titleText)
+            titleContainer.addView(closeButton)
+
+            val dialog = AlertDialog.Builder(this)
+                .setCustomTitle(titleContainer)
+                .setMessage("ES-DE Companion hasn't received any data from ES-DE.\n\n" +
+                        "Common issues:\n\n" +
+                        "1. Scripts folder path is incorrect\n" +
+                        "   → Scripts must be in ES-DE's scripts folder\n\n" +
+                        "2. Custom Event Scripts not enabled in ES-DE\n" +
+                        "   → Main Menu > Other Settings > Toggle both:\n" +
+                        "     • Custom Event Scripts: ON\n" +
+                        "     • Browsing Custom Events: ON\n\n" +
+                        "3. ES-DE not running or not browsing games\n" +
+                        "   → Make sure you're scrolling through games\n\n" +
+                        "What would you like to do?")
+                .setNegativeButton("Restart Setup") { _, _ ->
+                    currentErrorDialog = null  // Clear reference
+                    // Launch settings with auto-start wizard flag
+                    val intent = Intent(this, SettingsActivity::class.java)
+                    intent.putExtra("AUTO_START_WIZARD", true)
+                    settingsLauncher.launch(intent)
+                }
+                .setPositiveButton("Try Again") { _, _ ->
+                    currentErrorDialog = null  // Clear reference
+                    startScriptVerification()
+                }
+                .setCancelable(true)
+                .setIcon(android.R.drawable.ic_dialog_alert)
+                .create()
+
+            closeButton.setOnClickListener {
+                dialog.dismiss()
+                currentErrorDialog = null  // Clear reference when manually closed
+            }
+
+            currentErrorDialog = dialog  // Store reference to error dialog
+            dialog.show()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        // Stop script verification
+        scriptVerificationRunnable?.let { scriptVerificationHandler?.removeCallbacks(it) }
+        currentVerificationDialog?.dismiss()
+        currentErrorDialog?.dismiss()
         fileObserver?.stopWatching()
         unregisterReceiver(appChangeReceiver)
         // Cancel any pending image loads

@@ -157,6 +157,10 @@ class SettingsActivity : AppCompatActivity() {
                         // Path looks good, continue wizard if active
                         if (isInSetupWizard) {
                             continueSetupWizard()
+                        } else {
+                            // Not in wizard - user manually changed path
+                            // Offer to verify
+                            showScriptsPathChangedVerificationPrompt()
                         }
                     }
                 }
@@ -1568,6 +1572,10 @@ echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_screensavergameselect_system.tx
             // Continue wizard if active
             if (isInSetupWizard) {
                 continueSetupWizard()
+            } else {
+                // Not in wizard - user manually created scripts
+                // Offer to verify
+                showScriptsCreatedVerificationPrompt()
             }
 
         } catch (e: Exception) {
@@ -1650,7 +1658,7 @@ echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_screensavergameselect_system.tx
                     "4. Select downloaded media folder\n" +
                     "5. Enable scripts in ES-DE\n\n" +
                     "Ready to begin?")
-            .setPositiveButton("Start Setup") { _, _ ->
+            .setPositiveButton("Yeah man, I wanna do it") { _, _ ->
                 continueSetupWizard()
             }
             .setCancelable(false)
@@ -1797,7 +1805,7 @@ echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_screensavergameselect_system.tx
                 prefs.edit().putBoolean("setup_completed", true).apply()
 
                 // Show comprehensive tutorial dialog
-                showPostSetupTutorial()
+                showPostSetupTutorial(triggerVerification = true)
             }
         }
     }
@@ -2027,7 +2035,7 @@ echo -n "${'$'}3"        		> "${'$'}LOG_DIR/esde_screensavergameselect_system.tx
         }
     }
 
-    private fun showPostSetupTutorial() {
+    private fun showPostSetupTutorial(triggerVerification: Boolean = false) {
         // Create custom title view with emoji
         val titleContainer = android.widget.LinearLayout(this)
         titleContainer.orientation = android.widget.LinearLayout.HORIZONTAL
@@ -2093,10 +2101,59 @@ Enjoy your enhanced retro gaming experience! ✨
             .setCustomTitle(titleContainer)
             .setView(scrollView)
             .setPositiveButton("Got it!") { _, _ ->
-                // Close settings and return to MainActivity
+                if (triggerVerification) {
+                    // Signal MainActivity to start verification
+                    val intent = Intent()
+                    intent.putExtra("START_SCRIPT_VERIFICATION", true)
+                    setResult(Activity.RESULT_OK, intent)
+                }
                 finish()
             }
             .setCancelable(false)
+            .show()
+    }
+
+    /**
+     * Show prompt to verify scripts after path change
+     */
+    private fun showScriptsPathChangedVerificationPrompt() {
+        AlertDialog.Builder(this)
+            .setTitle("Scripts Path Updated")
+            .setMessage("Would you like to verify that ES-DE can execute the scripts in this location?\n\n" +
+                    "This will check if ES-DE is sending game/system information to the app.")
+            .setPositiveButton("Verify Now") { _, _ ->
+                // Return to MainActivity with verification flag
+                val intent = Intent()
+                intent.putExtra("START_SCRIPT_VERIFICATION", true)
+                setResult(Activity.RESULT_OK, intent)
+                finish()
+            }
+            .setNegativeButton("Skip") { _, _ ->
+                // Just close
+                finish()
+            }
+            .show()
+    }
+
+    /**
+     * Show prompt to verify scripts after creation
+     */
+    private fun showScriptsCreatedVerificationPrompt() {
+        AlertDialog.Builder(this)
+            .setTitle("Scripts Created Successfully")
+            .setMessage("Scripts have been created!\n\n" +
+                    "Would you like to verify that ES-DE can execute them?\n\n" +
+                    "This will check if ES-DE is sending game/system information to the app.")
+            .setPositiveButton("Verify Now") { _, _ ->
+                // Return to MainActivity with verification flag
+                val intent = Intent()
+                intent.putExtra("START_SCRIPT_VERIFICATION", true)
+                setResult(Activity.RESULT_OK, intent)
+                finish()
+            }
+            .setNegativeButton("Later") { _, _ ->
+                finish()
+            }
             .show()
     }
 
