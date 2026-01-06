@@ -69,6 +69,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var appLaunchPrefs: AppLaunchPreferences
 
+    private lateinit var blackOverlay: View
+    private var blackOverlayGestureDetector: GestureDetectorCompat? = null
+    private var isBlackOverlayShown = false
+
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<View>
     private lateinit var gestureDetector: GestureDetectorCompat
 
@@ -218,6 +222,12 @@ class MainActivity : AppCompatActivity() {
         settingsButton = findViewById(R.id.settingsButton)
         androidSettingsButton = findViewById(R.id.androidSettingsButton)
         videoView = findViewById(R.id.videoView)
+        blackOverlay = findViewById(R.id.blackOverlay)
+
+        // Set initial position off-screen (above the top)
+        val displayHeight = resources.displayMetrics.heightPixels.toFloat()
+        blackOverlay.translationY = -displayHeight
+        setupBlackOverlayGesture()
 
         // Log display information at startup
         logDisplayInfo()
@@ -825,8 +835,95 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    /**
+     * Setup gesture detector for black overlay swipe functionality
+     * Only active during game mode
+     */
+    private fun setupBlackOverlayGesture() {
+        blackOverlayGestureDetector = GestureDetectorCompat(this, object : GestureDetector.SimpleOnGestureListener() {
+            private val SWIPE_THRESHOLD = 100
+            private val SWIPE_VELOCITY_THRESHOLD = 100
+
+            override fun onDown(e: MotionEvent): Boolean {
+                // Only handle gestures during game mode
+                return isGamePlaying
+            }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (e1 == null || !isGamePlaying) return false
+
+                val diffY = e2.y - e1.y
+                val diffX = e2.x - e1.x
+
+                // Check if it's more vertical than horizontal
+                if (Math.abs(diffY) > Math.abs(diffX)) {
+                    if (Math.abs(diffY) > SWIPE_THRESHOLD && Math.abs(velocityY) > SWIPE_VELOCITY_THRESHOLD) {
+                        if (!isBlackOverlayShown && diffY > 0 && e1.y < 200) {
+                            // Swipe down from top edge - show overlay
+                            showBlackOverlay()
+                            return true
+                        } else if (isBlackOverlayShown && diffY < 0) {
+                            // Swipe up - hide overlay
+                            hideBlackOverlay()
+                            return true
+                        }
+                    }
+                }
+                return false
+            }
+        })
+    }
+
+    /**
+     * Show the black overlay with animation
+     */
+    private fun showBlackOverlay() {
+        android.util.Log.d("MainActivity", "Showing black overlay")
+        isBlackOverlayShown = true
+
+        blackOverlay.visibility = View.VISIBLE
+        blackOverlay.animate()
+            .translationY(0f)
+            .setDuration(300)
+            .setInterpolator(android.view.animation.DecelerateInterpolator())
+            .start()
+    }
+
+    /**
+     * Hide the black overlay with animation
+     */
+    private fun hideBlackOverlay() {
+        android.util.Log.d("MainActivity", "Hiding black overlay")
+        isBlackOverlayShown = false
+
+        val displayHeight = resources.displayMetrics.heightPixels.toFloat()
+        blackOverlay.animate()
+            .translationY(-displayHeight)
+            .setDuration(300)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction {
+                blackOverlay.visibility = View.GONE
+            }
+            .start()
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Only intercept gestures when the drawer is hidden
+        // Handle black overlay gestures first (only during game mode)
+        if (isGamePlaying) {
+            blackOverlayGestureDetector?.onTouchEvent(ev)
+
+            // If overlay is shown, consume all touch events except swipe up
+            if (isBlackOverlayShown) {
+                return true
+            }
+        }
+
+        // Only intercept drawer gestures when the drawer is hidden
         val currentState = bottomSheetBehavior.state
         if (ev.action == MotionEvent.ACTION_DOWN) {
             android.util.Log.d("MainActivity", "Touch down, drawer state: $currentState")
@@ -2410,6 +2507,11 @@ class MainActivity : AppCompatActivity() {
      * Handle game end event - return to normal browsing display
      */
     private fun handleGameEnd() {
+        // Hide black overlay if it's showing
+        if (isBlackOverlayShown) {
+            hideBlackOverlay()
+        }
+
         // Update browsing state to game view since we're returning from a game
         // This ensures we don't show system images when game ends
         isSystemScrollActive = false
