@@ -1,5 +1,8 @@
 # 🔄 Changelog
 
+## [0.2.9] - 2026-01-07
+- Fix for Game Launch Display setting not sticking after game launch
+- 
 ## [0.2.8] - 2026-01-07
 - Fix for media not displaying for games in folders, updating script detection to assist with migration 
 - Update image loading to handle cache invalidation 
