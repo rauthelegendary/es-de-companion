@@ -21,6 +21,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.google.android.material.chip.ChipGroup
+import java.io.File
 
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -37,6 +38,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var systemLogosPathText: TextView
     private lateinit var selectSystemPathButton: Button
     private lateinit var selectSystemLogosPathButton: Button
+    private lateinit var customBackgroundPathText: TextView
+    private lateinit var customBackgroundStatusText: TextView
+    private lateinit var customBackgroundStatusDescription: TextView
+    private lateinit var selectCustomBackgroundButton: Button
+    private lateinit var clearCustomBackgroundButton: Button
     private lateinit var scriptsPathText: TextView
     private lateinit var selectScriptsPathButton: Button
     private lateinit var createScriptsButton: Button
@@ -83,11 +89,12 @@ class SettingsActivity : AppCompatActivity() {
     private var logoTogglesChanged: Boolean = false
     private var gameLaunchBehaviorChanged: Boolean = false
     private var screensaverBehaviorChanged: Boolean = false
+    private var customBackgroundChanged: Boolean = false
 
     private var pathSelectionType = PathSelection.MEDIA
 
     enum class PathSelection {
-        MEDIA, SYSTEM, SCRIPTS, SYSTEM_LOGOS
+        MEDIA, SYSTEM, SCRIPTS, SYSTEM_LOGOS, CUSTOM_BACKGROUND
     }
 
     private var isInSetupWizard = false
@@ -170,6 +177,52 @@ class SettingsActivity : AppCompatActivity() {
                     prefs.edit().putString("system_logos_path", path).apply()
                     systemLogosPathText.text = path
                     Toast.makeText(this, "System logos path updated", Toast.LENGTH_SHORT).show()
+                }
+                PathSelection.CUSTOM_BACKGROUND -> {
+                    // This shouldn't be called since we use imagePicker instead
+                    // But need to handle it for exhaustive when
+                    android.util.Log.w("SettingsActivity", "directoryPicker called for CUSTOM_BACKGROUND - should use imagePicker instead")
+                }
+            }
+        }
+    }
+
+    private val customBackgroundPicker = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { uri ->
+                try {
+                    // Get the actual file path using the existing helper
+                    val path = getPathFromUri(uri)
+                    android.util.Log.d("SettingsActivity", "Selected file path: $path")
+
+                    // Verify the file exists
+                    val file = File(path)
+                    if (file.exists() && file.canRead()) {
+                        prefs.edit().putString(CUSTOM_BACKGROUND_KEY, path).apply()
+                        updateCustomBackgroundDisplay()
+                        customBackgroundChanged = true
+
+                        Toast.makeText(
+                            this,
+                            "Custom background set successfully",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "Selected file is not accessible",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("SettingsActivity", "Error setting custom background", e)
+                    Toast.makeText(
+                        this,
+                        "Error accessing file: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }
@@ -340,6 +393,12 @@ class SettingsActivity : AppCompatActivity() {
             blackOverlayChipGroup = findViewById(R.id.blackOverlayChipGroup)
             android.util.Log.d("SettingsActivity", "Video settings found")
 
+            customBackgroundPathText = findViewById(R.id.customBackgroundPathText)
+            customBackgroundStatusText = findViewById(R.id.customBackgroundStatusText)
+            customBackgroundStatusDescription = findViewById(R.id.customBackgroundStatusDescription)
+            selectCustomBackgroundButton = findViewById(R.id.selectCustomBackgroundButton)
+            clearCustomBackgroundButton = findViewById(R.id.clearCustomBackgroundButton)
+
             // Initialize version text
             versionText = findViewById(R.id.versionText)
             try {
@@ -374,6 +433,25 @@ class SettingsActivity : AppCompatActivity() {
                 checkAndRequestPermissions()
             }
 
+            selectCustomBackgroundButton.setOnClickListener {
+                pathSelectionType = PathSelection.CUSTOM_BACKGROUND
+                // Create intent to pick image file
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "image/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/jpeg", "image/jpg", "image/png", "image/webp"))
+                }
+                customBackgroundPicker.launch(intent)
+            }
+
+            clearCustomBackgroundButton.setOnClickListener {
+                // Clear custom background
+                prefs.edit().remove(CUSTOM_BACKGROUND_KEY).apply()
+                updateCustomBackgroundDisplay()
+                customBackgroundChanged = true
+                Toast.makeText(this, "Custom background cleared", Toast.LENGTH_SHORT).show()
+            }
+
             setupColumnCountSlider()
             android.util.Log.d("SettingsActivity", "Column count setup")
             setupDimmingSlider()
@@ -401,6 +479,7 @@ class SettingsActivity : AppCompatActivity() {
             updateMediaPathDisplay()
             updateSystemPathDisplay()
             updateScriptsPathDisplay()
+            updateCustomBackgroundDisplay()
 
             // Check if we should auto-start wizard from MainActivity
             val autoStartWizard = intent.getBooleanExtra("AUTO_START_WIZARD", false)
@@ -466,6 +545,10 @@ class SettingsActivity : AppCompatActivity() {
                     // Signal if screensaver behavior changed
                     if (screensaverBehaviorChanged) {
                         intent.putExtra("SCREENSAVER_BEHAVIOR_CHANGED", true)
+                    }
+                    // Signal if custom background changed
+                    if (customBackgroundChanged) {
+                        intent.putExtra("CUSTOM_BACKGROUND_CHANGED", true)
                     }
                     // Always signal to close drawer when returning from settings
                     intent.putExtra("CLOSE_DRAWER", true)
@@ -1176,6 +1259,48 @@ class SettingsActivity : AppCompatActivity() {
                     scriptsStatusDescription.text = "Scripts missing or invalid"
                 }
             }
+        }
+    }
+
+    private fun updateCustomBackgroundDisplay() {
+        val customBackgroundPath = prefs.getString(CUSTOM_BACKGROUND_KEY, null)
+
+        if (customBackgroundPath == null) {
+            // No custom background set
+            customBackgroundPathText.text = "Not set (using built-in default)"
+            customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#666666"))
+            customBackgroundStatusText.text = "●"
+            customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#666666"))
+            customBackgroundStatusDescription.text = "Using built-in default"
+            return
+        }
+
+        // Custom background is set - verify it exists
+        try {
+            val file = File(customBackgroundPath)
+
+            if (file.exists() && file.canRead()) {
+                // File exists and accessible - green indicator
+                customBackgroundPathText.text = file.name
+                customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                customBackgroundStatusText.text = "●"
+                customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                customBackgroundStatusDescription.text = "✓ Custom background set"
+            } else {
+                // File not accessible - red indicator
+                customBackgroundPathText.text = file.name
+                customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+                customBackgroundStatusText.text = "●"
+                customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+                customBackgroundStatusDescription.text = "⚠ File not accessible"
+            }
+        } catch (e: Exception) {
+            // Error checking file - red indicator
+            customBackgroundPathText.text = customBackgroundPath
+            customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+            customBackgroundStatusText.text = "●"
+            customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+            customBackgroundStatusDescription.text = "⚠ Error: ${e.message}"
         }
     }
 
@@ -2383,5 +2508,6 @@ Enjoy your enhanced retro gaming experience! ✨
         const val GAME_LAUNCH_BEHAVIOR_KEY = "game_launch_behavior"
         const val SCREENSAVER_BEHAVIOR_KEY = "screensaver_behavior"
         const val BLACK_OVERLAY_ENABLED_KEY = "black_overlay_enabled"
+        const val CUSTOM_BACKGROUND_KEY = "custom_background_uri"  // ADD THIS LINE
     }
 }

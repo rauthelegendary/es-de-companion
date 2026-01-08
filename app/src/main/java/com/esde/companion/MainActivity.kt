@@ -164,6 +164,7 @@ class MainActivity : AppCompatActivity() {
             val gameLaunchBehaviorChanged = result.data?.getBooleanExtra("GAME_LAUNCH_BEHAVIOR_CHANGED", false) ?: false
             val screensaverBehaviorChanged = result.data?.getBooleanExtra("SCREENSAVER_BEHAVIOR_CHANGED", false) ?: false
             val startVerification = result.data?.getBooleanExtra("START_SCRIPT_VERIFICATION", false) ?: false
+            val customBackgroundChanged = result.data?.getBooleanExtra("CUSTOM_BACKGROUND_CHANGED", false) ?: false
 
             // Close drawer if requested (before recreate to avoid visual glitch)
             if (closeDrawer && ::bottomSheetBehavior.isInitialized) {
@@ -186,6 +187,13 @@ class MainActivity : AppCompatActivity() {
                 handleScreensaverStart()
                 // Skip reload in onResume to prevent override
                 skipNextReload = true
+            } else if (customBackgroundChanged) {
+                // Custom background changed - reload to apply changes
+                if (isSystemScrollActive) {
+                    loadSystemImage()
+                } else {
+                    loadGameInfo()
+                }
             } else if (videoSettingsChanged || logoSizeChanged || mediaPathChanged || imagePreferenceChanged || logoTogglesChanged) {
                 // Settings that affect displayed content changed - reload to apply changes
                 if (isSystemScrollActive) {
@@ -888,17 +896,57 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         return path
     }
     private fun loadFallbackBackground() {
-        // Try to load from assets first (since you added default_background.webp)
+        android.util.Log.d("MainActivity", "═══ loadFallbackBackground CALLED ═══")
+
+        // Check if user has set a custom background
+        val customBackgroundPath = prefs.getString("custom_background_uri", null)
+        android.util.Log.d("MainActivity", "Custom background path: $customBackgroundPath")
+
+        if (customBackgroundPath != null) {
+            try {
+                val file = File(customBackgroundPath)
+                android.util.Log.d("MainActivity", "File exists: ${file.exists()}, canRead: ${file.canRead()}")
+
+                if (file.exists() && file.canRead()) {
+                    // Use loadImageWithAnimation for consistent behavior
+                    loadImageWithAnimation(file, gameImageView) {
+                        android.util.Log.d("MainActivity", "✓ Loaded custom background successfully")
+                    }
+                    android.util.Log.d("MainActivity", "Loading custom background from: $customBackgroundPath")
+                    return
+                } else {
+                    android.util.Log.w("MainActivity", "Custom background file not accessible: $customBackgroundPath")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Error loading custom background, using built-in default", e)
+            }
+        }
+
+        // No custom background or loading failed - use built-in default
+        android.util.Log.d("MainActivity", "Loading built-in fallback background")
+        loadBuiltInFallbackBackground()
+    }
+
+    private fun loadBuiltInFallbackBackground() {
         try {
             val assetPath = "fallback/default_background.webp"
-            Glide.with(this)
-                .load(android.net.Uri.parse("file:///android_asset/$assetPath"))
-                .diskCacheStrategy(DiskCacheStrategy.ALL)
-                .into(gameImageView)
-            android.util.Log.d("MainActivity", "Loaded fallback image from assets")
+            // Copy asset to cache for loadImageWithAnimation
+            val fallbackFile = File(cacheDir, "default_background.webp")
+            if (!fallbackFile.exists()) {
+                assets.open(assetPath).use { input ->
+                    fallbackFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            // Use loadImageWithAnimation for consistent behavior
+            loadImageWithAnimation(fallbackFile, gameImageView) {
+                android.util.Log.d("MainActivity", "Loaded built-in fallback image from assets")
+            }
         } catch (e: Exception) {
-            android.util.Log.w("MainActivity", "Failed to load fallback image, using solid color", e)
-            // Final fallback: solid color
+            android.util.Log.w("MainActivity", "Failed to load built-in fallback image, using solid color", e)
+            // Final fallback: solid color (no animation possible)
             gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
             gameImageView.setImageDrawable(null)
         }
@@ -2901,50 +2949,61 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Handle screensaver start event
      */
     private fun handleScreensaverStart() {
+        android.util.Log.d("MainActivity", "═══ handleScreensaverStart CALLED ═══")
+
         // Stop any videos
         releasePlayer()
 
-        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+        android.util.Log.d("MainActivity", "Screensaver behavior setting: $screensaverBehavior")
 
         when (screensaverBehavior) {
             "game_image" -> {
-                // Load screensaver game if available, otherwise use current browsing state
+                android.util.Log.d("MainActivity", "Screensaver: Loading GAME IMAGE mode")
+                // Load screensaver game if available
                 if (screensaverGameFilename != null && screensaverSystemName != null) {
-                    // Hide old content immediately - go black
-                    gameImageView.setImageDrawable(null)
-                    gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
-                    gameImageView.visibility = View.VISIBLE
-                    marqueeImageView.visibility = View.GONE
-                    videoView.visibility = View.GONE
-
                     // Load the screensaver game's artwork
                     val gameName = sanitizeGameFilename(screensaverGameFilename!!).substringBeforeLast('.')
                     val gameImage = findGameImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
-
                     if (gameImage != null) {
-                        loadImageWithAnimation(gameImage, gameImageView) {
-                            // Image loaded - now load marquee if enabled
-                            if (prefs.getBoolean("game_logo_enabled", true)) {
-                                val marqueeImage = findMarqueeImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
-                                if (marqueeImage != null) {
-                                    loadImageWithAnimation(marqueeImage, marqueeImageView)
-                                    marqueeImageView.visibility = View.VISIBLE
-                                }
-                            }
+                        Glide.with(this)
+                            .load(gameImage)
+                            .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(gameImage)))
+                            .into(gameImageView)
+                    } else {
+                        gameImageView.setImageDrawable(null)
+                        gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
+                    }
+
+                    // Load the screensaver game's marquee
+                    if (prefs.getBoolean("game_logo_enabled", true)) {
+                        val marqueeImage = findMarqueeImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
+                        if (marqueeImage != null) {
+                            Glide.with(this)
+                                .load(marqueeImage)
+                                .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(marqueeImage)))
+                                .into(marqueeImageView)
+                            marqueeImageView.visibility = View.VISIBLE
+                        } else {
+                            marqueeImageView.visibility = View.GONE
                         }
                     } else {
-                        // No game image - load fallback
-                        loadFallbackBackground()
                         marqueeImageView.visibility = View.GONE
                     }
                 } else {
-                    // No screensaver game data yet (dim/black mode) - keep current browsing display
-                    // Don't reload anything - screensaver game select events will update if needed
-                    gameImageView.visibility = View.VISIBLE
-                    videoView.visibility = View.GONE
+                    // No screensaver game data yet (dim/black mode or just started)
+                    // Show black screen - will update if game select events fire
+                    gameImageView.setImageDrawable(null)
+                    gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
+                    marqueeImageView.setImageDrawable(null)
+                    marqueeImageView.visibility = View.GONE
                 }
+
+                gameImageView.visibility = View.VISIBLE
+                videoView.visibility = View.GONE
             }
             "black_screen" -> {
+                android.util.Log.d("MainActivity", "Screensaver: Loading BLACK SCREEN mode")
                 // Show plain black screen - no logos or images
                 gameImageView.setImageDrawable(null)
                 gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
@@ -2958,72 +3017,61 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 videoView.visibility = View.GONE
             }
             else -> { // "default_image"
-                // Hide old content immediately - go black
+                android.util.Log.d("MainActivity", "Screensaver: Loading DEFAULT IMAGE mode")
+
+                // Hide old content immediately - go black while we load
                 gameImageView.setImageDrawable(null)
                 gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
                 gameImageView.visibility = View.VISIBLE
                 marqueeImageView.visibility = View.GONE
                 videoView.visibility = View.GONE
 
-                // Determine what marquee to load
-                var marqueeToLoad: File? = null
-                var marqueeIsSystemLogo = false
+                // Determine which marquee to show
+                var marqueeFile: File? = null
                 var systemLogoDrawable: Drawable? = null
+                val logoEnabled = prefs.getBoolean("game_logo_enabled", true)
 
-                // Check if we have screensaver game data
-                val hasScreensaverGame = screensaverGameFilename != null && screensaverSystemName != null
-
-                if (hasScreensaverGame) {
-                    // Screensaver game marquee
-                    val gameName = sanitizeGameFilename(screensaverGameFilename!!).substringBeforeLast('.')
-                    marqueeToLoad = findMarqueeImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
-                } else if (isSystemScrollActive) {
-                    // System logo (from assets - synchronous)
-                    val systemName = currentSystemName
-                    if (systemName != null && prefs.getBoolean("system_logo_enabled", true)) {
-                        systemLogoDrawable = loadSystemLogoFromAssets(systemName)
-                        marqueeIsSystemLogo = true
-                    }
-                } else {
-                    // Browsing game marquee
-                    val filename = currentGameFilename
-                    val systemName = currentSystemName
-                    if (filename != null && systemName != null) {
-                        val gameName = sanitizeGameFilename(filename).substringBeforeLast('.')
-                        marqueeToLoad = findMarqueeImage(systemName, gameName, filename)
+                if (logoEnabled) {
+                    // First try to show screensaver game marquee (slideshow/video mode)
+                    if (screensaverGameFilename != null && screensaverSystemName != null) {
+                        val gameName = sanitizeGameFilename(screensaverGameFilename!!).substringBeforeLast('.')
+                        marqueeFile = findMarqueeImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
+                    } else {
+                        // No screensaver game data (dim/black mode) - show browsing state marquee
+                        if (isSystemScrollActive) {
+                            // System logo
+                            val systemName = currentSystemName
+                            if (systemName != null && prefs.getBoolean("system_logo_enabled", true)) {
+                                systemLogoDrawable = loadSystemLogoFromAssets(systemName)
+                            }
+                        } else {
+                            // Game marquee from browsing state
+                            val filename = currentGameFilename
+                            val systemName = currentSystemName
+                            if (filename != null && systemName != null) {
+                                val gameName = sanitizeGameFilename(filename).substringBeforeLast('.')
+                                marqueeFile = findMarqueeImage(systemName, gameName, filename)
+                            }
+                        }
                     }
                 }
 
-                // Now load the marquee first, then background
-                if (prefs.getBoolean("game_logo_enabled", true) && (marqueeToLoad != null || systemLogoDrawable != null)) {
-                    if (marqueeIsSystemLogo && systemLogoDrawable != null) {
-                        // System logo is synchronous - set it then load background
+                // Now load background and marquee together
+                if (logoEnabled && (marqueeFile != null || systemLogoDrawable != null)) {
+                    if (systemLogoDrawable != null) {
+                        // System logo is synchronous - set it then fade in background
                         updateMarqueeSize()
                         marqueeImageView.setImageDrawable(systemLogoDrawable)
                         marqueeImageView.visibility = View.VISIBLE
                         marqueeShowingText = false
 
-                        // Load background with animation
-                        try {
-                            val assetPath = "fallback/default_background.webp"
-                            val fallbackFile = File(cacheDir, "fallback_bg.webp")
-                            if (!fallbackFile.exists()) {
-                                assets.open(assetPath).use { input ->
-                                    fallbackFile.outputStream().use { output ->
-                                        input.copyTo(output)
-                                    }
-                                }
-                            }
-                            loadImageWithAnimation(fallbackFile, gameImageView)
-                        } catch (e: Exception) {
-                            android.util.Log.w("MainActivity", "Failed to load fallback, using solid color", e)
-                            gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
-                        }
-                    } else if (marqueeToLoad != null) {
-                        // Game marquee - load it first with listener
+                        // Fade in background
+                        loadFallbackBackground()
+                    } else if (marqueeFile != null) {
+                        // Preload marquee first, then fade in both together
                         Glide.with(this)
-                            .load(marqueeToLoad)
-                            .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(marqueeToLoad)))
+                            .load(marqueeFile)
+                            .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(marqueeFile)))
                             .listener(object : RequestListener<Drawable> {
                                 override fun onLoadFailed(
                                     e: GlideException?,
@@ -3033,22 +3081,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                                 ): Boolean {
                                     android.util.Log.d("MainActivity", "Marquee load failed - showing background only")
                                     // Marquee failed - just load background
-                                    try {
-                                        val assetPath = "fallback/default_background.webp"
-                                        val fallbackFile = File(cacheDir, "fallback_bg.webp")
-                                        if (!fallbackFile.exists()) {
-                                            assets.open(assetPath).use { input ->
-                                                fallbackFile.outputStream().use { output ->
-                                                    input.copyTo(output)
-                                                }
-                                            }
-                                        }
-                                        loadImageWithAnimation(fallbackFile, gameImageView)
-                                    } catch (ex: Exception) {
-                                        android.util.Log.w("MainActivity", "Failed to load fallback", ex)
-                                        gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
-                                    }
-                                    marqueeImageView.visibility = View.GONE
+                                    loadFallbackBackground()
                                     return false
                                 }
 
@@ -3059,67 +3092,19 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                                     dataSource: DataSource,
                                     isFirstResource: Boolean
                                 ): Boolean {
-                                    android.util.Log.d("MainActivity", "Marquee loaded - showing background with animation")
-                                    // Marquee ready - show it and load background
+                                    android.util.Log.d("MainActivity", "Marquee preloaded - fading in background and marquee together")
+                                    // Marquee is ready - now fade in background
+                                    loadFallbackBackground()
+                                    // Show marquee at the same time
                                     marqueeImageView.visibility = View.VISIBLE
-
-                                    // Load background with animation
-                                    try {
-                                        val assetPath = "fallback/default_background.webp"
-                                        val fallbackFile = File(cacheDir, "fallback_bg.webp")
-                                        if (!fallbackFile.exists()) {
-                                            assets.open(assetPath).use { input ->
-                                                fallbackFile.outputStream().use { output ->
-                                                    input.copyTo(output)
-                                                }
-                                            }
-                                        }
-                                        loadImageWithAnimation(fallbackFile, gameImageView)
-                                    } catch (ex: Exception) {
-                                        android.util.Log.w("MainActivity", "Failed to load fallback", ex)
-                                        gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
-                                    }
                                     return false
                                 }
                             })
                             .into(marqueeImageView)
-                    } else {
-                        // No marquee found - just load background
-                        try {
-                            val assetPath = "fallback/default_background.webp"
-                            val fallbackFile = File(cacheDir, "fallback_bg.webp")
-                            if (!fallbackFile.exists()) {
-                                assets.open(assetPath).use { input ->
-                                    fallbackFile.outputStream().use { output ->
-                                        input.copyTo(output)
-                                    }
-                                }
-                            }
-                            loadImageWithAnimation(fallbackFile, gameImageView)
-                        } catch (e: Exception) {
-                            android.util.Log.w("MainActivity", "Failed to load fallback", e)
-                            gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
-                        }
-                        marqueeImageView.visibility = View.GONE
                     }
                 } else {
-                    // Logo disabled or not found - just load background
-                    try {
-                        val assetPath = "fallback/default_background.webp"
-                        val fallbackFile = File(cacheDir, "fallback_bg.webp")
-                        if (!fallbackFile.exists()) {
-                            assets.open(assetPath).use { input ->
-                                fallbackFile.outputStream().use { output ->
-                                    input.copyTo(output)
-                                }
-                            }
-                        }
-                        loadImageWithAnimation(fallbackFile, gameImageView)
-                    } catch (e: Exception) {
-                        android.util.Log.w("MainActivity", "Failed to load fallback", e)
-                        gameImageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
-                    }
-                    marqueeImageView.visibility = View.GONE
+                    // No logo or logo disabled - just load background
+                    loadFallbackBackground()
                 }
             }
         }
