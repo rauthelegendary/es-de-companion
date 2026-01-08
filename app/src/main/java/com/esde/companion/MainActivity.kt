@@ -765,7 +765,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         appRecyclerView.layoutManager = GridLayoutManager(this, columnCount)
 
         // Update marquee size based on logo size setting
-        updateMarqueeSize()
+        updateMarqueeSize(isSystemLogo = isSystemScrollActive)
 
         // If marquee is showing text drawable, restore WRAP_CONTENT
         if (marqueeShowingText) {
@@ -798,8 +798,17 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         }
     }
 
-    private fun updateMarqueeSize() {
-        val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
+    private fun updateMarqueeSize(isSystemLogo: Boolean = false) {
+        // Determine which size setting to use based on context
+        val sizeKey = if (isSystemLogo) "system_logo_size" else "game_logo_size"
+        val logoSize = prefs.getString(sizeKey, "medium") ?: "medium"
+
+        // Don't resize if logo is set to "off"
+        if (logoSize == "off") {
+            marqueeImageView.visibility = View.GONE
+            return
+        }
+
         val layoutParams = marqueeImageView.layoutParams
 
         when (logoSize) {
@@ -2099,11 +2108,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
 
                 // Use built-in system logo as marquee overlay
-                if (prefs.getBoolean("system_logo_enabled", true)) {
+                val systemLogoSize = prefs.getString("system_logo_size", "medium") ?: "medium"
+                if (systemLogoSize != "off") {
                     val logoDrawable = loadSystemLogoFromAssets(systemName)
                     if (logoDrawable != null) {
                         // Restore fixed size for actual logo images
-                        updateMarqueeSize()
+                        updateMarqueeSize(isSystemLogo = true)
 
                         marqueeImageView.visibility = View.VISIBLE
                         marqueeImageView.setImageDrawable(logoDrawable)
@@ -2123,7 +2133,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     // Show logo as overlay (respects logo size setting)
                     if (prefs.getBoolean("system_logo_enabled", true)) {
                         // Restore fixed size for actual logo images
-                        updateMarqueeSize()
+                        updateMarqueeSize(isSystemLogo = true)
 
                         marqueeImageView.visibility = View.VISIBLE
                         marqueeImageView.setImageDrawable(logoDrawable)
@@ -2216,9 +2226,10 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     loadFallbackBackground()
 
                     // Load marquee content (even if video is playing - just keep it hidden)
-                    if (prefs.getBoolean("game_logo_enabled", true)) {
+                    val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                    if (gameLogoSize != "off") {
                         // Restore fixed size for actual marquee images
-                        updateMarqueeSize()
+                        updateMarqueeSize(isSystemLogo = false)
 
                         loadImageWithAnimation(marqueeFile, marqueeImageView)
                         // Only show if video is NOT playing
@@ -2230,7 +2241,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     // No artwork and no marquee - show fallback with or without text
                     loadFallbackBackground()
 
-                    if (prefs.getBoolean("game_logo_enabled", true)) {
+                    val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                    if (gameLogoSize != "off") {
                         // Logo enabled - show game name as text overlay
                         val displayName = currentGameName ?: gameName
                         val logoSize = prefs.getString("logo_size", "medium") ?: "medium"
@@ -2265,7 +2277,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         marqueeImageView.setImageDrawable(null)
                     } else {
                         // Restore fixed size for actual marquee images
-                        updateMarqueeSize()
+                        updateMarqueeSize(isSystemLogo = false)
 
                         // Load marquee content
                         loadImageWithAnimation(marqueeFile, marqueeImageView)
@@ -2275,7 +2287,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     }
                 } else {
                     // Game has no marquee - clear it (don't show wrong marquee from previous game)
-                    if (prefs.getBoolean("game_logo_enabled", true)) {
+                    val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                    if (gameLogoSize != "off") {
                         // Only clear if logo is supposed to be shown
                         // If logo is off or video is playing, it's already hidden
                         Glide.with(this).clear(marqueeImageView)
@@ -2728,7 +2741,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             }
 
                             // Load marquee
-                            if (prefs.getBoolean("game_logo_enabled", true)) {
+                            val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                            if (gameLogoSize != "off") {
                                 val marqueeImage = findMarqueeImage(systemName, gameName, filename)
                                 if (marqueeImage != null) {
                                     Glide.with(this)
@@ -2764,7 +2778,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         videoView.visibility = View.GONE
 
                         // Load marquee if enabled
-                        if (prefs.getBoolean("game_logo_enabled", true)) {
+                        val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                        if (gameLogoSize != "off") {
                             val filename = playingGameFilename ?: screensaverGameFilename
                             val systemName = screensaverSystemName ?: currentSystemName
                             if (filename != null && systemName != null) {
@@ -2824,7 +2839,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         }
 
                         // Load the game's marquee
-                        if (prefs.getBoolean("game_logo_enabled", true)) {
+                        val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                        if (gameLogoSize != "off") {
                             val marqueeImage = findMarqueeImage(systemName, gameName, filename)
                             if (marqueeImage != null) {
                                 Glide.with(this)
@@ -2864,7 +2880,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 videoView.visibility = View.GONE
 
                 // Load and show the game's marquee if enabled
-                if (prefs.getBoolean("game_logo_enabled", true)) {
+                val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                if (gameLogoSize != "off") {
                     val filename = playingGameFilename
                     val systemName = currentSystemName
                     if (filename != null && systemName != null) {
@@ -3076,7 +3093,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         loadImageWithAnimation(gameImage, gameImageView)
 
                         // Load marquee if enabled
-                        if (prefs.getBoolean("game_logo_enabled", true)) {
+                        val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                        if (gameLogoSize != "off") {
                             val marqueeFile = findMarqueeImage(
                                 screensaverSystemName!!,
                                 gameName,
@@ -3084,7 +3102,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             )
 
                             if (marqueeFile != null && marqueeFile.exists()) {
-                                updateMarqueeSize()
+                                updateMarqueeSize(isSystemLogo = false)
                                 loadImageWithAnimation(marqueeFile, marqueeImageView)
                                 marqueeImageView.visibility = View.VISIBLE
                                 marqueeShowingText = false
@@ -3110,7 +3128,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         // No game image - show fallback with marquee/text
                         loadFallbackBackground()
 
-                        if (prefs.getBoolean("game_logo_enabled", true)) {
+                        val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                        if (gameLogoSize != "off") {
                             val marqueeFile = findMarqueeImage(
                                 screensaverSystemName!!,
                                 gameName,
@@ -3118,7 +3137,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             )
 
                             if (marqueeFile != null && marqueeFile.exists()) {
-                                updateMarqueeSize()
+                                updateMarqueeSize(isSystemLogo = false)
                                 loadImageWithAnimation(marqueeFile, marqueeImageView)
                                 marqueeImageView.visibility = View.VISIBLE
                                 marqueeShowingText = false
@@ -3147,7 +3166,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     gameImageView.visibility = View.VISIBLE
                     videoView.visibility = View.GONE
 
-                    if (prefs.getBoolean("game_logo_enabled", true)) {
+                    val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                    if (gameLogoSize != "off") {
                         val marqueeFile = findMarqueeImage(
                             screensaverSystemName!!,
                             gameName,
@@ -3155,7 +3175,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         )
 
                         if (marqueeFile != null && marqueeFile.exists()) {
-                            updateMarqueeSize()
+                            updateMarqueeSize(isSystemLogo = false)
                             loadImageWithAnimation(marqueeFile, marqueeImageView)
                             marqueeImageView.visibility = View.VISIBLE
                             marqueeShowingText = false
@@ -3561,7 +3581,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
                     // Restore marquee visibility if game logo is enabled
                     // Note: The marquee content will be set by loadGameInfo when called
-                    if (prefs.getBoolean("game_logo_enabled", true)) {
+                    val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+                    if (gameLogoSize != "off") {
                         marqueeImageView.visibility = View.VISIBLE
                     }
                 }
@@ -3573,7 +3594,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             currentVideoPath = null
 
             // Restore marquee visibility if game logo is enabled
-            if (prefs.getBoolean("game_logo_enabled", true)) {
+            val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
+            if (gameLogoSize != "off") {
                 marqueeImageView.visibility = View.VISIBLE
             }
         }
