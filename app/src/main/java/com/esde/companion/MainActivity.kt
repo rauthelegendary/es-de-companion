@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity() {
     private var screensaverGameName: String? = null  // Current screensaver game name
     private var screensaverSystemName: String? = null  // Current screensaver system name
     private var isLaunchingFromScreensaver = false  // Track if we're launching game from screensaver
+    private var screensaverInitialized = false  // Track if screensaver has loaded its first game
 
     // Video playback variables
     private var player: ExoPlayer? = null
@@ -2949,61 +2950,21 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Handle screensaver start event
      */
     private fun handleScreensaverStart() {
-        android.util.Log.d("MainActivity", "═══ handleScreensaverStart CALLED ═══")
-
         // Stop any videos
         releasePlayer()
 
+        // Reset initialization flag
+        screensaverInitialized = false
+
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
-        android.util.Log.d("MainActivity", "Screensaver behavior setting: $screensaverBehavior")
 
         when (screensaverBehavior) {
             "game_image" -> {
-                android.util.Log.d("MainActivity", "Screensaver: Loading GAME IMAGE mode")
-                // Load screensaver game if available
-                if (screensaverGameFilename != null && screensaverSystemName != null) {
-                    // Load the screensaver game's artwork
-                    val gameName = sanitizeGameFilename(screensaverGameFilename!!).substringBeforeLast('.')
-                    val gameImage = findGameImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
-                    if (gameImage != null) {
-                        Glide.with(this)
-                            .load(gameImage)
-                            .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(gameImage)))
-                            .into(gameImageView)
-                    } else {
-                        gameImageView.setImageDrawable(null)
-                        gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
-                    }
-
-                    // Load the screensaver game's marquee
-                    if (prefs.getBoolean("game_logo_enabled", true)) {
-                        val marqueeImage = findMarqueeImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
-                        if (marqueeImage != null) {
-                            Glide.with(this)
-                                .load(marqueeImage)
-                                .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(marqueeImage)))
-                                .into(marqueeImageView)
-                            marqueeImageView.visibility = View.VISIBLE
-                        } else {
-                            marqueeImageView.visibility = View.GONE
-                        }
-                    } else {
-                        marqueeImageView.visibility = View.GONE
-                    }
-                } else {
-                    // No screensaver game data yet (dim/black mode or just started)
-                    // Show black screen - will update if game select events fire
-                    gameImageView.setImageDrawable(null)
-                    gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
-                    marqueeImageView.setImageDrawable(null)
-                    marqueeImageView.visibility = View.GONE
-                }
-
-                gameImageView.visibility = View.VISIBLE
-                videoView.visibility = View.GONE
+                // For game_image mode, wait for first game event before showing anything
+                // Don't load anything yet - handleScreensaverGameSelect will do it
+                android.util.Log.d("MainActivity", "Screensaver: game_image mode - waiting for first game event")
             }
             "black_screen" -> {
-                android.util.Log.d("MainActivity", "Screensaver: Loading BLACK SCREEN mode")
                 // Show plain black screen - no logos or images
                 gameImageView.setImageDrawable(null)
                 gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
@@ -3015,97 +2976,14 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 Glide.with(this).clear(marqueeImageView)
 
                 videoView.visibility = View.GONE
+
+                // Mark as initialized (no game data needed for black screen)
+                screensaverInitialized = true
             }
             else -> { // "default_image"
-                android.util.Log.d("MainActivity", "Screensaver: Loading DEFAULT IMAGE mode")
-
-                // Hide old content immediately - go black while we load
-                gameImageView.setImageDrawable(null)
-                gameImageView.setBackgroundColor(android.graphics.Color.BLACK)
-                gameImageView.visibility = View.VISIBLE
-                marqueeImageView.visibility = View.GONE
-                videoView.visibility = View.GONE
-
-                // Determine which marquee to show
-                var marqueeFile: File? = null
-                var systemLogoDrawable: Drawable? = null
-                val logoEnabled = prefs.getBoolean("game_logo_enabled", true)
-
-                if (logoEnabled) {
-                    // First try to show screensaver game marquee (slideshow/video mode)
-                    if (screensaverGameFilename != null && screensaverSystemName != null) {
-                        val gameName = sanitizeGameFilename(screensaverGameFilename!!).substringBeforeLast('.')
-                        marqueeFile = findMarqueeImage(screensaverSystemName!!, gameName, screensaverGameFilename!!)
-                    } else {
-                        // No screensaver game data (dim/black mode) - show browsing state marquee
-                        if (isSystemScrollActive) {
-                            // System logo
-                            val systemName = currentSystemName
-                            if (systemName != null && prefs.getBoolean("system_logo_enabled", true)) {
-                                systemLogoDrawable = loadSystemLogoFromAssets(systemName)
-                            }
-                        } else {
-                            // Game marquee from browsing state
-                            val filename = currentGameFilename
-                            val systemName = currentSystemName
-                            if (filename != null && systemName != null) {
-                                val gameName = sanitizeGameFilename(filename).substringBeforeLast('.')
-                                marqueeFile = findMarqueeImage(systemName, gameName, filename)
-                            }
-                        }
-                    }
-                }
-
-                // Now load background and marquee together
-                if (logoEnabled && (marqueeFile != null || systemLogoDrawable != null)) {
-                    if (systemLogoDrawable != null) {
-                        // System logo is synchronous - set it then fade in background
-                        updateMarqueeSize()
-                        marqueeImageView.setImageDrawable(systemLogoDrawable)
-                        marqueeImageView.visibility = View.VISIBLE
-                        marqueeShowingText = false
-
-                        // Fade in background
-                        loadFallbackBackground()
-                    } else if (marqueeFile != null) {
-                        // Preload marquee first, then fade in both together
-                        Glide.with(this)
-                            .load(marqueeFile)
-                            .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(marqueeFile)))
-                            .listener(object : RequestListener<Drawable> {
-                                override fun onLoadFailed(
-                                    e: GlideException?,
-                                    model: Any?,
-                                    target: com.bumptech.glide.request.target.Target<Drawable>,
-                                    isFirstResource: Boolean
-                                ): Boolean {
-                                    android.util.Log.d("MainActivity", "Marquee load failed - showing background only")
-                                    // Marquee failed - just load background
-                                    loadFallbackBackground()
-                                    return false
-                                }
-
-                                override fun onResourceReady(
-                                    resource: Drawable,
-                                    model: Any,
-                                    target: com.bumptech.glide.request.target.Target<Drawable>?,
-                                    dataSource: DataSource,
-                                    isFirstResource: Boolean
-                                ): Boolean {
-                                    android.util.Log.d("MainActivity", "Marquee preloaded - fading in background and marquee together")
-                                    // Marquee is ready - now fade in background
-                                    loadFallbackBackground()
-                                    // Show marquee at the same time
-                                    marqueeImageView.visibility = View.VISIBLE
-                                    return false
-                                }
-                            })
-                            .into(marqueeImageView)
-                    }
-                } else {
-                    // No logo or logo disabled - just load background
-                    loadFallbackBackground()
-                }
+                // For default_image mode, wait for first game event before loading
+                // Don't load anything yet - handleScreensaverGameSelect will do it
+                android.util.Log.d("MainActivity", "Screensaver: default_image mode - waiting for first game event")
             }
         }
     }
@@ -3123,6 +3001,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         android.util.Log.d("MainActivity", "  currentGameFilename: $currentGameFilename")
         android.util.Log.d("MainActivity", "  currentSystemName: $currentSystemName")
         android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        // Reset initialization flag
+        screensaverInitialized = false
 
         when (reason) {
             "game-start" -> {
@@ -3170,10 +3051,17 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Handle screensaver game select event (for slideshow/video screensavers)
      */
     private fun handleScreensaverGameSelect() {
-        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+
+        val isFirstGame = !screensaverInitialized
+
+        if (isFirstGame) {
+            android.util.Log.d("MainActivity", "Screensaver: First game event received - initializing display")
+            screensaverInitialized = true
+        }
 
         if (screensaverGameFilename != null && screensaverSystemName != null) {
-            val gameName = sanitizeGameFilename(screensaverGameFilename!!).substringBeforeLast('.')
+            val gameName = screensaverGameFilename!!.substringBeforeLast('.')
 
             when (screensaverBehavior) {
                 "game_image" -> {
@@ -3254,7 +3142,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     }
                 }
                 "default_image" -> {
-                    // Keep fallback image, but update marquee to screensaver game's marquee
+                    // On first game OR subsequent games, load/update display
+                    loadFallbackBackground()
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
                     if (prefs.getBoolean("game_logo_enabled", true)) {
                         val marqueeFile = findMarqueeImage(
                             screensaverSystemName!!,
