@@ -1,5 +1,8 @@
 # 🔄 Changelog
 
+## [0.3.3] - 2026-01-10
+- Added additional selectable game overlay image types (None, Marquee, 2D Box, 3D Box, Mix Image)
+
 ## [0.3.2] - 2026-01-09
 - More fixes for custom image ImagePicker to work with MediaStore and other file picker scenarios
 
