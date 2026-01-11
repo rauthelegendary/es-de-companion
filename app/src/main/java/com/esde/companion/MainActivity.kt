@@ -90,6 +90,8 @@ class MainActivity : AppCompatActivity() {
     private var touchDownX = 0f
     private var touchDownY = 0f
     private val LONG_PRESS_TIMEOUT = 500L
+    private var widgetMenuShowing = false
+    private var widgetMenuDialog: android.app.AlertDialog? = null
 
     private var fileObserver: FileObserver? = null
     private var isSystemScrollActive = false
@@ -1253,29 +1255,47 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 touchDownX = ev.x
                 touchDownY = ev.y
                 longPressTriggered = false
-                if (longPressHandler == null) {
-                    longPressHandler = Handler(android.os.Looper.getMainLooper())
+
+                // Cancel any existing callbacks first
+                longPressRunnable?.let {
+                    longPressHandler?.removeCallbacks(it)
                 }
-                longPressRunnable = Runnable {
-                    if (!longPressTriggered && drawerState == BottomSheetBehavior.STATE_HIDDEN && !isSystemScrollActive) {
-                        longPressTriggered = true
-                        showCreateWidgetMenu()
+
+                // CHANGED: Only start long press timer if menu isn't already showing
+                if (!widgetMenuShowing && drawerState == BottomSheetBehavior.STATE_HIDDEN && !isSystemScrollActive) {
+                    if (longPressHandler == null) {
+                        longPressHandler = Handler(android.os.Looper.getMainLooper())
                     }
+                    longPressRunnable = Runnable {
+                        if (!longPressTriggered && !widgetMenuShowing) {
+                            longPressTriggered = true
+                            widgetMenuShowing = true
+                            showCreateWidgetMenu()
+                        }
+                    }
+                    longPressHandler?.postDelayed(longPressRunnable!!, LONG_PRESS_TIMEOUT)
                 }
-                longPressHandler?.postDelayed(longPressRunnable!!, LONG_PRESS_TIMEOUT)
             }
             MotionEvent.ACTION_MOVE -> {
                 // Cancel long press if finger moves
                 val deltaX = kotlin.math.abs(ev.x - touchDownX)
                 val deltaY = kotlin.math.abs(ev.y - touchDownY)
                 if (deltaX > 10 || deltaY > 10) {
-                    longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                    longPressRunnable?.let {
+                        longPressHandler?.removeCallbacks(it)
+                        longPressTriggered = false  // ADDED: Reset flag when movement cancels
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                // CHANGED: Always cancel the callback on finger lift
+                longPressRunnable?.let {
+                    longPressHandler?.removeCallbacks(it)
+                }
+
                 if (longPressTriggered) {
                     // Long press was triggered, consume this event
+                    longPressTriggered = false  // ADDED: Reset immediately
                     return true
                 }
             }
@@ -3389,6 +3409,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     private fun updateWidgetsForScreensaverGame() {
+        android.util.Log.d("MainActivity", "═══ updateWidgetsForScreensaverGame START ═══")
+
         // Clear existing widgets
         widgetContainer.removeAllViews()
         activeWidgets.clear()
@@ -3399,8 +3421,15 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         if (systemName != null && gameFilename != null) {
             // Load saved widgets and update with screensaver game images
             val allWidgets = widgetManager.loadWidgets()
+            android.util.Log.d("MainActivity", "Loaded ${allWidgets.size} widgets for screensaver")
 
-            allWidgets.forEach { widget ->
+            // Sort widgets by z-index before processing
+            val sortedWidgets = allWidgets.sortedBy { it.zIndex }
+            android.util.Log.d("MainActivity", "Sorted ${sortedWidgets.size} widgets by z-index")
+
+            sortedWidgets.forEachIndexed { index, widget ->
+                android.util.Log.d("MainActivity", "Processing screensaver widget $index: type=${widget.imageType}, zIndex=${widget.zIndex}")
+
                 val gameName = sanitizeGameFilename(gameFilename).substringBeforeLast('.')
                 val imageFile = when (widget.imageType) {
                     OverlayWidget.ImageType.MARQUEE ->
@@ -3425,20 +3454,24 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
                 // ALWAYS create the widget, even if image doesn't exist
                 val widgetToAdd = if (imageFile != null && imageFile.exists()) {
-                    // Image exists - update widget with screensaver game's image
+                    android.util.Log.d("MainActivity", "  Creating screensaver widget with new image")
                     widget.copy(imagePath = imageFile.absolutePath)
                 } else {
-                    // Image doesn't exist - keep showing previous image
-                    android.util.Log.d("MainActivity", "No screensaver image found for widget type ${widget.imageType}, keeping last image")
-                    widget
+                    android.util.Log.d("MainActivity", "  No screensaver image found for widget type ${widget.imageType}, using empty path")
+                    widget.copy(imagePath = "")  // CHANGED: Use empty path instead of keeping old path
                 }
 
-                addWidgetToScreenWithoutSaving(widgetToAdd)  // CHANGED: Don't trigger saves during recreation
+                addWidgetToScreenWithoutSaving(widgetToAdd)
+                android.util.Log.d("MainActivity", "  Screensaver widget added to screen")
             }
+
+            android.util.Log.d("MainActivity", "Total screensaver widgets added: ${activeWidgets.size}")
 
             // Make sure container is visible
             widgetContainer.visibility = View.VISIBLE
         }
+
+        android.util.Log.d("MainActivity", "═══ updateWidgetsForScreensaverGame END ═══")
     }
 
     // ========== VIDEO PLAYBACK FUNCTIONS ==========
@@ -3983,6 +4016,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     private fun showCreateWidgetMenu() {
+        // If dialog already exists and is showing, don't create another
+        if (widgetMenuDialog?.isShowing == true) {
+            android.util.Log.d("MainActivity", "Widget menu already showing, ignoring")
+            return
+        }
+
         // Deselect all widgets first
         activeWidgets.forEach { it.deselect() }
 
@@ -4004,9 +4043,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             "Title Screen"
         )
 
-        android.app.AlertDialog.Builder(this)
+        widgetMenuDialog = android.app.AlertDialog.Builder(this)
             .setTitle("Widget Menu")
-            .setItems(options) { dialog, which ->
+            .setItems(options) { dialogInterface, which ->
                 when (which) {
                     0 -> toggleWidgetLock()
                     1 -> toggleSnapToGrid()
@@ -4024,13 +4063,23 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             10 -> OverlayWidget.ImageType.FANART
                             else -> OverlayWidget.ImageType.TITLE_SCREEN
                         }
+
                         createWidget(imageType)
-                        dialog.dismiss()  // Close dialog after widget creation
+                        dialogInterface.dismiss()
                     }
                 }
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .setOnDismissListener {
+                // Reset flags when dialog is dismissed
+                widgetMenuShowing = false
+                widgetMenuDialog = null
+                android.util.Log.d("MainActivity", "Widget menu dismissed, flags reset")
+            }
+            .create()
+
+        widgetMenuDialog?.show()
+        android.util.Log.d("MainActivity", "Widget menu dialog created and shown")
     }
 
     private fun toggleSnapToGrid() {
@@ -4126,6 +4175,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             return
         }
 
+        // Get next z-index (max + 1)
+        val nextZIndex = (activeWidgets.maxOfOrNull { it.widget.zIndex } ?: -1) + 1
+
         // Create widget in center of screen
         val displayMetrics = resources.displayMetrics
         val widget = OverlayWidget(
@@ -4134,7 +4186,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             x = displayMetrics.widthPixels / 2f - 150f,
             y = displayMetrics.heightPixels / 2f - 200f,
             width = 300f,
-            height = 400f
+            height = 400f,
+            zIndex = nextZIndex  // ADDED
         )
 
         addWidgetToScreen(widget)
@@ -4187,9 +4240,13 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 activeWidgets.clear()
                 android.util.Log.d("MainActivity", "Cleared widget container")
 
+                // Sort widgets by z-index before processing
+                val sortedWidgets = allWidgets.sortedBy { it.zIndex }
+                android.util.Log.d("MainActivity", "Sorted ${sortedWidgets.size} widgets by z-index")
+
                 // Reload all widgets with current game images
-                allWidgets.forEachIndexed { index, widget ->
-                    android.util.Log.d("MainActivity", "Processing widget $index: type=${widget.imageType}")
+                sortedWidgets.forEachIndexed { index, widget ->
+                    android.util.Log.d("MainActivity", "Processing widget $index: type=${widget.imageType}, zIndex=${widget.zIndex}")
 
                     val gameName = sanitizeGameFilename(gameFilename).substringBeforeLast('.')
                     android.util.Log.d("MainActivity", "  Looking for images for: $gameName")
@@ -4223,11 +4280,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         android.util.Log.d("MainActivity", "  Creating widget with new image")
                         widget.copy(imagePath = imageFile.absolutePath)
                     } else {
-                        android.util.Log.d("MainActivity", "  Creating widget with previous image path: ${widget.imagePath}")
-                        widget
+                        android.util.Log.d("MainActivity", "  No valid image found, using empty path")
+                        widget.copy(imagePath = "")  // CHANGED: Use empty path instead of keeping old path
                     }
 
-                    addWidgetToScreenWithoutSaving(widgetToAdd)  // CHANGED: Use new method that doesn't trigger save
+                    addWidgetToScreenWithoutSaving(widgetToAdd)
                     android.util.Log.d("MainActivity", "  Widget added to screen")
                 }
 
@@ -4310,6 +4367,98 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             }
         }
         return false
+    }
+
+    fun bringWidgetToFront(widgetView: WidgetView) {
+        // Get max z-index
+        val maxZ = activeWidgets.maxOfOrNull { it.widget.zIndex } ?: 0
+
+        // Set this widget to max + 1
+        widgetView.widget.zIndex = maxZ + 1
+
+        // Reorder widgets
+        reorderWidgetsByZIndex()
+
+        android.util.Log.d("MainActivity", "Widget brought to front with z-index ${widgetView.widget.zIndex}")
+    }
+
+    fun sendWidgetToBack(widgetView: WidgetView) {
+        // Get min z-index
+        val minZ = activeWidgets.minOfOrNull { it.widget.zIndex } ?: 0
+
+        // Set this widget to min - 1
+        widgetView.widget.zIndex = minZ - 1
+
+        // Reorder widgets
+        reorderWidgetsByZIndex()
+
+        android.util.Log.d("MainActivity", "Widget sent to back with z-index ${widgetView.widget.zIndex}")
+    }
+
+    fun moveWidgetForward(widgetView: WidgetView) {
+        // Find the widget with the next higher z-index
+        val currentZ = widgetView.widget.zIndex
+        val nextHigherWidget = activeWidgets
+            .filter { it.widget.zIndex > currentZ }
+            .minByOrNull { it.widget.zIndex }
+
+        if (nextHigherWidget != null) {
+            // Swap z-indices
+            val temp = widgetView.widget.zIndex
+            widgetView.widget.zIndex = nextHigherWidget.widget.zIndex
+            nextHigherWidget.widget.zIndex = temp
+
+            reorderWidgetsByZIndex()
+            android.util.Log.d("MainActivity", "Widget moved forward to z-index ${widgetView.widget.zIndex}")
+        } else {
+            android.widget.Toast.makeText(this, "Already at front", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun moveWidgetBackward(widgetView: WidgetView) {
+        // Find the widget with the next lower z-index
+        val currentZ = widgetView.widget.zIndex
+        val nextLowerWidget = activeWidgets
+            .filter { it.widget.zIndex < currentZ }
+            .maxByOrNull { it.widget.zIndex }
+
+        if (nextLowerWidget != null) {
+            // Swap z-indices
+            val temp = widgetView.widget.zIndex
+            widgetView.widget.zIndex = nextLowerWidget.widget.zIndex
+            nextLowerWidget.widget.zIndex = temp
+
+            reorderWidgetsByZIndex()
+            android.util.Log.d("MainActivity", "Widget moved backward to z-index ${widgetView.widget.zIndex}")
+        } else {
+            android.widget.Toast.makeText(this, "Already at back", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun reorderWidgetsByZIndex() {
+        // Sort widgets by z-index
+        val sortedWidgets = activeWidgets.sortedBy { it.widget.zIndex }
+
+        // Remove all from container
+        widgetContainer.removeAllViews()
+
+        // Re-add in sorted order (lower z-index = added first = appears behind)
+        sortedWidgets.forEach { widgetView ->
+            widgetContainer.addView(widgetView)
+        }
+
+        // Save the updated z-indices
+        saveAllWidgetsWithZIndex()
+    }
+
+    private fun saveAllWidgetsWithZIndex() {
+        val widgets = activeWidgets.map { it.widget }
+        widgetManager.saveWidgets(widgets)
+        android.util.Log.d("MainActivity", "Saved ${widgets.size} widgets with z-indices")
+    }
+
+    fun deselectAllWidgets() {
+        activeWidgets.forEach { it.deselect() }
     }
 
     companion object {

@@ -4,9 +4,11 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.view.View
 import android.view.MotionEvent
 import android.widget.ImageButton
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import com.bumptech.glide.Glide
 import java.io.File
@@ -24,6 +26,7 @@ class WidgetView(
 
     private val imageView: ImageView
     private val deleteButton: ImageButton
+    private val settingsButton: ImageButton
 
     private val borderPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -70,6 +73,32 @@ class WidgetView(
         }
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
+        val buttonSize = (handleSize * 1.2f).toInt()
+        val buttonSpacing = 10  // Space between buttons
+
+        // Create a container for the buttons at the top center
+        val buttonContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER
+        }
+        val containerParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
+        containerParams.addRule(ALIGN_PARENT_TOP)
+        containerParams.addRule(CENTER_HORIZONTAL)
+        containerParams.topMargin = 0
+
+        // Create settings button (cog icon)
+        settingsButton = ImageButton(context).apply {
+            setImageResource(android.R.drawable.ic_menu_preferences)
+            setBackgroundColor(0xFF2196F3.toInt())  // Blue background
+            visibility = GONE
+            setOnClickListener {
+                showLayerMenu()
+            }
+        }
+        val settingsButtonParams = LinearLayout.LayoutParams(buttonSize, buttonSize)
+        settingsButtonParams.rightMargin = buttonSpacing / 2
+        buttonContainer.addView(settingsButton, settingsButtonParams)
+
         // Create delete button (trash icon)
         deleteButton = ImageButton(context).apply {
             setImageResource(android.R.drawable.ic_menu_delete)
@@ -79,12 +108,13 @@ class WidgetView(
                 showDeleteDialog()
             }
         }
-        val deleteButtonSize = (handleSize * 1.2f).toInt()
-        val deleteParams = LayoutParams(deleteButtonSize, deleteButtonSize)
-        deleteParams.addRule(ALIGN_PARENT_TOP)
-        deleteParams.addRule(CENTER_HORIZONTAL)
-        deleteParams.topMargin = 0
-        addView(deleteButton, deleteParams)
+        val deleteButtonParams = LinearLayout.LayoutParams(buttonSize, buttonSize)
+        deleteButtonParams.leftMargin = buttonSpacing / 2
+        buttonContainer.addView(deleteButton, deleteButtonParams)
+
+        addView(buttonContainer, containerParams)
+
+        android.util.Log.d("WidgetView", "Settings and delete buttons created in container")
 
         // Make this view clickable and focusable
         isClickable = true
@@ -106,6 +136,11 @@ class WidgetView(
             Glide.with(context)
                 .load(file)
                 .into(imageView)
+        } else {
+            // File doesn't exist - clear the image
+            android.util.Log.d("WidgetView", "Image file doesn't exist: ${widget.imagePath}, clearing image")
+            Glide.with(context).clear(imageView)
+            imageView.setImageDrawable(null)
         }
     }
 
@@ -229,13 +264,24 @@ class WidgetView(
 
                 val deltaX = event.rawX - dragStartX
                 val deltaY = event.rawY - dragStartY
-                val wasMoved = abs(deltaX) > 5 || abs(deltaY) > 5  // CHANGED: Reduced from 10 to 5
+                val wasMoved = abs(deltaX) > 5 || abs(deltaY) > 5
 
                 // Check for tap (to select/deselect)
                 if (!wasMoved && !isResizing) {
-                    isWidgetSelected = !isWidgetSelected
-                    updateDeleteButtonVisibility()
-                    invalidate()
+                    if (isWidgetSelected) {
+                        // Already selected - deselect this one
+                        isWidgetSelected = false
+                        updateDeleteButtonVisibility()
+                        invalidate()
+                    } else {
+                        // Not selected - deselect all others first, then select this one
+                        val mainActivity = context as? MainActivity
+                        mainActivity?.deselectAllWidgets()
+
+                        isWidgetSelected = true
+                        updateDeleteButtonVisibility()
+                        invalidate()
+                    }
                 }
 
                 // Apply final snap on release if enabled
@@ -413,7 +459,15 @@ class WidgetView(
     }
 
     private fun updateDeleteButtonVisibility() {
-        deleteButton.visibility = if (isWidgetSelected && !isLocked) VISIBLE else GONE
+        val shouldShow = isWidgetSelected && !isLocked
+        android.util.Log.d("WidgetView", "updateDeleteButtonVisibility: shouldShow=$shouldShow, isWidgetSelected=$isWidgetSelected, isLocked=$isLocked")
+
+        deleteButton.visibility = if (shouldShow) VISIBLE else GONE
+        settingsButton.visibility = if (shouldShow) VISIBLE else GONE
+
+        android.util.Log.d("WidgetView", "Delete button visibility: ${deleteButton.visibility}, Settings button visibility: ${settingsButton.visibility}")
+        android.util.Log.d("WidgetView", "Settings button visibility: ${settingsButton.visibility}")
+        android.util.Log.d("WidgetView", "Settings button parent: ${settingsButton.parent}")
     }
 
     private fun showDeleteDialog() {
@@ -425,5 +479,56 @@ class WidgetView(
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showLayerMenu() {
+        val options = arrayOf(
+            "Bring to Front",
+            "Send to Back",
+            "Move Forward",
+            "Move Backward",
+            "─────────────",
+            "Delete"
+        )
+
+        android.app.AlertDialog.Builder(context)
+            .setTitle("Widget Layer")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> bringWidgetToFront()  // CHANGED
+                    1 -> sendWidgetToBack()    // CHANGED
+                    2 -> moveWidgetForward()   // CHANGED
+                    3 -> moveWidgetBackward()  // CHANGED
+                    4 -> {} // Separator
+                    5 -> showDeleteDialog()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun bringWidgetToFront() {  // CHANGED name
+        val mainActivity = context as? MainActivity
+        mainActivity?.bringWidgetToFront(this)
+    }
+
+    private fun sendWidgetToBack() {  // CHANGED name
+        val mainActivity = context as? MainActivity
+        mainActivity?.sendWidgetToBack(this)
+    }
+
+    private fun moveWidgetForward() {  // CHANGED name
+        val mainActivity = context as? MainActivity
+        mainActivity?.moveWidgetForward(this)
+    }
+
+    private fun moveWidgetBackward() {  // CHANGED name
+        val mainActivity = context as? MainActivity
+        mainActivity?.moveWidgetBackward(this)
+    }
+
+    fun clearImage() {
+        Glide.with(context).clear(imageView)
+        imageView.setImageDrawable(null)
     }
 }

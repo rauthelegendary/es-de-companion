@@ -10,7 +10,8 @@ data class OverlayWidget(
     var x: Float,
     var y: Float,
     var width: Float,
-    var height: Float
+    var height: Float,
+    var zIndex: Int = 0
 ) {
     enum class ImageType {
         MARQUEE,
