@@ -80,6 +80,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var widgetContainer: RelativeLayout
     private lateinit var widgetManager: WidgetManager
     private val activeWidgets = mutableListOf<WidgetView>()
+    private var widgetsLocked = false
+    private var snapToGrid = false
+    private val gridSize = 50f
+    private var isInteractingWithWidget = false
+    private var longPressHandler: Handler? = null
+    private var longPressRunnable: Runnable? = null
+    private var longPressTriggered = false
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private val LONG_PRESS_TIMEOUT = 500L
 
     private var fileObserver: FileObserver? = null
     private var isSystemScrollActive = false
@@ -247,9 +257,10 @@ class MainActivity : AppCompatActivity() {
         // Initialize widget system
         widgetContainer = findViewById(R.id.widgetContainer)
         widgetManager = WidgetManager(this)
-        // Make container non-clickable so touches pass through
-        widgetContainer.isClickable = false
-        widgetContainer.isFocusable = false
+        // Load lock state
+        widgetsLocked = prefs.getBoolean("widgets_locked", false)
+        // Load snap to grid state
+        snapToGrid = prefs.getBoolean("snap_to_grid", false)
 
         // Set initial position off-screen (above the top)
         val displayHeight = resources.displayMetrics.heightPixels.toFloat()
@@ -1106,8 +1117,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             }
 
             override fun onLongPress(e: MotionEvent) {
-                // Only show widget menu if drawer is closed AND not touching a widget
-                if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN) {
+                // Only show widget menu if drawer is closed, NOT in system view, AND not touching a widget
+                if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN &&
+                    !isSystemScrollActive) {  // Added check for system view
                     // Check if long press is on a widget
                     val isTouchingWidget = isTouchOnWidget(e.x, e.y)
                     if (!isTouchingWidget) {
@@ -1131,7 +1143,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 if (abs(diffY) > abs(diffX)) {
                     // Vertical fling
                     if (abs(diffY) > 100 && abs(velocityY) > 100) {
-                        if (diffY < 0) {  // CHANGED: diffY < 0 means swipe UP
+                        if (diffY < 0) {  // diffY < 0 means swipe UP
                             // Swipe up - open drawer
                             bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
                             return true
@@ -1193,9 +1205,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         }
     }
 
-    // Add these member variables at the top of MainActivity class
-    private var isInteractingWithWidget = false
-
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Check if black overlay feature is enabled
         val blackOverlayEnabled = prefs.getBoolean("black_overlay_enabled", false)
@@ -1238,17 +1247,59 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             return true
         }
 
-        // Track widget interaction state
+        // Handle long press for widget menu (works anywhere, even on widgets)
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
-                isInteractingWithWidget = isTouchOnWidget(ev.x, ev.y)
+                touchDownX = ev.x
+                touchDownY = ev.y
+                longPressTriggered = false
+                if (longPressHandler == null) {
+                    longPressHandler = Handler(android.os.Looper.getMainLooper())
+                }
+                longPressRunnable = Runnable {
+                    if (!longPressTriggered && drawerState == BottomSheetBehavior.STATE_HIDDEN && !isSystemScrollActive) {
+                        longPressTriggered = true
+                        showCreateWidgetMenu()
+                    }
+                }
+                longPressHandler?.postDelayed(longPressRunnable!!, LONG_PRESS_TIMEOUT)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                // Cancel long press if finger moves
+                val deltaX = kotlin.math.abs(ev.x - touchDownX)
+                val deltaY = kotlin.math.abs(ev.y - touchDownY)
+                if (deltaX > 10 || deltaY > 10) {
+                    longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+                if (longPressTriggered) {
+                    // Long press was triggered, consume this event
+                    return true
+                }
+            }
+        }
+
+        // Handle tapping outside widgets to deselect them
+        if (ev.action == MotionEvent.ACTION_UP && !longPressTriggered) {
+            if (!isTouchOnWidget(ev.x, ev.y)) {
+                // Tapped outside any widget - deselect all
+                activeWidgets.forEach { it.deselect() }
+            }
+        }
+
+        // Track widget interaction state for gesture detector
+        when (ev.action) {
+            MotionEvent.ACTION_DOWN -> {
+                isInteractingWithWidget = isTouchOnWidget(ev.x, ev.y) && isWidgetSelected(ev.x, ev.y)
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isInteractingWithWidget = false
             }
         }
 
-        // Only use gesture detector if NOT interacting with a widget AND drawer is hidden
+        // Only use gesture detector if NOT actively interacting with a SELECTED widget AND drawer is hidden
         if (drawerState == BottomSheetBehavior.STATE_HIDDEN && !isInteractingWithWidget) {
             gestureDetector.onTouchEvent(ev)
         }
@@ -2836,17 +2887,20 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 gameImageView.visibility = View.VISIBLE
                 videoView.visibility = View.GONE
 
-                // Check if widgets exist - keep them visible if they do
+                // Check if widgets exist
                 val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-                if (!hasWidgets) {
+                if (hasWidgets) {
+                    // Widgets exist - hide old marquee and keep widgets visible
+                    marqueeImageView.visibility = View.GONE
+                    // Widgets are already showing from screensaver, just ensure they're visible
+                    widgetContainer.visibility = View.VISIBLE
+                    android.util.Log.d("MainActivity", "Keeping widgets visible, hiding old marquee")
+                } else {
                     // No widgets - show old marquee if enabled
                     val gameLogoSize = prefs.getString("game_logo_size", "medium") ?: "medium"
                     if (gameLogoSize != "off") {
                         marqueeImageView.visibility = View.VISIBLE
                     }
-                } else {
-                    // Widgets exist - hide old marquee, keep widgets visible
-                    marqueeImageView.visibility = View.GONE
                 }
             } else {
                 // Behaviors differ - update display based on game launch behavior
@@ -2887,6 +2941,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             } else {
                                 marqueeImageView.visibility = View.GONE
                             }
+
+                            // Keep widgets visible if they exist
+                            if (hasWidgets) {
+                                widgetContainer.visibility = View.VISIBLE
+                            }
                         }
 
                         gameImageView.visibility = View.VISIBLE
@@ -2922,6 +2981,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             }
                         } else {
                             marqueeImageView.visibility = View.GONE
+                        }
+
+                        // Keep widgets visible if they exist
+                        if (hasWidgets) {
+                            widgetContainer.visibility = View.VISIBLE
                         }
                     }
                     "black" -> {
@@ -2975,6 +3039,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         } else {
                             marqueeImageView.visibility = View.GONE
                         }
+
+                        // Keep widgets visible if they exist
+                        if (hasWidgets) {
+                            widgetContainer.visibility = View.VISIBLE
+                        }
                     }
                 }
                 "default_image" -> {
@@ -3008,6 +3077,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     } else {
                         marqueeImageView.visibility = View.GONE
                     }
+
+                    // Keep widgets visible if they exist
+                    if (hasWidgets) {
+                        widgetContainer.visibility = View.VISIBLE
+                    }
                 }
                 "black" -> {
                     gameImageView.visibility = View.GONE
@@ -3037,9 +3111,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         screensaverGameName = null
         screensaverSystemName = null
 
-        // IMPORTANT: Don't hide widgets during game launch - keep them visible
-        // (They were visible during screensaver, so keep them showing during gameplay)
-        // The hideWidgets() call has been removed
+        // IMPORTANT: Don't call hideWidgets() here - keep widgets visible during gameplay
     }
 
     /**
@@ -3093,6 +3165,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
 
+        // Hide old marquee immediately when screensaver starts
+        marqueeImageView.visibility = View.GONE
+
         when (screensaverBehavior) {
             "game_image" -> {
                 // Game images will be loaded by handleScreensaverGameSelect events
@@ -3105,18 +3180,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 loadFallbackBackground()
                 gameImageView.visibility = View.VISIBLE
                 videoView.visibility = View.GONE
-
-                // Check if widgets exist
-                val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-
-                // Only show marquee if no widgets exist
-                if (!hasWidgets) {
-                    // Marquee will be updated by handleScreensaverGameSelect if available
-                    marqueeImageView.visibility = View.GONE
-                } else {
-                    // Hide marquee when widgets exist
-                    marqueeImageView.visibility = View.GONE
-                }
+                marqueeImageView.visibility = View.GONE
             }
             "black" -> {
                 // Show black screen
@@ -3138,7 +3202,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Handle screensaver end event - return to normal browsing display
      * @param reason The reason for screensaver ending: "cancel", "game-jump", or "game-start"
      */
-    private fun handleScreensaverEnd(reason: String = "cancel") {
+    private fun handleScreensaverEnd(reason: String?) {
+        android.util.Log.d("MainActivity", "Screensaver end detected: $reason")
         android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         android.util.Log.d("MainActivity", "SCREENSAVER END: reason=$reason")
         android.util.Log.d("MainActivity", "  screensaverGameFilename: $screensaverGameFilename")
@@ -3148,54 +3213,85 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         android.util.Log.d("MainActivity", "  currentSystemName: $currentSystemName")
         android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        // Reset initialization flag
+        isScreensaverActive = false
         screensaverInitialized = false
 
-        // Show widgets after screensaver ends
-        showWidgets()
-        updateWidgetsForCurrentGame()
+        if (reason != null) {
+            when (reason) {
+                "game-start" -> {
+                    // User is launching a game from screensaver
+                    android.util.Log.d("MainActivity", "Screensaver end - game starting, waiting for game-start event")
+                    isLaunchingFromScreensaver = true
 
+                    // CRITICAL FIX: Update current game context to screensaver game BEFORE game starts
+                    // This ensures widgets load images from the correct system folder
+                    if (screensaverSystemName != null) {
+                        currentSystemName = screensaverSystemName
+                        android.util.Log.d("MainActivity", "Updated currentSystemName to screensaver system: $currentSystemName")
+                    }
+                    if (screensaverGameFilename != null) {
+                        currentGameFilename = screensaverGameFilename
+                        android.util.Log.d("MainActivity", "Updated currentGameFilename to screensaver game: $currentGameFilename")
+                    }
 
-        when (reason) {
-            "game-start" -> {
-                // Set flag to ignore game-select events until game starts
-                isLaunchingFromScreensaver = true
-                // Game is launching from screensaver - don't reload browsing state
-                // The game-start event will arrive immediately after and handle the display
-                android.util.Log.d("MainActivity", "Screensaver end - game starting, waiting for game-start event")
-                // Don't do anything - let handleGameStart() handle it
-            }
-            "game-jump" -> {
-                // User selected a game from screensaver and jumped to it in the gamelist
-                // The current screensaver game is now the selected game, so image can be retained
-                android.util.Log.d("MainActivity", "Screensaver end - game-jump, retaining current image")
-                // The current screensaver game image is already showing, so don't reload
-            }
-            "cancel" -> {
-                // User cancelled screensaver (pressed back or timeout)
-                // Return to the browsing state from before screensaver started
-                android.util.Log.d("MainActivity", "Screensaver end - cancel, returning to browsing state")
+                    // Don't clear screensaver variables yet - handleGameStart needs them
+                    // The game-start event will handle the display
+                }
+                "game-jump" -> {
+                    // User jumped to a different game while in screensaver
+                    // The game is now the selected game, so image can be retained
+                    android.util.Log.d("MainActivity", "Screensaver end - game-jump, retaining current image")
 
-                // Variables already cleared in event handler, but ensure they're gone
-                screensaverGameFilename = null
-                screensaverGameName = null
-                screensaverSystemName = null
+                    // Update current game context to screensaver game
+                    if (screensaverSystemName != null) {
+                        currentSystemName = screensaverSystemName
+                    }
+                    if (screensaverGameFilename != null) {
+                        currentGameFilename = screensaverGameFilename
+                    }
+                    if (screensaverGameName != null) {
+                        currentGameName = screensaverGameName
+                    }
 
-                if (isSystemScrollActive) {
-                    loadSystemImage()
-                } else {
-                    loadGameInfo()
+                    // Clear screensaver variables since we're done with screensaver
+                    screensaverGameFilename = null
+                    screensaverGameName = null
+                    screensaverSystemName = null
+
+                    // The current screensaver game image is already showing, so don't reload
+                }
+                "cancel" -> {
+                    // User cancelled screensaver (pressed back or timeout)
+                    // Return to the browsing state from before screensaver started
+                    android.util.Log.d("MainActivity", "Screensaver end - cancel, returning to browsing state")
+
+                    // Variables already cleared in event handler, but ensure they're gone
+                    screensaverGameFilename = null
+                    screensaverGameName = null
+                    screensaverSystemName = null
+
+                    if (isSystemScrollActive) {
+                        loadSystemImage()
+                    } else {
+                        loadGameInfo()
+                    }
+                }
+                else -> {
+                    // Unknown reason - default to cancel behavior
+                    android.util.Log.w("MainActivity", "Screensaver end - unknown reason: $reason, defaulting to cancel behavior")
+                    if (isSystemScrollActive) {
+                        loadSystemImage()
+                    } else {
+                        loadGameInfo()
+                    }
                 }
             }
-            else -> {
-                // Unknown reason - default to cancel behavior
-                android.util.Log.w("MainActivity", "Screensaver end - unknown reason: $reason, defaulting to cancel behavior")
-                if (isSystemScrollActive) {
-                    loadSystemImage()
-                } else {
-                    loadGameInfo()
-                }
-            }
+        }
+
+        // Show widgets after screensaver ends (unless it's game-start, where handleGameStart will manage it)
+        if (reason != "game-start") {
+            showWidgets()
+            updateWidgetsForCurrentGame()
         }
     }
     /**
@@ -3213,6 +3309,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         if (screensaverGameFilename != null && screensaverSystemName != null) {
             val gameName = screensaverGameFilename!!.substringBeforeLast('.')
+
+            // Clear old marquee before loading new screensaver game
+            marqueeImageView.visibility = View.GONE
+            Glide.with(this).clear(marqueeImageView)
+            marqueeImageView.setImageDrawable(null)
 
             when (screensaverBehavior) {
                 "game_image" -> {
@@ -3322,11 +3423,17 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
                 }
 
-                if (imageFile != null && imageFile.exists()) {
-                    // Update widget with screensaver game's image
-                    val updatedWidget = widget.copy(imagePath = imageFile.absolutePath)
-                    addWidgetToScreen(updatedWidget)
+                // ALWAYS create the widget, even if image doesn't exist
+                val widgetToAdd = if (imageFile != null && imageFile.exists()) {
+                    // Image exists - update widget with screensaver game's image
+                    widget.copy(imagePath = imageFile.absolutePath)
+                } else {
+                    // Image doesn't exist - keep showing previous image
+                    android.util.Log.d("MainActivity", "No screensaver image found for widget type ${widget.imageType}, keeping last image")
+                    widget
                 }
+
+                addWidgetToScreenWithoutSaving(widgetToAdd)  // CHANGED: Don't trigger saves during recreation
             }
 
             // Make sure container is visible
@@ -3843,9 +3950,27 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 removeWidget(view)
             },
             onUpdate = { updatedWidget ->
-                saveAllWidgets()
+                // Update the widget in storage
+                val allWidgets = widgetManager.loadWidgets().toMutableList()
+                val widgetIndex = allWidgets.indexOfFirst { it.id == updatedWidget.id }
+                if (widgetIndex != -1) {
+                    allWidgets[widgetIndex] = updatedWidget
+                    widgetManager.saveWidgets(allWidgets)
+                    android.util.Log.d("MainActivity", "Widget ${updatedWidget.id} updated: pos=(${updatedWidget.x}, ${updatedWidget.y}), size=(${updatedWidget.width}, ${updatedWidget.height})")
+                } else {
+                    // New widget - add it
+                    allWidgets.add(updatedWidget)
+                    widgetManager.saveWidgets(allWidgets)
+                    android.util.Log.d("MainActivity", "New widget ${updatedWidget.id} added")
+                }
             }
         )
+
+        // Apply current lock state to new widget
+        widgetView.setLocked(widgetsLocked)
+
+        // Apply current snap to grid state
+        widgetView.setSnapToGrid(snapToGrid, gridSize)
 
         activeWidgets.add(widgetView)
         widgetContainer.addView(widgetView)
@@ -3857,16 +3982,17 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         widgetManager.deleteWidget(widgetView.widget.id)
     }
 
-    private fun saveAllWidgets() {
-        val widgets = activeWidgets.map { it.widget }
-        widgetManager.saveWidgets(widgets)
-    }
-
     private fun showCreateWidgetMenu() {
         // Deselect all widgets first
         activeWidgets.forEach { it.deselect() }
 
+        val lockText = if (widgetsLocked) "🔒 Unlock Widgets" else "🔓 Lock Widgets"
+        val snapText = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
+
         val options = arrayOf(
+            lockText,
+            snapText,
+            "─────────────",
             "Marquee",
             "2D Box",
             "3D Box",
@@ -3879,23 +4005,68 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         )
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("Create Widget")
-            .setItems(options) { _, which ->
-                val imageType = when (which) {
-                    0 -> OverlayWidget.ImageType.MARQUEE
-                    1 -> OverlayWidget.ImageType.BOX_2D
-                    2 -> OverlayWidget.ImageType.BOX_3D
-                    3 -> OverlayWidget.ImageType.MIX_IMAGE
-                    4 -> OverlayWidget.ImageType.BACK_COVER
-                    5 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
-                    6 -> OverlayWidget.ImageType.SCREENSHOT
-                    7 -> OverlayWidget.ImageType.FANART
-                    else -> OverlayWidget.ImageType.TITLE_SCREEN
+            .setTitle("Widget Menu")
+            .setItems(options) { dialog, which ->
+                when (which) {
+                    0 -> toggleWidgetLock()
+                    1 -> toggleSnapToGrid()
+                    2 -> {} // Separator - do nothing
+                    3, 4, 5, 6, 7, 8, 9, 10, 11 -> {
+                        // Create widget based on selection
+                        val imageType = when (which) {
+                            3 -> OverlayWidget.ImageType.MARQUEE
+                            4 -> OverlayWidget.ImageType.BOX_2D
+                            5 -> OverlayWidget.ImageType.BOX_3D
+                            6 -> OverlayWidget.ImageType.MIX_IMAGE
+                            7 -> OverlayWidget.ImageType.BACK_COVER
+                            8 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
+                            9 -> OverlayWidget.ImageType.SCREENSHOT
+                            10 -> OverlayWidget.ImageType.FANART
+                            else -> OverlayWidget.ImageType.TITLE_SCREEN
+                        }
+                        createWidget(imageType)
+                        dialog.dismiss()  // Close dialog after widget creation
+                    }
                 }
-                createWidget(imageType)
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun toggleSnapToGrid() {
+        snapToGrid = !snapToGrid
+
+        // Update all active widgets with the new snap state
+        activeWidgets.forEach { it.setSnapToGrid(snapToGrid, gridSize) }
+
+        val message = if (snapToGrid) {
+            "Snap to grid enabled - widgets will align to ${gridSize.toInt()}px grid"
+        } else {
+            "Snap to grid disabled - free placement and sizing"
+        }
+
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+
+        // Save snap state to preferences
+        prefs.edit().putBoolean("snap_to_grid", snapToGrid).apply()
+    }
+
+    private fun toggleWidgetLock() {
+        widgetsLocked = !widgetsLocked
+
+        // Update all active widgets with the new lock state
+        activeWidgets.forEach { it.setLocked(widgetsLocked) }
+
+        val message = if (widgetsLocked) {
+            "Widgets locked - they can no longer be moved, resized, or deleted"
+        } else {
+            "Widgets unlocked - tap to select, drag to move, resize from corner"
+        }
+
+        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+
+        // Save lock state to preferences
+        prefs.edit().putBoolean("widgets_locked", widgetsLocked).apply()
     }
 
     private fun createWidget(imageType: OverlayWidget.ImageType) {
@@ -3967,7 +4138,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         )
 
         addWidgetToScreen(widget)
-        saveAllWidgets()
 
         android.widget.Toast.makeText(
             this,
@@ -3996,9 +4166,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     private fun updateWidgetsForCurrentGame() {
-        // Clear existing widgets
-        widgetContainer.removeAllViews()
-        activeWidgets.clear()
+        android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame START ═══")
+        android.util.Log.d("MainActivity", "isSystemScrollActive: $isSystemScrollActive")
+        android.util.Log.d("MainActivity", "isGamePlaying: $isGamePlaying")
+        android.util.Log.d("MainActivity", "currentSystemName: $currentSystemName")
+        android.util.Log.d("MainActivity", "currentGameFilename: $currentGameFilename")
 
         // Show widgets in game view OR during screensaver (not in system view, not during gameplay)
         if (!isSystemScrollActive && !isGamePlaying) {
@@ -4006,12 +4178,22 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             val gameFilename = currentGameFilename
 
             if (systemName != null && gameFilename != null) {
-                // Load saved widgets and filter for current game
+                // Load saved widgets
                 val allWidgets = widgetManager.loadWidgets()
+                android.util.Log.d("MainActivity", "Loaded ${allWidgets.size} widgets from storage")
+
+                // Clear existing widget views but keep track of which ones to recreate
+                widgetContainer.removeAllViews()
+                activeWidgets.clear()
+                android.util.Log.d("MainActivity", "Cleared widget container")
 
                 // Reload all widgets with current game images
-                allWidgets.forEach { widget ->
+                allWidgets.forEachIndexed { index, widget ->
+                    android.util.Log.d("MainActivity", "Processing widget $index: type=${widget.imageType}")
+
                     val gameName = sanitizeGameFilename(gameFilename).substringBeforeLast('.')
+                    android.util.Log.d("MainActivity", "  Looking for images for: $gameName")
+
                     val imageFile = when (widget.imageType) {
                         OverlayWidget.ImageType.MARQUEE ->
                             findImageInFolder(systemName, gameName, gameFilename, "marquees")
@@ -4033,20 +4215,72 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
                     }
 
-                    if (imageFile != null && imageFile.exists()) {
-                        // Update widget with current game's image
-                        val updatedWidget = widget.copy(imagePath = imageFile.absolutePath)
-                        addWidgetToScreen(updatedWidget)
+                    android.util.Log.d("MainActivity", "  Image file: ${imageFile?.absolutePath ?: "NULL"}")
+                    android.util.Log.d("MainActivity", "  Image exists: ${imageFile?.exists()}")
+
+                    // ALWAYS create the widget, even if image doesn't exist
+                    val widgetToAdd = if (imageFile != null && imageFile.exists()) {
+                        android.util.Log.d("MainActivity", "  Creating widget with new image")
+                        widget.copy(imagePath = imageFile.absolutePath)
+                    } else {
+                        android.util.Log.d("MainActivity", "  Creating widget with previous image path: ${widget.imagePath}")
+                        widget
                     }
+
+                    addWidgetToScreenWithoutSaving(widgetToAdd)  // CHANGED: Use new method that doesn't trigger save
+                    android.util.Log.d("MainActivity", "  Widget added to screen")
                 }
+
+                android.util.Log.d("MainActivity", "Total widgets added: ${activeWidgets.size}")
+                android.util.Log.d("MainActivity", "Widget container children: ${widgetContainer.childCount}")
 
                 // Make sure container is visible
                 widgetContainer.visibility = View.VISIBLE
+                android.util.Log.d("MainActivity", "Widget container visibility: ${widgetContainer.visibility}")
+            } else {
+                android.util.Log.d("MainActivity", "System or game filename is null - not updating widgets")
             }
         } else {
             // Hide widgets in other views
+            android.util.Log.d("MainActivity", "Hiding widgets - wrong view state")
             widgetContainer.visibility = View.GONE
         }
+
+        android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame END ═══")
+    }
+
+    private fun addWidgetToScreenWithoutSaving(widget: OverlayWidget) {
+        // Create a variable to hold the widget view reference
+        var widgetViewRef: WidgetView? = null
+
+        val widgetView = WidgetView(
+            this,
+            widget,
+            onDelete = { view ->
+                removeWidget(view)
+            },
+            onUpdate = { updatedWidget ->
+                // Update the widget in storage
+                val allWidgets = widgetManager.loadWidgets().toMutableList()
+                val widgetIndex = allWidgets.indexOfFirst { it.id == updatedWidget.id }
+                if (widgetIndex != -1) {
+                    allWidgets[widgetIndex] = updatedWidget
+                    widgetManager.saveWidgets(allWidgets)
+                    android.util.Log.d("MainActivity", "Widget ${updatedWidget.id} updated: pos=(${updatedWidget.x}, ${updatedWidget.y}), size=(${updatedWidget.width}, ${updatedWidget.height})")
+                }
+            }
+        )
+
+        widgetViewRef = widgetView
+
+        // Apply current lock state to new widget
+        widgetView.setLocked(widgetsLocked)
+
+        // Apply current snap to grid state
+        widgetView.setSnapToGrid(snapToGrid, gridSize)
+
+        activeWidgets.add(widgetView)
+        widgetContainer.addView(widgetView)
     }
 
     private fun hideWidgets() {
@@ -4060,6 +4294,22 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             widgetContainer.visibility = View.VISIBLE
             android.util.Log.d("MainActivity", "Showing widgets")
         }
+    }
+
+    private fun isWidgetSelected(x: Float, y: Float): Boolean {
+        for (widgetView in activeWidgets) {
+            val location = IntArray(2)
+            widgetView.getLocationOnScreen(location)
+            val widgetX = location[0].toFloat()
+            val widgetY = location[1].toFloat()
+
+            if (x >= widgetX && x <= widgetX + widgetView.width &&
+                y >= widgetY && y <= widgetY + widgetView.height) {
+                // Check if this widget is actually selected
+                return widgetView.isWidgetSelected
+            }
+        }
+        return false
     }
 
     companion object {
