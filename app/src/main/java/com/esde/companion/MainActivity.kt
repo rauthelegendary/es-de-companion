@@ -279,9 +279,12 @@ class MainActivity : AppCompatActivity() {
         widgetContainer = findViewById(R.id.widgetContainer)
         widgetManager = WidgetManager(this)
         // Load lock state
-        widgetsLocked = prefs.getBoolean("widgets_locked", false)
+        widgetsLocked = prefs.getBoolean("widgets_locked", true)
         // Load snap to grid state
-        snapToGrid = prefs.getBoolean("snap_to_grid", false)
+        snapToGrid = prefs.getBoolean("snap_to_grid", true)
+
+        // Create default widgets on first launch
+        createDefaultWidgets()
 
         // Set initial position off-screen (above the top)
         val displayHeight = resources.displayMetrics.heightPixels.toFloat()
@@ -759,6 +762,62 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             ).show()
             android.util.Log.e("MainActivity", "Error updating scripts", e)
         }
+    }
+
+    private fun createDefaultWidgets() {
+        // Check if we've already created default widgets
+        val hasCreatedDefaults = prefs.getBoolean("default_widgets_created", false)
+        if (hasCreatedDefaults) {
+            android.util.Log.d("MainActivity", "Default widgets already created on previous launch")
+            return
+        }
+
+        android.util.Log.d("MainActivity", "First launch - creating default widgets")
+
+        val displayMetrics = resources.displayMetrics
+        val centerX = displayMetrics.widthPixels / 2f
+        val centerY = displayMetrics.heightPixels / 2f
+
+        // System logo size (medium equivalent - adjust as needed)
+        val systemLogoWidth = 800f
+        val systemLogoHeight = 300f
+
+        // Game marquee size (medium equivalent - typically wider than system logo)
+        val gameMarqueeWidth = 800f
+        val gameMarqueeHeight = 300f
+
+        // Create default system logo widget (centered)
+        val systemLogoWidget = OverlayWidget(
+            imageType = OverlayWidget.ImageType.SYSTEM_LOGO,
+            imagePath = "",  // Will be updated when system loads
+            x = centerX - (systemLogoWidth / 2),
+            y = centerY - (systemLogoHeight / 2),
+            width = systemLogoWidth,
+            height = systemLogoHeight,
+            zIndex = 0,
+            widgetContext = OverlayWidget.WidgetContext.SYSTEM
+        )
+
+        // Create default game marquee widget (centered)
+        val gameMarqueeWidget = OverlayWidget(
+            imageType = OverlayWidget.ImageType.MARQUEE,
+            imagePath = "",  // Will be updated when game loads
+            x = centerX - (gameMarqueeWidth / 2),
+            y = centerY - (gameMarqueeHeight / 2),
+            width = gameMarqueeWidth,
+            height = gameMarqueeHeight,
+            zIndex = 0,
+            widgetContext = OverlayWidget.WidgetContext.GAME
+        )
+
+        // Save both widgets
+        val defaultWidgets = listOf(systemLogoWidget, gameMarqueeWidget)
+        widgetManager.saveWidgets(defaultWidgets)
+
+        // Mark that we've created default widgets
+        prefs.edit().putBoolean("default_widgets_created", true).apply()
+
+        android.util.Log.d("MainActivity", "Created ${defaultWidgets.size} default widgets")
     }
 
     /**
@@ -1912,7 +1971,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Handles both regular systems and ES-DE auto-collections
      * Returns drawable if found, null otherwise
      */
-    fun loadSystemLogoFromAssets(systemName: String): android.graphics.drawable.Drawable? {
+    fun loadSystemLogoFromAssets(systemName: String, width: Int = -1, height: Int = -1): android.graphics.drawable.Drawable? {
         return try {
             // Handle ES-DE auto-collections
             val baseFileName = when (systemName.lowercase()) {
@@ -1925,7 +1984,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             // First check user-provided system logos path with multiple format support
             val userLogosDir = File(getSystemLogosPath())
             if (userLogosDir.exists() && userLogosDir.isDirectory) {
-                // Check formats in priority order: SVG (best quality) -> PNG -> JPG -> WebP
                 val extensions = listOf("svg", "png", "jpg", "jpeg", "webp")
 
                 for (ext in extensions) {
@@ -1935,8 +1993,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
                         return when (ext) {
                             "svg" -> {
-                                // Load SVG
+                                // Load SVG with specific dimensions if provided
                                 val svg = com.caverock.androidsvg.SVG.getFromInputStream(logoFile.inputStream())
+                                if (width > 0 && height > 0) {
+                                    svg.documentWidth = width.toFloat()
+                                    svg.documentHeight = height.toFloat()
+                                }
                                 android.graphics.drawable.PictureDrawable(svg.renderToPicture())
                             }
                             else -> {
@@ -1952,6 +2014,13 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             // Fall back to built-in SVG assets
             val svgPath = "system_logos/$baseFileName.svg"
             val svg = com.caverock.androidsvg.SVG.getFromAsset(assets, svgPath)
+
+            // Set dimensions if provided
+            if (width > 0 && height > 0) {
+                svg.documentWidth = width.toFloat()
+                svg.documentHeight = height.toFloat()
+            }
+
             android.graphics.drawable.PictureDrawable(svg.renderToPicture())
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Failed to load logo for $systemName", e)

@@ -326,9 +326,14 @@ class WidgetView(
 
             val mainActivity = context as? MainActivity
             if (mainActivity != null) {
-                // loadSystemLogoFromAssets expects just the system name
-                val drawable = mainActivity.loadSystemLogoFromAssets(systemName)
+                // Pass widget dimensions to properly scale SVG
+                val drawable = mainActivity.loadSystemLogoFromAssets(
+                    systemName,
+                    widget.width.toInt(),
+                    widget.height.toInt()
+                )
                 if (drawable != null) {
+                    imageView.scaleType = ImageView.ScaleType.FIT_CENTER
                     imageView.setImageDrawable(drawable)
                     android.util.Log.d("WidgetView", "Built-in system logo loaded successfully")
                 } else {
