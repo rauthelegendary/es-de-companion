@@ -4006,7 +4006,14 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     private fun findSystemLogo(systemName: String): String? {
-        android.util.Log.d("MainActivity", "Finding system logo for: $systemName")
+        // Handle ES-DE auto-collections
+        val baseFileName = when (systemName.lowercase()) {
+            "all" -> "auto-allgames"
+            "favorites" -> "auto-favorites"
+            "recent" -> "auto-lastplayed"
+            else -> systemName.lowercase()
+        }
+        android.util.Log.d("MainActivity", "Finding system logo for: $baseFileName")
 
         // First check if custom system logos are enabled
         val customSystemLogosEnabled = prefs.getBoolean("custom_system_logos_enabled", false)
@@ -4021,7 +4028,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     // Try different extensions
                     val extensions = listOf("svg", "png", "jpg", "webp")
                     for (ext in extensions) {
-                        val logoFile = File(customLogoDir, "$systemName.$ext")
+                        val logoFile = File(customLogoDir, "$baseFileName.$ext")
                         if (logoFile.exists()) {
                             android.util.Log.d("MainActivity", "Found custom system logo: ${logoFile.absolutePath}")
                             return logoFile.absolutePath
@@ -4033,8 +4040,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Fall back to built-in assets
         // Return special marker that WidgetView will recognize to load from assets
-        android.util.Log.d("MainActivity", "Using built-in system logo for $systemName")
-        return "builtin://$systemName"  // CHANGED: Just pass system name
+        android.util.Log.d("MainActivity", "Using built-in system logo for $baseFileName")
+        return "builtin://$baseFileName"  // CHANGED: Just pass system name
     }
 
     private fun updateWidgetsForCurrentSystem() {
