@@ -2841,6 +2841,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
                     // Don't touch ANYTHING - everything is already correct
                     // This prevents any layout passes that could cause flashing
+                    // Only reload widgets for case where coming from video playing
+                    val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
+                    if (hasWidgets) {
+                        widgetContainer.visibility = View.VISIBLE
+                    }
                 } else {
                     // Need to update display
                     android.util.Log.d("MainActivity", "Updating display for game launch")
@@ -2972,9 +2977,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             "default_image" -> {
                 // Show default/fallback image immediately
                 android.util.Log.d("MainActivity", "Screensaver behavior: default_image")
-                loadFallbackBackground()
-                gameImageView.visibility = View.VISIBLE
-                videoView.visibility = View.GONE
+                // loadFallbackBackground()
+                // gameImageView.visibility = View.VISIBLE
+                // videoView.visibility = View.GONE
             }
         }
 
