@@ -79,10 +79,12 @@ class MainActivity : AppCompatActivity() {
     // Widget system
     private lateinit var widgetContainer: RelativeLayout
     private lateinit var widgetManager: WidgetManager
+    private var gridOverlayView: GridOverlayView? = null
     private val activeWidgets = mutableListOf<WidgetView>()
     private var widgetsLocked = false
     private var snapToGrid = false
-    private val gridSize = 50f
+    private val gridSize = 40f
+    private var showGrid = false
     private var isInteractingWithWidget = false
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
@@ -3084,7 +3086,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         android.util.Log.d("MainActivity", "Screensaver behavior: $screensaverBehavior")
 
         // CRITICAL: If black screen, clear everything IMMEDIATELY
-        if (screensaverBehavior == "black_screen") {  // CHANGED: "black" -> "black_screen"
+        if (screensaverBehavior == "black_screen") {
             android.util.Log.d("MainActivity", "Black screen behavior - clearing display immediately")
             Glide.with(this).clear(gameImageView)
             gameImageView.setImageDrawable(null)
@@ -3092,7 +3094,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             videoView.visibility = View.GONE
             hideWidgets()
             releasePlayer()
-            return  // ADDED: Exit early, don't process anything else
+            // Hide grid for black screen
+            gridOverlayView?.visibility = View.GONE
+            return  // Exit early, don't process anything else
         }
 
         when (screensaverBehavior) {
@@ -3111,6 +3115,10 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Stop any videos
         releasePlayer()
+
+        // Update grid overlay for screensaver state (for game_image and default_image)
+        widgetContainer.visibility = View.VISIBLE
+        updateGridOverlay()
     }
 
     /**
@@ -3905,6 +3913,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         fun getMenuOptions(): Array<String> {
             val lockText = if (widgetsLocked) "🔒 Unlock Widgets" else "🔓 Lock Widgets"
             val snapText = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
+            val gridText = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
 
             // Different options based on current view
             return if (isSystemScrollActive) {
@@ -3912,6 +3921,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 arrayOf(
                     lockText,
                     snapText,
+                    gridText,
                     "─────────────",
                     "System Logo"
                 )
@@ -3920,6 +3930,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 arrayOf(
                     lockText,
                     snapText,
+                    gridText,
                     "─────────────",
                     "Marquee",
                     "2D Box",
@@ -3964,8 +3975,16 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         showCreateWidgetMenu()
                     }
                 }
-                which == 2 -> {} // Separator - do nothing
-                isSystemScrollActive && which == 3 -> {
+                which == 2 -> {
+                    // Toggle show grid - dismiss and reopen instantly
+                    toggleShowGrid()
+                    dialog.dismiss()
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        showCreateWidgetMenu()
+                    }
+                }
+                which == 3 -> {} // Separator - do nothing
+                isSystemScrollActive && which == 4 -> {  // CHANGED from 3 to 4
                     // System Logo - check if locked before creating
                     if (widgetsLocked) {
                         android.widget.Toast.makeText(
@@ -3992,15 +4011,15 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     }
 
                     val imageType = when (which) {
-                        3 -> OverlayWidget.ImageType.MARQUEE
-                        4 -> OverlayWidget.ImageType.BOX_2D
-                        5 -> OverlayWidget.ImageType.BOX_3D
-                        6 -> OverlayWidget.ImageType.MIX_IMAGE
-                        7 -> OverlayWidget.ImageType.BACK_COVER
-                        8 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
-                        9 -> OverlayWidget.ImageType.SCREENSHOT
-                        10 -> OverlayWidget.ImageType.FANART
-                        11 -> OverlayWidget.ImageType.TITLE_SCREEN
+                        4 -> OverlayWidget.ImageType.MARQUEE  // CHANGED from 3
+                        5 -> OverlayWidget.ImageType.BOX_2D   // CHANGED from 4
+                        6 -> OverlayWidget.ImageType.BOX_3D   // CHANGED from 5
+                        7 -> OverlayWidget.ImageType.MIX_IMAGE // CHANGED from 6
+                        8 -> OverlayWidget.ImageType.BACK_COVER // CHANGED from 7
+                        9 -> OverlayWidget.ImageType.PHYSICAL_MEDIA // CHANGED from 8
+                        10 -> OverlayWidget.ImageType.SCREENSHOT // CHANGED from 9
+                        11 -> OverlayWidget.ImageType.FANART // CHANGED from 10
+                        12 -> OverlayWidget.ImageType.TITLE_SCREEN // CHANGED from 11
                         else -> return@setOnItemClickListener
                     }
                     createWidget(imageType)
@@ -4030,6 +4049,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Save snap state to preferences
         prefs.edit().putBoolean("snap_to_grid", snapToGrid).apply()
+    }
+
+    private fun toggleShowGrid() {
+        showGrid = !showGrid
+        updateGridOverlay()
+        android.util.Log.d("MainActivity", "Show grid toggled: $showGrid")
     }
 
     private fun toggleWidgetLock() {
@@ -4381,14 +4406,29 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
                 // Make sure container is visible
                 widgetContainer.visibility = View.VISIBLE
+                updateGridOverlay()
                 android.util.Log.d("MainActivity", "Widget container visibility: ${widgetContainer.visibility}")
             } else {
                 android.util.Log.d("MainActivity", "System or game filename is null - not updating widgets")
             }
+        } else if (isSystemScrollActive) {
+            // System view - show grid but no game widgets
+            android.util.Log.d("MainActivity", "System view - showing grid only")
+
+            // Clear game widgets
+            widgetContainer.removeAllViews()
+            activeWidgets.clear()
+
+            // Keep container visible and show grid if enabled
+            widgetContainer.visibility = View.VISIBLE
+            updateGridOverlay()
+
+            android.util.Log.d("MainActivity", "System view setup complete")
         } else {
-            // Hide widgets in other views
-            android.util.Log.d("MainActivity", "Hiding widgets - wrong view state")
+            // Hide widgets during gameplay or other states
+            android.util.Log.d("MainActivity", "Hiding widgets - wrong view state (gameplay)")
             widgetContainer.visibility = View.GONE
+            gridOverlayView?.visibility = View.GONE
         }
 
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame END ═══")
@@ -4429,15 +4469,62 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     private fun hideWidgets() {
-        widgetContainer.visibility = View.GONE
-        android.util.Log.d("MainActivity", "Hiding widgets")
+        // Remove all widget views but keep grid if it should be shown
+        val childCount = widgetContainer.childCount
+        for (i in childCount - 1 downTo 0) {
+            val child = widgetContainer.getChildAt(i)
+            if (child !is GridOverlayView) {
+                widgetContainer.removeView(child)
+            }
+        }
+        activeWidgets.clear()
+
+        // Only hide container if grid is also off
+        if (!showGrid) {
+            widgetContainer.visibility = View.GONE
+        }
+
+        android.util.Log.d("MainActivity", "Hiding widgets, showGrid=$showGrid, container visibility=${widgetContainer.visibility}")
     }
 
     private fun showWidgets() {
         // Only show if we're in the right state
         if (!isSystemScrollActive && !isGamePlaying && !isScreensaverActive) {
             widgetContainer.visibility = View.VISIBLE
+            updateGridOverlay()
             android.util.Log.d("MainActivity", "Showing widgets")
+        } else if (isSystemScrollActive || isScreensaverActive) {
+            // During system scroll or screensaver, keep container visible for grid
+            widgetContainer.visibility = View.VISIBLE
+            updateGridOverlay()
+            android.util.Log.d("MainActivity", "Keeping container visible for grid (system scroll or screensaver)")
+        }
+    }
+
+    private fun updateGridOverlay() {
+        if (showGrid && widgetContainer.visibility == View.VISIBLE) {
+            // Always recreate grid overlay to ensure it's properly attached
+            if (gridOverlayView != null && gridOverlayView?.parent != null) {
+                // Remove existing grid if it exists
+                widgetContainer.removeView(gridOverlayView)
+                gridOverlayView = null
+            }
+
+            // Create fresh grid overlay
+            gridOverlayView = GridOverlayView(this, gridSize)
+            val params = RelativeLayout.LayoutParams(
+                RelativeLayout.LayoutParams.MATCH_PARENT,
+                RelativeLayout.LayoutParams.MATCH_PARENT
+            )
+            widgetContainer.addView(gridOverlayView, 0)  // Add as first child (behind widgets)
+            android.util.Log.d("MainActivity", "Grid overlay recreated and added")
+        } else {
+            // Remove grid overlay completely
+            if (gridOverlayView != null) {
+                widgetContainer.removeView(gridOverlayView)
+                gridOverlayView = null
+                android.util.Log.d("MainActivity", "Grid overlay removed")
+            }
         }
     }
 
