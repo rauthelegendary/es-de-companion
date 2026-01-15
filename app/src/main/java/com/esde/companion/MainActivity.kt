@@ -53,6 +53,11 @@ import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import android.os.Handler
 import android.os.Looper
+import androidx.lifecycle.lifecycleScope
+import com.esde.companion.ost.MusicDownloader
+import com.esde.companion.ost.MusicPlayer
+import com.esde.companion.ost.MusicRepository
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -218,6 +223,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private lateinit var musicRepository: MusicRepository
+    private lateinit var musicPlayer: MusicPlayer
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -308,6 +316,9 @@ class MainActivity : AppCompatActivity() {
         // Register volume change listener for real-time updates
         registerVolumeListener()
         registerSecondaryVolumeObserver()
+
+        musicRepository = MusicRepository(this, MusicDownloader())
+        musicPlayer = MusicPlayer(musicRepository, ExoPlayer.Builder(this).build())
     }
 
     private fun checkAndLaunchSetupWizard() {
@@ -2216,6 +2227,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             val gameImage = findGameImage(systemName, gameName, gameNameRaw)
 
             var gameImageLoaded = false
+
+            //ADDED FOR MUSIC
+            lifecycleScope.launch {
+                currentGameName?.let { musicPlayer.onGameFocused(it)}
+            }
 
             if (gameImage != null && gameImage.exists()) {
                 // Game has its own artwork - use it
