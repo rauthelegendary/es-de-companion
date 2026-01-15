@@ -38,15 +38,13 @@
         android:scaleType="fitCenter"
         android:cropToPadding="false" />
 
-    <!-- Black overlay that can be pulled down during game mode -->
-    <View
-        android:id="@+id/blackOverlay"
+    <!-- Widget Container (for overlay widgets) -->
+    <RelativeLayout
+        android:id="@+id/widgetContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#FF000000"
-        android:visibility="gone"
-        android:clickable="true"
-        android:focusable="true" />
+        android:clickable="false"
+        android:focusable="false" />
 
     <androidx.coordinatorlayout.widget.CoordinatorLayout
         android:layout_width="match_parent"
@@ -148,5 +146,16 @@
         </LinearLayout>
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
+
+    <!-- Black overlay that can be pulled down during game mode -->
+    <View
+        android:id="@+id/blackOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true"
+        android:elevation="100dp" />
 
 </RelativeLayout>
