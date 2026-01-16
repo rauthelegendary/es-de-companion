@@ -59,6 +59,7 @@ import com.esde.companion.ost.MusicPlayer
 import com.esde.companion.ost.MusicRepository
 import kotlinx.coroutines.launch
 import kotlin.apply
+import com.esde.companion.ResizableWidgetContainer
 
 class MainActivity : AppCompatActivity() {
 
@@ -82,12 +83,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gestureDetector: GestureDetectorCompat
 
     // Widget system
-    private lateinit var widgetContainer: RelativeLayout
+    private lateinit var widgetContainer: ResizableWidgetContainer
     private lateinit var widgetManager: WidgetManager
+    private var gridOverlayView: GridOverlayView? = null
     private val activeWidgets = mutableListOf<WidgetView>()
     private var widgetsLocked = false
     private var snapToGrid = false
-    private val gridSize = 50f
+    private val gridSize = 40f
+    private var showGrid = false
     private var isInteractingWithWidget = false
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
@@ -108,6 +111,10 @@ class MainActivity : AppCompatActivity() {
     private var hasWindowFocus = true  // Track if app has window focus (is on top)
     private var playingGameFilename: String? = null  // Filename of currently playing game
     private var isScreensaverActive = false  // Track if ES-DE screensaver is running
+    private var wasInSystemViewBeforeScreensaver = false
+    private var systemBeforeScreensaver: String? = null
+    private var gameFilenameBeforeScreensaver: String? = null
+    private var gameNameBeforeScreensaver: String? = null
     private var screensaverGameFilename: String? = null  // Current screensaver game filename
     private var screensaverGameName: String? = null  // Current screensaver game name
     private var screensaverSystemName: String? = null  // Current screensaver system name
@@ -306,6 +313,8 @@ class MainActivity : AppCompatActivity() {
         widgetsLocked = prefs.getBoolean("widgets_locked", true)
         // Load snap to grid state
         snapToGrid = prefs.getBoolean("snap_to_grid", true)
+        // Load show grid state
+        showGrid = prefs.getBoolean("show_grid", false)
 
         // Create default widgets on first launch
         createDefaultWidgets()
@@ -1868,13 +1877,6 @@ class MainActivity : AppCompatActivity() {
      * @param gameName The game name to display
      * @param width Target width in pixels (default 800 for marquees)
      * @param height Target height in pixels (default 300 for marquees)
-     * @return A drawable with centered text
-     */
-    /**
-     * Create a text-based drawable as fallback for marquee images when no image is available
-     * @param gameName The game name to display
-     * @param width Target width in pixels (default 800 for marquees)
-     * @param height Target height in pixels (default 300 for marquees)
      * @return A drawable with centered text on transparent background
      */
     fun createMarqueeTextFallback(
@@ -1909,8 +1911,11 @@ class MainActivity : AppCompatActivity() {
             textAlign = android.graphics.Paint.Align.CENTER
         }
 
-        // Word wrap logic
+        // Word wrap logic with line limit
         val maxWidth = width * 1.0f
+        val lineHeight = paint.textSize * 1.2f
+        val maxLines = (height * 0.9f / lineHeight).toInt().coerceAtLeast(1) // Calculate how many lines fit
+
         val words = displayName.split(" ")
         val lines = mutableListOf<String>()
         var currentLine = ""
@@ -1920,14 +1925,30 @@ class MainActivity : AppCompatActivity() {
             if (paint.measureText(testLine) <= maxWidth) {
                 currentLine = testLine
             } else {
-                if (currentLine.isNotEmpty()) lines.add(currentLine)
+                if (currentLine.isNotEmpty()) {
+                    lines.add(currentLine)
+                    if (lines.size >= maxLines) break // Stop if we've reached max lines
+                }
                 currentLine = word
             }
         }
-        if (currentLine.isNotEmpty()) lines.add(currentLine)
+
+        // Handle the last line with ellipsis if needed
+        if (currentLine.isNotEmpty()) {
+            if (lines.size >= maxLines) {
+                // Truncate last line with ellipsis
+                val lastLine = lines[maxLines - 1]
+                var truncated = lastLine
+                while (paint.measureText("$truncated...") > maxWidth && truncated.isNotEmpty()) {
+                    truncated = truncated.dropLast(1).trimEnd()
+                }
+                lines[maxLines - 1] = "$truncated..."
+            } else {
+                lines.add(currentLine)
+            }
+        }
 
         // Draw lines centered vertically
-        val lineHeight = paint.textSize * 1.2f
         val totalHeight = lines.size * lineHeight
         var yPos = (height - totalHeight) / 2f + lineHeight * 0.8f
 
@@ -2295,9 +2316,14 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("MainActivity", "  gameNameRaw (full path): $gameNameRaw")
             handleVideoForGame(systemName, gameName, gameNameRaw)
 
-            // Show and update widgets at the end
-            showWidgets()
+            // Update game widgets after loading game image
             updateWidgetsForCurrentGame()
+            // Don't show widgets if screensaver is active
+            if (!isScreensaverActive) {
+                showWidgets()
+            } else {
+                android.util.Log.d("MainActivity", "Screensaver active - not showing widgets from loadGameInfo")
+            }
 
         } catch (e: Exception) {
             // Don't clear images on exception - keep last valid images
@@ -2816,10 +2842,9 @@ class MainActivity : AppCompatActivity() {
                             gameImageView.visibility = View.VISIBLE
                             videoView.visibility = View.GONE
 
-                            val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-                            if (hasWidgets) {
-                                widgetContainer.visibility = View.VISIBLE
-                            }
+                            // Load and show widgets
+                            updateWidgetsForCurrentGame()
+                            showWidgets()
                         }
                     }
                 }
@@ -2835,16 +2860,14 @@ class MainActivity : AppCompatActivity() {
             if (gameLaunchBehavior != "black_screen") {
                 // If we were already in game view with game_image behavior, keep the display
                 if (wasInGameView && gameLaunchBehavior == "game_image") {
-                    android.util.Log.d("MainActivity", "Already showing game image - keeping current display and widgets")
-                    android.util.Log.d("MainActivity", "Nothing to update - display already correct")
+                    android.util.Log.d("MainActivity", "Already showing game image - keeping current display and reloading widgets")
 
-                    // Don't touch ANYTHING - everything is already correct
-                    // This prevents any layout passes that could cause flashing
-                    // Only reload widgets for case where coming from video playing
-                    val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-                    if (hasWidgets) {
-                        widgetContainer.visibility = View.VISIBLE
-                    }
+                    // Keep the display but reload widgets since they may have changed
+                    // This ensures widgets show up even when launching the same game again
+                    updateWidgetsForCurrentGame()
+                    showWidgets()
+
+                    android.util.Log.d("MainActivity", "Widgets reloaded for same game launch")
                 } else {
                     // Need to update display
                     android.util.Log.d("MainActivity", "Updating display for game launch")
@@ -2878,10 +2901,9 @@ class MainActivity : AppCompatActivity() {
                             gameImageView.visibility = View.VISIBLE
                             videoView.visibility = View.GONE
 
-                            val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-                            if (hasWidgets) {
-                                widgetContainer.visibility = View.VISIBLE
-                            }
+                            // Load and show widgets
+                            updateWidgetsForCurrentGame()
+                            showWidgets()
                         }
                     }
                 }
@@ -2954,11 +2976,18 @@ class MainActivity : AppCompatActivity() {
         isScreensaverActive = true
         screensaverInitialized = false
 
+        // Save complete state before screensaver
+        wasInSystemViewBeforeScreensaver = isSystemScrollActive
+        systemBeforeScreensaver = currentSystemName
+        gameFilenameBeforeScreensaver = currentGameFilename
+        gameNameBeforeScreensaver = currentGameName
+        android.util.Log.d("MainActivity", "Saved pre-screensaver state: system=$systemBeforeScreensaver, game=$gameNameBeforeScreensaver, isSystemView=$wasInSystemViewBeforeScreensaver")
+
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
         android.util.Log.d("MainActivity", "Screensaver behavior: $screensaverBehavior")
 
         // CRITICAL: If black screen, clear everything IMMEDIATELY
-        if (screensaverBehavior == "black_screen") {  // CHANGED: "black" -> "black_screen"
+        if (screensaverBehavior == "black_screen") {
             android.util.Log.d("MainActivity", "Black screen behavior - clearing display immediately")
             Glide.with(this).clear(gameImageView)
             gameImageView.setImageDrawable(null)
@@ -2967,7 +2996,9 @@ class MainActivity : AppCompatActivity() {
             hideWidgets()
             releasePlayer()
             releaseMusicPlayer()
-            return  // ADDED: Exit early, don't process anything else
+            // Hide grid for black screen
+            gridOverlayView?.visibility = View.GONE
+            return  // Exit early, don't process anything else
         }
 
         when (screensaverBehavior) {
@@ -2987,6 +3018,16 @@ class MainActivity : AppCompatActivity() {
         // Stop any videos
         releasePlayer()
         releaseMusicPlayer()
+
+        // CRITICAL: Clear all widgets immediately when screensaver starts
+        // Game widgets will be loaded by handleScreensaverGameSelect when first game is selected
+        widgetContainer.removeAllViews()
+        activeWidgets.clear()
+        android.util.Log.d("MainActivity", "Screensaver started - all widgets cleared, waiting for game-select")
+
+        // Update grid overlay for screensaver state (for game_image and default_image)
+        widgetContainer.visibility = View.VISIBLE
+        updateGridOverlay()
     }
 
     /**
@@ -3061,10 +3102,11 @@ class MainActivity : AppCompatActivity() {
                     screensaverGameName = null
                     screensaverSystemName = null
 
-                    // CHANGED: Check what view we should return to
-                    if (isSystemScrollActive) {
+                    // CHANGED: Check what view we were in BEFORE screensaver started
+                    if (wasInSystemViewBeforeScreensaver) {
                         // Was in system view - reload system image and widgets
                         android.util.Log.d("MainActivity", "Returning to system view")
+                        isSystemScrollActive = true  // Restore system view state
                         loadSystemImage()
                     } else {
                         // Was in game view - reload game info and widgets
@@ -3081,9 +3123,15 @@ class MainActivity : AppCompatActivity() {
                     screensaverGameName = null
                     screensaverSystemName = null
 
-                    if (isSystemScrollActive) {
+                    // CHANGED: Check what view we were in BEFORE screensaver started
+                    if (wasInSystemViewBeforeScreensaver) {
+                        // Was in system view - reload system image and widgets
+                        android.util.Log.d("MainActivity", "Returning to system view")
+                        isSystemScrollActive = true  // Restore system view state
                         loadSystemImage()
                     } else {
+                        // Was in game view - reload game info and widgets
+                        android.util.Log.d("MainActivity", "Returning to game view")
                         loadGameInfo()
                     }
                 }
@@ -3099,7 +3147,7 @@ class MainActivity : AppCompatActivity() {
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
 
         // If black screen, don't load anything
-        if (screensaverBehavior == "black_screen") {  // CHANGED
+        if (screensaverBehavior == "black_screen") {
             android.util.Log.d("MainActivity", "Black screen - ignoring screensaver game select")
             return
         }
@@ -3129,15 +3177,42 @@ class MainActivity : AppCompatActivity() {
                         loadFallbackBackground()
                     }
 
-                    // Show widgets for game_image behavior
-                    showWidgets()
-                    updateWidgetsForScreensaverGame()
+                    // NEW: Make sure views are visible
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
+                    // CRITICAL: Set current game context BEFORE loading widgets
+                    // This ensures widgets load images from the correct system folder
+                    currentSystemName = screensaverSystemName
+                    currentGameFilename = screensaverGameFilename
+                    currentGameName = gameName
+                    isSystemScrollActive = false  // CRITICAL: Set to false so updateWidgetsForCurrentGame() loads game widgets
+                    android.util.Log.d("MainActivity", "Set game context for widgets: system=$currentSystemName, game=$currentGameName")
+
+                    // Use existing function to load game widgets with correct images
+                    updateWidgetsForCurrentGame()
                 }
                 "default_image" -> {
                     loadFallbackBackground()
-                    // Show widgets for default image too
-                    showWidgets()
-                    updateWidgetsForScreensaverGame()
+
+                    // NEW: Make sure views are visible
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
+                    // DEBUG: Log visibility state
+                    android.util.Log.d("MainActivity", "After setting visibility: gameImageView=${gameImageView.visibility}, videoView=${videoView.visibility}")
+                    android.util.Log.d("MainActivity", "gameImageView drawable: ${gameImageView.drawable}")
+
+                    // CRITICAL: Set current game context BEFORE loading widgets
+                    // This ensures widgets load images from the correct system folder
+                    currentSystemName = screensaverSystemName
+                    currentGameFilename = screensaverGameFilename
+                    currentGameName = gameName
+                    isSystemScrollActive = false  // CRITICAL: Set to false so updateWidgetsForCurrentGame() loads game widgets
+                    android.util.Log.d("MainActivity", "Set game context for widgets: system=$currentSystemName, game=$currentGameName")
+
+                    // Use existing function to load game widgets with correct images
+                    updateWidgetsForCurrentGame()
                 }
             }
         }
@@ -3189,23 +3264,34 @@ class MainActivity : AppCompatActivity() {
                         findImageInFolder(systemName, gameName, gameFilename, "fanart")
                     OverlayWidget.ImageType.TITLE_SCREEN ->
                         findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
-                    OverlayWidget.ImageType.SYSTEM_LOGO -> null  // ADDED: System logos don't belong in game view
+                    OverlayWidget.ImageType.GAME_DESCRIPTION -> null  // NEW: Text widget, handled separately
+                    OverlayWidget.ImageType.SYSTEM_LOGO -> null
                 }
 
                 // ALWAYS create the widget, even if image doesn't exist
-                val widgetToAdd = if (imageFile != null && imageFile.exists()) {
-                    android.util.Log.d("MainActivity", "  Creating screensaver widget with new image")
-                    widget.copy(imagePath = imageFile.absolutePath)
-                } else {
-                    android.util.Log.d("MainActivity", "  No screensaver image found for widget type ${widget.imageType}, using empty path")
-                    // Store game name in widget ID for marquee text fallback
-                    if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-                        widget.copy(
-                            imagePath = "",
-                            id = "widget_${gameName}"
-                        )
-                    } else {
-                        widget.copy(imagePath = "")
+                val widgetToAdd = when {
+                    // NEW: Handle description text widget for screensaver
+                    widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
+                        val description = getGameDescription(systemName, gameFilename)
+                        android.util.Log.d("MainActivity", "  Updating screensaver description widget: ${description?.take(50)}")
+                        widget.copy(imagePath = description ?: "")
+                    }
+                    // Handle image widgets
+                    imageFile != null && imageFile.exists() -> {
+                        android.util.Log.d("MainActivity", "  Creating screensaver widget with new image")
+                        widget.copy(imagePath = imageFile.absolutePath)
+                    }
+                    // No image found
+                    else -> {
+                        android.util.Log.d("MainActivity", "  No screensaver image found for widget type ${widget.imageType}, using empty path")
+                        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                            widget.copy(
+                                imagePath = "",
+                                id = "widget_${gameName}"
+                            )
+                        } else {
+                            widget.copy(imagePath = "")
+                        }
                     }
                 }
 
@@ -3612,13 +3698,13 @@ class MainActivity : AppCompatActivity() {
                     // Show the game image view again
                     gameImageView.visibility = View.VISIBLE
 
-                    // Show widgets again if not during gameplay  // ADDED
-                    if (!isGamePlaying) {  // ADDED
-                        val hasWidgets = widgetManager.loadWidgets().isNotEmpty()  // ADDED
-                        if (hasWidgets) {  // ADDED
-                            showWidgets()  // ADDED
-                        }  // ADDED
-                    }  // ADDED
+                    // Show widgets when game is playing (FIXED)
+                    if (isGamePlaying) {  // Changed from !isGamePlaying
+                        val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
+                        if (hasWidgets) {
+                            showWidgets()
+                        }
+                    }
                 }
                 .start()
         } else {
@@ -3627,13 +3713,13 @@ class MainActivity : AppCompatActivity() {
             gameImageView.visibility = View.VISIBLE
             currentVideoPath = null
 
-            // Show widgets again if not during gameplay  // ADDED
-            if (!isGamePlaying) {  // ADDED
-                val hasWidgets = widgetManager.loadWidgets().isNotEmpty()  // ADDED
-                if (hasWidgets) {  // ADDED
-                    showWidgets()  // ADDED
-                }  // ADDED
-            }  // ADDED
+            // Show widgets when game is playing (FIXED)
+            if (isGamePlaying) {  // Changed from !isGamePlaying
+                val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
+                if (hasWidgets) {
+                    showWidgets()
+                }
+            }
         }
     }
 
@@ -3651,12 +3737,12 @@ class MainActivity : AppCompatActivity() {
 
         // Hybrid blocking approach to handle different device scenarios:
         //
-        // Scenario 1: Game launches on SAME screen as Companion (normal devices)
+        // Scenario 1: Game launches on SAME screen as Companion
         //   - hasWindowFocus becomes false (game window is on top)
         //   - onPause() does NOT fire (Companion is still "active" behind game)
         //   - Block: !hasWindowFocus
         //
-        // Scenario 2: Game launches on OTHER screen (dual-screen devices like Ayaneo)
+        // Scenario 2: Game launches on OTHER screen
         //   - hasWindowFocus may be unreliable (identical display names)
         //   - onPause() DOES fire (Companion is backgrounded by system)
         //   - Block: lifecycle state check
@@ -3786,6 +3872,7 @@ class MainActivity : AppCompatActivity() {
         fun getMenuOptions(): Array<String> {
             val lockText = if (widgetsLocked) "🔒 Unlock Widgets" else "🔓 Lock Widgets"
             val snapText = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
+            val gridText = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
 
             // Different options based on current view
             return if (isSystemScrollActive) {
@@ -3793,6 +3880,7 @@ class MainActivity : AppCompatActivity() {
                 arrayOf(
                     lockText,
                     snapText,
+                    gridText,
                     "─────────────",
                     "System Logo"
                 )
@@ -3801,6 +3889,7 @@ class MainActivity : AppCompatActivity() {
                 arrayOf(
                     lockText,
                     snapText,
+                    gridText,
                     "─────────────",
                     "Marquee",
                     "2D Box",
@@ -3810,7 +3899,8 @@ class MainActivity : AppCompatActivity() {
                     "Physical Media",
                     "Screenshot",
                     "Fanart",
-                    "Title Screen"
+                    "Title Screen",
+                    "Game Description"
                 )
             }
         }
@@ -3845,8 +3935,16 @@ class MainActivity : AppCompatActivity() {
                         showCreateWidgetMenu()
                     }
                 }
-                which == 2 -> {} // Separator - do nothing
-                isSystemScrollActive && which == 3 -> {
+                which == 2 -> {
+                    // Toggle show grid - dismiss and reopen instantly
+                    toggleShowGrid()
+                    dialog.dismiss()
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        showCreateWidgetMenu()
+                    }
+                }
+                which == 3 -> {} // Separator - do nothing
+                isSystemScrollActive && which == 4 -> {  // CHANGED from 3 to 4
                     // System Logo - check if locked before creating
                     if (widgetsLocked) {
                         android.widget.Toast.makeText(
@@ -3873,15 +3971,16 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     val imageType = when (which) {
-                        3 -> OverlayWidget.ImageType.MARQUEE
-                        4 -> OverlayWidget.ImageType.BOX_2D
-                        5 -> OverlayWidget.ImageType.BOX_3D
-                        6 -> OverlayWidget.ImageType.MIX_IMAGE
-                        7 -> OverlayWidget.ImageType.BACK_COVER
-                        8 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
-                        9 -> OverlayWidget.ImageType.SCREENSHOT
-                        10 -> OverlayWidget.ImageType.FANART
-                        11 -> OverlayWidget.ImageType.TITLE_SCREEN
+                        4 -> OverlayWidget.ImageType.MARQUEE
+                        5 -> OverlayWidget.ImageType.BOX_2D
+                        6 -> OverlayWidget.ImageType.BOX_3D
+                        7 -> OverlayWidget.ImageType.MIX_IMAGE
+                        8 -> OverlayWidget.ImageType.BACK_COVER
+                        9 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
+                        10 -> OverlayWidget.ImageType.SCREENSHOT
+                        11 -> OverlayWidget.ImageType.FANART
+                        12 -> OverlayWidget.ImageType.TITLE_SCREEN
+                        13 -> OverlayWidget.ImageType.GAME_DESCRIPTION
                         else -> return@setOnItemClickListener
                     }
                     createWidget(imageType)
@@ -3901,16 +4000,18 @@ class MainActivity : AppCompatActivity() {
         // Update all active widgets with the new snap state
         activeWidgets.forEach { it.setSnapToGrid(snapToGrid, gridSize) }
 
-        val message = if (snapToGrid) {
-            "Snap to grid enabled - widgets will align to ${gridSize.toInt()}px grid"
-        } else {
-            "Snap to grid disabled - free placement and sizing"
-        }
-
-        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
-
         // Save snap state to preferences
         prefs.edit().putBoolean("snap_to_grid", snapToGrid).apply()
+    }
+
+    private fun toggleShowGrid() {
+        showGrid = !showGrid
+        updateGridOverlay()
+
+        // Save show grid state to preferences
+        prefs.edit().putBoolean("show_grid", showGrid).apply()
+
+        android.util.Log.d("MainActivity", "Show grid toggled: $showGrid")
     }
 
     private fun toggleWidgetLock() {
@@ -4014,9 +4115,37 @@ class MainActivity : AppCompatActivity() {
                     findImageInFolder(systemName, gameName, gameFilename, "fanart")
                 OverlayWidget.ImageType.TITLE_SCREEN ->
                     findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
+                OverlayWidget.ImageType.GAME_DESCRIPTION -> null
                 else -> null
             }
 
+            // Special handling for game description (text widget)
+            if (imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+                val description = getGameDescription(systemName, gameFilename)
+
+                val widget = OverlayWidget(
+                    imageType = OverlayWidget.ImageType.GAME_DESCRIPTION,
+                    imagePath = description ?: "",  // Store description text in imagePath
+                    x = displayMetrics.widthPixels / 2f - 300f,
+                    y = displayMetrics.heightPixels / 2f - 200f,
+                    width = 600f,
+                    height = 400f,
+                    zIndex = nextZIndex,
+                    widgetContext = OverlayWidget.WidgetContext.GAME
+                )
+
+                addWidgetToScreen(widget)
+
+                android.widget.Toast.makeText(
+                    this,
+                    if (description != null) "Game description widget created!" else "No description available for this game",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+
+                return
+            }
+
+            // Existing validation for image-based widgets
             if (imageFile == null || !imageFile.exists()) {
                 val typeName = when (imageType) {
                     OverlayWidget.ImageType.MARQUEE -> "marquee"
@@ -4028,6 +4157,7 @@ class MainActivity : AppCompatActivity() {
                     OverlayWidget.ImageType.SCREENSHOT -> "screenshot"
                     OverlayWidget.ImageType.FANART -> "fanart"
                     OverlayWidget.ImageType.TITLE_SCREEN -> "title screen"
+                    OverlayWidget.ImageType.GAME_DESCRIPTION -> "game description"
                     else -> "image"
                 }
                 android.widget.Toast.makeText(
@@ -4102,6 +4232,12 @@ class MainActivity : AppCompatActivity() {
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentSystem START ═══")
         android.util.Log.d("MainActivity", "currentSystemName: $currentSystemName")
 
+        // Don't update system widgets during screensaver
+        if (isScreensaverActive) {
+            android.util.Log.d("MainActivity", "Screensaver active - skipping system widget update")
+            return
+        }
+
         val systemName = currentSystemName
 
         if (systemName != null) {
@@ -4175,6 +4311,77 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * Parse game description from ES-DE gamelist.xml
+     * Returns null if not found or any error occurs
+     */
+    private fun getGameDescription(systemName: String, gameFilename: String): String? {
+        try {
+            // Get scripts path and navigate to ES-DE folder
+            val scriptsPath = prefs.getString("scripts_path", "/storage/emulated/0/ES-DE/scripts")
+                ?: return null
+
+            // Get ES-DE root folder (parent of scripts folder)
+            val scriptsDir = File(scriptsPath)
+            val esdeRoot = scriptsDir.parentFile ?: return null
+
+            // Build path to gamelist.xml: ~/ES-DE/gamelists/<systemname>/gamelist.xml
+            val gamelistFile = File(esdeRoot, "gamelists/$systemName/gamelist.xml")
+
+            android.util.Log.d("MainActivity", "Looking for gamelist: ${gamelistFile.absolutePath}")
+
+            if (!gamelistFile.exists()) {
+                android.util.Log.d("MainActivity", "Gamelist file not found for system: $systemName")
+                return null
+            }
+
+            // Parse XML to find the game's description
+            val xmlContent = gamelistFile.readText()
+
+            // Sanitize the game filename for comparison
+            val sanitizedFilename = sanitizeGameFilename(gameFilename)
+
+            // Look for the game entry with matching path
+            // Match pattern: <path>./filename</path>
+            val pathPattern = "<path>\\./\\Q$sanitizedFilename\\E</path>".toRegex()
+            val pathMatch = pathPattern.find(xmlContent)
+
+            if (pathMatch == null) {
+                android.util.Log.d("MainActivity", "Game not found in gamelist: $sanitizedFilename")
+                return null
+            }
+
+            // Find the <desc> tag after this <path> tag
+            val gameStartIndex = pathMatch.range.first
+
+            // Search for <desc>...</desc> within this game entry (before next <game> tag)
+            val remainingXml = xmlContent.substring(gameStartIndex)
+            val nextGameIndex = remainingXml.indexOf("<game>", startIndex = 1)
+            val searchSpace = if (nextGameIndex > 0) {
+                remainingXml.substring(0, nextGameIndex)
+            } else {
+                remainingXml
+            }
+
+            // Extract description text between <desc> and </desc>
+            val descPattern = "<desc>([\\s\\S]*?)</desc>".toRegex()
+            val descMatch = descPattern.find(searchSpace)
+
+            return if (descMatch != null) {
+                val description = descMatch.groupValues[1].trim()
+                android.util.Log.d("MainActivity", "Found description: ${description.take(100)}...")
+                description
+            } else {
+                android.util.Log.d("MainActivity", "No description found for game: $sanitizedFilename")
+                null
+            }
+
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error parsing gamelist.xml", e)
+            return null
+        }
+    }
+
     private fun updateWidgetsForCurrentGame() {
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame START ═══")
         android.util.Log.d("MainActivity", "isSystemScrollActive: $isSystemScrollActive")
@@ -4183,7 +4390,7 @@ class MainActivity : AppCompatActivity() {
         android.util.Log.d("MainActivity", "currentGameFilename: $currentGameFilename")
 
         // Show widgets in game view OR during screensaver (not in system view, not during gameplay)
-        if (!isSystemScrollActive && !isGamePlaying) {
+        if (!isSystemScrollActive) {  // Remove the !isGamePlaying check
             val systemName = currentSystemName
             val gameFilename = currentGameFilename
 
@@ -4230,26 +4437,38 @@ class MainActivity : AppCompatActivity() {
                             findImageInFolder(systemName, gameName, gameFilename, "fanart")
                         OverlayWidget.ImageType.TITLE_SCREEN ->
                             findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
-                        OverlayWidget.ImageType.SYSTEM_LOGO -> null  // ADDED: System logos don't belong in screensaver
+                        OverlayWidget.ImageType.GAME_DESCRIPTION -> null  // NEW: Text widget, handled separately
+                        OverlayWidget.ImageType.SYSTEM_LOGO -> null
                     }
 
                     android.util.Log.d("MainActivity", "  Image file: ${imageFile?.absolutePath ?: "NULL"}")
                     android.util.Log.d("MainActivity", "  Image exists: ${imageFile?.exists()}")
 
                     // ALWAYS create the widget, even if image doesn't exist
-                    val widgetToAdd = if (imageFile != null && imageFile.exists()) {
-                        android.util.Log.d("MainActivity", "  Creating widget with new image")
-                        widget.copy(imagePath = imageFile.absolutePath)
-                    } else {
-                        android.util.Log.d("MainActivity", "  No valid image found, using empty path")
-                        // Store game name in widget ID for marquee text fallback
-                        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-                            widget.copy(
-                                imagePath = "",
-                                id = "widget_${gameName}"
-                            )
-                        } else {
-                            widget.copy(imagePath = "")
+                    val widgetToAdd = when {
+                        // NEW: Handle description text widget
+                        widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
+                            val description = getGameDescription(systemName, gameFilename)
+                            android.util.Log.d("MainActivity", "  Updating description widget: ${description?.take(50)}")
+                            widget.copy(imagePath = description ?: "")
+                        }
+                        // Handle image widgets
+                        imageFile != null && imageFile.exists() -> {
+                            android.util.Log.d("MainActivity", "  Creating widget with new image")
+                            widget.copy(imagePath = imageFile.absolutePath)
+                        }
+                        // No image found
+                        else -> {
+                            android.util.Log.d("MainActivity", "  No valid image found, using empty path")
+                            // Store game name in widget ID for marquee text fallback
+                            if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                                widget.copy(
+                                    imagePath = "",
+                                    id = "widget_${gameName}"
+                                )
+                            } else {
+                                widget.copy(imagePath = "")
+                            }
                         }
                     }
 
@@ -4262,14 +4481,29 @@ class MainActivity : AppCompatActivity() {
 
                 // Make sure container is visible
                 widgetContainer.visibility = View.VISIBLE
+                updateGridOverlay()
                 android.util.Log.d("MainActivity", "Widget container visibility: ${widgetContainer.visibility}")
             } else {
                 android.util.Log.d("MainActivity", "System or game filename is null - not updating widgets")
             }
+        } else if (isSystemScrollActive) {
+            // System view - show grid but no game widgets
+            android.util.Log.d("MainActivity", "System view - showing grid only")
+
+            // Clear game widgets
+            widgetContainer.removeAllViews()
+            activeWidgets.clear()
+
+            // Keep container visible and show grid if enabled
+            widgetContainer.visibility = View.VISIBLE
+            updateGridOverlay()
+
+            android.util.Log.d("MainActivity", "System view setup complete")
         } else {
-            // Hide widgets in other views
-            android.util.Log.d("MainActivity", "Hiding widgets - wrong view state")
+            // Hide widgets during gameplay or other states
+            android.util.Log.d("MainActivity", "Hiding widgets - wrong view state (gameplay)")
             widgetContainer.visibility = View.GONE
+            gridOverlayView?.visibility = View.GONE
         }
 
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame END ═══")
@@ -4310,15 +4544,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hideWidgets() {
-        widgetContainer.visibility = View.GONE
-        android.util.Log.d("MainActivity", "Hiding widgets")
+        // Remove all widget views but keep grid if it should be shown
+        val childCount = widgetContainer.childCount
+        for (i in childCount - 1 downTo 0) {
+            val child = widgetContainer.getChildAt(i)
+            if (child !is GridOverlayView) {
+                widgetContainer.removeView(child)
+            }
+        }
+        activeWidgets.clear()
+
+        // Only hide container if grid is also off
+        if (!showGrid) {
+            widgetContainer.visibility = View.GONE
+        }
+
+        android.util.Log.d("MainActivity", "Hiding widgets, showGrid=$showGrid, container visibility=${widgetContainer.visibility}")
     }
 
     private fun showWidgets() {
-        // Only show if we're in the right state
-        if (!isSystemScrollActive && !isGamePlaying && !isScreensaverActive) {
-            widgetContainer.visibility = View.VISIBLE
-            android.util.Log.d("MainActivity", "Showing widgets")
+        // Show widgets/grid in all views (game browsing, gameplay, system view, screensaver)
+        widgetContainer.visibility = View.VISIBLE
+        updateGridOverlay()
+        android.util.Log.d("MainActivity", "Showing widgets/grid")
+    }
+
+    private fun updateGridOverlay() {
+        if (showGrid && widgetContainer.visibility == View.VISIBLE) {
+            // Always recreate grid overlay to ensure it's properly attached
+            if (gridOverlayView != null && gridOverlayView?.parent != null) {
+                // Remove existing grid if it exists
+                widgetContainer.removeView(gridOverlayView)
+                gridOverlayView = null
+            }
+
+            // Create fresh grid overlay
+            gridOverlayView = GridOverlayView(this, gridSize)
+            val params = RelativeLayout.LayoutParams(
+                RelativeLayout.LayoutParams.MATCH_PARENT,
+                RelativeLayout.LayoutParams.MATCH_PARENT
+            )
+            widgetContainer.addView(gridOverlayView, 0)  // Add as first child (behind widgets)
+            android.util.Log.d("MainActivity", "Grid overlay recreated and added")
+        } else {
+            // Remove grid overlay completely (but keep widget container visible)
+            if (gridOverlayView != null) {
+                widgetContainer.removeView(gridOverlayView)
+                gridOverlayView = null
+                android.util.Log.d("MainActivity", "Grid overlay removed")
+            }
+            // Don't hide the widget container - widgets should still be visible
         }
     }
 

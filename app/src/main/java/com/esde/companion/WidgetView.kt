@@ -17,6 +17,20 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+/**
+ * ScrollView that never intercepts touch events - only auto-scrolls programmatically
+ */
+class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) {
+    override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+        // Never intercept - let parent handle all touches
+        return false
+    }
+
+    override fun onTouchEvent(ev: MotionEvent?): Boolean {
+        // Never handle touches - only programmatic scrolling allowed
+        return false
+    }
+}
 class WidgetView(
     context: Context,
     val widget: OverlayWidget,
@@ -25,6 +39,8 @@ class WidgetView(
 ) : RelativeLayout(context) {
 
     private val imageView: ImageView
+    private val textView: android.widget.TextView
+    private val scrollView: AutoScrollOnlyView  // CHANGED
     private val deleteButton: ImageButton
     private val settingsButton: ImageButton
 
@@ -56,6 +72,9 @@ class WidgetView(
     // Snap to grid settings
     private var snapToGrid = false
     private var gridSize = 50f
+    private var scrollJob: Runnable? = null
+    private val scrollSpeed = 1  // pixels per frame
+    private val scrollDelay = 30L  // milliseconds between scroll updates
 
     enum class ResizeCorner {
         NONE,
@@ -66,11 +85,53 @@ class WidgetView(
     }
 
     init {
+        // Create scroll view for text (will be hidden for image widgets)
+        // Create scroll view for text (will be hidden for image widgets)
+        scrollView = AutoScrollOnlyView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.MATCH_PARENT
+            )
+            visibility = View.GONE
+            isVerticalScrollBarEnabled = false  // Hide scrollbar for cleaner look
+
+            // NEW: Completely disable all touch interaction - auto-scroll only
+            isClickable = false
+            isFocusable = false
+            isFocusableInTouchMode = false
+
+            // Never intercept touch events
+            setOnTouchListener { _, _ -> false }
+        }
+
+        // Also make TextView non-interactive
+        textView = android.widget.TextView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT
+            )
+            textSize = 16f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(20, 20, 20, 20)
+            setBackgroundColor(android.graphics.Color.parseColor("#66000000"))
+
+            // Make completely non-interactive
+            isClickable = false
+            isFocusable = false
+            isFocusableInTouchMode = false
+        }
+        scrollView.addView(textView)
+
         // Create ImageView for the widget content
         imageView = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER  // Keeps image centered and scaled
+            // Remove any max dimensions that might constrain scaling
+            maxHeight = Int.MAX_VALUE
+            maxWidth = Int.MAX_VALUE
         }
+
+        // Add both views (only one will be visible at a time)
+        addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         val buttonSize = (handleSize * 1.2f).toInt()
@@ -237,8 +298,8 @@ class WidgetView(
                     val newX = initialX + deltaX
                     val newY = initialY + deltaY
 
-                    widget.x = if (snapToGrid) snapToGridValue(newX) else newX
-                    widget.y = if (snapToGrid) snapToGridValue(newY) else newY
+                    widget.x = if (snapToGrid) snapXToGrid(newX) else newX
+                    widget.y = if (snapToGrid) snapYToGrid(newY) else newY
                     updateLayout()
                 }
 
@@ -272,8 +333,8 @@ class WidgetView(
 
                 // Apply final snap on release if enabled
                 if (snapToGrid && (isDragging || isResizing)) {
-                    widget.x = snapToGridValue(widget.x)
-                    widget.y = snapToGridValue(widget.y)
+                    widget.x = snapXToGrid(widget.x)
+                    widget.y = snapYToGrid(widget.y)
                     widget.width = snapToGridValue(widget.width)
                     widget.height = snapToGridValue(widget.height)
                     updateLayout()
@@ -312,6 +373,35 @@ class WidgetView(
     }
 
     private fun loadWidgetImage() {
+        // NEW: Handle text-based widgets (game description) FIRST, before checking if path is empty
+        if (widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+            imageView.visibility = View.GONE
+
+            val description = widget.imagePath
+            if (description.isNotEmpty()) {
+                // Show scrollView with background when there's text
+                scrollView.visibility = View.VISIBLE
+                textView.text = description
+                textView.setBackgroundColor(android.graphics.Color.parseColor("#4D000000"))  // Show background
+                android.util.Log.d("WidgetView", "Game description loaded: ${description.take(100)}...")
+
+                // Start auto-scrolling after a short delay
+                postDelayed({
+                    startAutoScroll()
+                }, 2000)
+            } else {
+                // Hide scrollView completely when there's no text
+                scrollView.visibility = View.GONE
+                textView.text = ""
+                android.util.Log.d("WidgetView", "No description available - hiding widget")
+            }
+            return
+        }
+
+        // Existing code for image widgets - hide text view, show image view
+        scrollView.visibility = View.GONE
+        imageView.visibility = View.VISIBLE
+
         if (widget.imagePath.isEmpty()) {
             // Only show text fallback for MARQUEE type
             if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
@@ -366,10 +456,13 @@ class WidgetView(
             // Load from file (custom logo path)
             val file = File(widget.imagePath)
             if (file.exists()) {
+                // ✨ UPDATED SECTION - Better scaling for images
                 Glide.with(context)
                     .load(file)
+                    .override(widget.width.toInt(), widget.height.toInt())  // ✅ Scale to container size
+                    .fitCenter()
                     .into(imageView)
-                android.util.Log.d("WidgetView", "Loaded custom logo file: ${widget.imagePath}")
+                android.util.Log.d("WidgetView", "Loaded custom logo file with full scaling: ${widget.imagePath}")
             } else {
                 // Only show text fallback for MARQUEE type
                 if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
@@ -397,6 +490,23 @@ class WidgetView(
                 }
             }
         }
+
+        // At the very end of loadWidgetImage() method
+        postDelayed({
+            android.util.Log.d("WidgetView", "═══ DIAGNOSTIC INFO ═══")
+            android.util.Log.d("WidgetView", "Widget container: ${width}x${height}")
+            android.util.Log.d("WidgetView", "Widget data size: ${widget.width}x${widget.height}")
+            android.util.Log.d("WidgetView", "ImageView size: ${imageView.width}x${imageView.height}")
+            android.util.Log.d("WidgetView", "ImageView scaleType: ${imageView.scaleType}")
+            android.util.Log.d("WidgetView", "ImageView layoutParams: ${imageView.layoutParams.width}x${imageView.layoutParams.height}")
+
+            val drawable = imageView.drawable
+            if (drawable != null) {
+                android.util.Log.d("WidgetView", "Drawable intrinsic: ${drawable.intrinsicWidth}x${drawable.intrinsicHeight}")
+                android.util.Log.d("WidgetView", "Drawable bounds: ${drawable.bounds}")
+            }
+            android.util.Log.d("WidgetView", "═══ END DIAGNOSTIC ═══")
+        }, 100)
     }
 
     private fun extractGameNameFromWidget(): String {
@@ -412,7 +522,7 @@ class WidgetView(
         }
     }
 
-    private fun isTouchingExtendedCorner(x: Float, y: Float): Boolean {
+    fun isTouchingExtendedCorner(x: Float, y: Float): Boolean {
         val extend = handleHitZone / 2  // Half the hit zone extends outside
 
         // Top-left extended zone
@@ -469,7 +579,6 @@ class WidgetView(
     private fun resizeFromCorner(corner: ResizeCorner, deltaX: Float, deltaY: Float) {
         when (corner) {
             ResizeCorner.TOP_LEFT -> {
-                // Resize from top-left: move position and change size inversely
                 val newWidth = max(100f, initialWidth - deltaX)
                 val newHeight = max(100f, initialHeight - deltaY)
                 val widthDiff = initialWidth - newWidth
@@ -477,31 +586,28 @@ class WidgetView(
 
                 widget.width = if (snapToGrid) snapToGridValue(newWidth) else newWidth
                 widget.height = if (snapToGrid) snapToGridValue(newHeight) else newHeight
-                widget.x = if (snapToGrid) snapToGridValue(initialX + widthDiff) else initialX + widthDiff
-                widget.y = if (snapToGrid) snapToGridValue(initialY + heightDiff) else initialY + heightDiff
+                widget.x = if (snapToGrid) snapXToGrid(initialX + widthDiff) else initialX + widthDiff
+                widget.y = if (snapToGrid) snapYToGrid(initialY + heightDiff) else initialY + heightDiff
             }
             ResizeCorner.TOP_RIGHT -> {
-                // Resize from top-right: change width and move y
                 val newWidth = max(100f, initialWidth + deltaX)
                 val newHeight = max(100f, initialHeight - deltaY)
                 val heightDiff = initialHeight - newHeight
 
                 widget.width = if (snapToGrid) snapToGridValue(newWidth) else newWidth
                 widget.height = if (snapToGrid) snapToGridValue(newHeight) else newHeight
-                widget.y = if (snapToGrid) snapToGridValue(initialY + heightDiff) else initialY + heightDiff
+                widget.y = if (snapToGrid) snapYToGrid(initialY + heightDiff) else initialY + heightDiff
             }
             ResizeCorner.BOTTOM_LEFT -> {
-                // Resize from bottom-left: change height and move x
                 val newWidth = max(100f, initialWidth - deltaX)
                 val newHeight = max(100f, initialHeight + deltaY)
                 val widthDiff = initialWidth - newWidth
 
                 widget.width = if (snapToGrid) snapToGridValue(newWidth) else newWidth
                 widget.height = if (snapToGrid) snapToGridValue(newHeight) else newHeight
-                widget.x = if (snapToGrid) snapToGridValue(initialX + widthDiff) else initialX + widthDiff
+                widget.x = if (snapToGrid) snapXToGrid(initialX + widthDiff) else initialX + widthDiff
             }
             ResizeCorner.BOTTOM_RIGHT -> {
-                // Resize from bottom-right: just increase size
                 val newWidth = max(100f, initialWidth + deltaX)
                 val newHeight = max(100f, initialHeight + deltaY)
 
@@ -512,8 +618,24 @@ class WidgetView(
         }
     }
 
-    private fun snapToGridValue(value: Float): Float {
-        return (value / gridSize).roundToInt() * gridSize
+    private fun snapXToGrid(x: Float): Float {
+        val displayMetrics = context.resources.displayMetrics
+        val screenCenterX = displayMetrics.widthPixels / 2f
+        // Snap the center itself to grid
+        val snappedCenterX = (screenCenterX / gridSize).roundToInt() * gridSize
+        val distanceFromCenter = x - snappedCenterX
+        val snappedDistance = (distanceFromCenter / gridSize).roundToInt() * gridSize
+        return snappedCenterX + snappedDistance
+    }
+
+    private fun snapYToGrid(y: Float): Float {
+        val displayMetrics = context.resources.displayMetrics
+        val screenCenterY = displayMetrics.heightPixels / 2f
+        // Snap the center itself to grid
+        val snappedCenterY = (screenCenterY / gridSize).roundToInt() * gridSize
+        val distanceFromCenter = y - snappedCenterY
+        val snappedDistance = (distanceFromCenter / gridSize).roundToInt() * gridSize
+        return snappedCenterY + snappedDistance
     }
 
     fun setLocked(locked: Boolean) {
@@ -525,13 +647,17 @@ class WidgetView(
         invalidate()
     }
 
+    private fun snapToGridValue(value: Float): Float {
+        return (value / gridSize).roundToInt() * gridSize
+    }
+
     fun setSnapToGrid(snap: Boolean, size: Float) {
         snapToGrid = snap
         gridSize = size
 
         if (snap) {
-            widget.x = snapToGridValue(widget.x)
-            widget.y = snapToGridValue(widget.y)
+            widget.x = snapXToGrid(widget.x)
+            widget.y = snapYToGrid(widget.y)
             widget.width = snapToGridValue(widget.width)
             widget.height = snapToGridValue(widget.height)
             updateLayout()
@@ -553,8 +679,6 @@ class WidgetView(
         settingsButton.visibility = if (shouldShow) VISIBLE else GONE
 
         android.util.Log.d("WidgetView", "Delete button visibility: ${deleteButton.visibility}, Settings button visibility: ${settingsButton.visibility}")
-        android.util.Log.d("WidgetView", "Settings button visibility: ${settingsButton.visibility}")
-        android.util.Log.d("WidgetView", "Settings button parent: ${settingsButton.parent}")
     }
 
     private fun showDeleteDialog() {
@@ -579,6 +703,8 @@ class WidgetView(
         // Get the widget name from imagePath since we can't directly access ImageType here
         // Parse the builtin path or filename to determine widget type
         val widgetName = when {
+            widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> "Game Description"
+
             widget.imagePath.contains("marquees", ignoreCase = true) -> "Marquee"
             widget.imagePath.contains("covers", ignoreCase = true) -> "2D Box"
             widget.imagePath.contains("3dboxes", ignoreCase = true) -> "3D Box"
@@ -639,5 +765,46 @@ class WidgetView(
     fun clearImage() {
         Glide.with(context).clear(imageView)
         imageView.setImageDrawable(null)
+    }
+
+    private fun startAutoScroll() {
+        stopAutoScroll()  // Stop any existing scroll
+
+        scrollJob = object : Runnable {
+            override fun run() {
+                val maxScroll = textView.height - scrollView.height
+                if (maxScroll > 0) {
+                    val currentScroll = scrollView.scrollY
+
+                    // Scroll down
+                    if (currentScroll < maxScroll) {
+                        scrollView.scrollTo(0, currentScroll + scrollSpeed)
+                        postDelayed(this, scrollDelay)
+                    } else {
+                        // Reached bottom, pause then reset
+                        postDelayed({
+                            scrollView.scrollTo(0, 0)
+                            // Restart scrolling after pause
+                            postDelayed(this, 2000)
+                        }, 2000)
+                    }
+                }
+            }
+        }
+
+        post(scrollJob!!)
+    }
+
+    private fun stopAutoScroll() {
+        scrollJob?.let {
+            removeCallbacks(it)
+            scrollJob = null
+        }
+    }
+
+    // Update onDetachedFromWindow to stop scrolling
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        stopAutoScroll()
     }
 }

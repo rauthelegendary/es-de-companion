@@ -24,7 +24,8 @@ data class OverlayWidget(
         SCREENSHOT,
         FANART,
         TITLE_SCREEN,
-        SYSTEM_LOGO
+        SYSTEM_LOGO,
+        GAME_DESCRIPTION
     }
 
     enum class WidgetContext {
