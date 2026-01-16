@@ -703,6 +703,8 @@ class WidgetView(
         // Get the widget name from imagePath since we can't directly access ImageType here
         // Parse the builtin path or filename to determine widget type
         val widgetName = when {
+            widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> "Game Description"
+
             widget.imagePath.contains("marquees", ignoreCase = true) -> "Marquee"
             widget.imagePath.contains("covers", ignoreCase = true) -> "2D Box"
             widget.imagePath.contains("3dboxes", ignoreCase = true) -> "3D Box"
