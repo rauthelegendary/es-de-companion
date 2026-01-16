@@ -3262,7 +3262,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
 
         // If black screen, don't load anything
-        if (screensaverBehavior == "black_screen") {  // CHANGED
+        if (screensaverBehavior == "black_screen") {
             android.util.Log.d("MainActivity", "Black screen - ignoring screensaver game select")
             return
         }
@@ -3292,6 +3292,10 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         loadFallbackBackground()
                     }
 
+                    // NEW: Make sure views are visible
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
                     // CRITICAL: Set current game context BEFORE loading widgets
                     // This ensures widgets load images from the correct system folder
                     currentSystemName = screensaverSystemName
@@ -3305,6 +3309,15 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
                 "default_image" -> {
                     loadFallbackBackground()
+
+                    // NEW: Make sure views are visible
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
+                    // DEBUG: Log visibility state
+                    android.util.Log.d("MainActivity", "After setting visibility: gameImageView=${gameImageView.visibility}, videoView=${videoView.visibility}")
+                    android.util.Log.d("MainActivity", "gameImageView drawable: ${gameImageView.drawable}")
+
                     // CRITICAL: Set current game context BEFORE loading widgets
                     // This ensures widgets load images from the correct system folder
                     currentSystemName = screensaverSystemName
@@ -3366,23 +3379,34 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         findImageInFolder(systemName, gameName, gameFilename, "fanart")
                     OverlayWidget.ImageType.TITLE_SCREEN ->
                         findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
-                    OverlayWidget.ImageType.SYSTEM_LOGO -> null  // ADDED: System logos don't belong in game view
+                    OverlayWidget.ImageType.GAME_DESCRIPTION -> null  // NEW: Text widget, handled separately
+                    OverlayWidget.ImageType.SYSTEM_LOGO -> null
                 }
 
                 // ALWAYS create the widget, even if image doesn't exist
-                val widgetToAdd = if (imageFile != null && imageFile.exists()) {
-                    android.util.Log.d("MainActivity", "  Creating screensaver widget with new image")
-                    widget.copy(imagePath = imageFile.absolutePath)
-                } else {
-                    android.util.Log.d("MainActivity", "  No screensaver image found for widget type ${widget.imageType}, using empty path")
-                    // Store game name in widget ID for marquee text fallback
-                    if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-                        widget.copy(
-                            imagePath = "",
-                            id = "widget_${gameName}"
-                        )
-                    } else {
-                        widget.copy(imagePath = "")
+                val widgetToAdd = when {
+                    // NEW: Handle description text widget for screensaver
+                    widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
+                        val description = getGameDescription(systemName, gameFilename)
+                        android.util.Log.d("MainActivity", "  Updating screensaver description widget: ${description?.take(50)}")
+                        widget.copy(imagePath = description ?: "")
+                    }
+                    // Handle image widgets
+                    imageFile != null && imageFile.exists() -> {
+                        android.util.Log.d("MainActivity", "  Creating screensaver widget with new image")
+                        widget.copy(imagePath = imageFile.absolutePath)
+                    }
+                    // No image found
+                    else -> {
+                        android.util.Log.d("MainActivity", "  No screensaver image found for widget type ${widget.imageType}, using empty path")
+                        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                            widget.copy(
+                                imagePath = "",
+                                id = "widget_${gameName}"
+                            )
+                        } else {
+                            widget.copy(imagePath = "")
+                        }
                     }
                 }
 
@@ -3985,7 +4009,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     "Physical Media",
                     "Screenshot",
                     "Fanart",
-                    "Title Screen"
+                    "Title Screen",
+                    "Game Description"
                 )
             }
         }
@@ -4056,15 +4081,16 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     }
 
                     val imageType = when (which) {
-                        4 -> OverlayWidget.ImageType.MARQUEE  // CHANGED from 3
-                        5 -> OverlayWidget.ImageType.BOX_2D   // CHANGED from 4
-                        6 -> OverlayWidget.ImageType.BOX_3D   // CHANGED from 5
-                        7 -> OverlayWidget.ImageType.MIX_IMAGE // CHANGED from 6
-                        8 -> OverlayWidget.ImageType.BACK_COVER // CHANGED from 7
-                        9 -> OverlayWidget.ImageType.PHYSICAL_MEDIA // CHANGED from 8
-                        10 -> OverlayWidget.ImageType.SCREENSHOT // CHANGED from 9
-                        11 -> OverlayWidget.ImageType.FANART // CHANGED from 10
-                        12 -> OverlayWidget.ImageType.TITLE_SCREEN // CHANGED from 11
+                        4 -> OverlayWidget.ImageType.MARQUEE
+                        5 -> OverlayWidget.ImageType.BOX_2D
+                        6 -> OverlayWidget.ImageType.BOX_3D
+                        7 -> OverlayWidget.ImageType.MIX_IMAGE
+                        8 -> OverlayWidget.ImageType.BACK_COVER
+                        9 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
+                        10 -> OverlayWidget.ImageType.SCREENSHOT
+                        11 -> OverlayWidget.ImageType.FANART
+                        12 -> OverlayWidget.ImageType.TITLE_SCREEN
+                        13 -> OverlayWidget.ImageType.GAME_DESCRIPTION
                         else -> return@setOnItemClickListener
                     }
                     createWidget(imageType)
@@ -4199,9 +4225,37 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     findImageInFolder(systemName, gameName, gameFilename, "fanart")
                 OverlayWidget.ImageType.TITLE_SCREEN ->
                     findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
+                OverlayWidget.ImageType.GAME_DESCRIPTION -> null
                 else -> null
             }
 
+            // Special handling for game description (text widget)
+            if (imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+                val description = getGameDescription(systemName, gameFilename)
+
+                val widget = OverlayWidget(
+                    imageType = OverlayWidget.ImageType.GAME_DESCRIPTION,
+                    imagePath = description ?: "",  // Store description text in imagePath
+                    x = displayMetrics.widthPixels / 2f - 300f,
+                    y = displayMetrics.heightPixels / 2f - 200f,
+                    width = 600f,
+                    height = 400f,
+                    zIndex = nextZIndex,
+                    widgetContext = OverlayWidget.WidgetContext.GAME
+                )
+
+                addWidgetToScreen(widget)
+
+                android.widget.Toast.makeText(
+                    this,
+                    if (description != null) "Game description widget created!" else "No description available for this game",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+
+                return
+            }
+
+            // Existing validation for image-based widgets
             if (imageFile == null || !imageFile.exists()) {
                 val typeName = when (imageType) {
                     OverlayWidget.ImageType.MARQUEE -> "marquee"
@@ -4213,6 +4267,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     OverlayWidget.ImageType.SCREENSHOT -> "screenshot"
                     OverlayWidget.ImageType.FANART -> "fanart"
                     OverlayWidget.ImageType.TITLE_SCREEN -> "title screen"
+                    OverlayWidget.ImageType.GAME_DESCRIPTION -> "game description"
                     else -> "image"
                 }
                 android.widget.Toast.makeText(
@@ -4366,6 +4421,77 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         )
     }
 
+    /**
+     * Parse game description from ES-DE gamelist.xml
+     * Returns null if not found or any error occurs
+     */
+    private fun getGameDescription(systemName: String, gameFilename: String): String? {
+        try {
+            // Get scripts path and navigate to ES-DE folder
+            val scriptsPath = prefs.getString("scripts_path", "/storage/emulated/0/ES-DE/scripts")
+                ?: return null
+
+            // Get ES-DE root folder (parent of scripts folder)
+            val scriptsDir = File(scriptsPath)
+            val esdeRoot = scriptsDir.parentFile ?: return null
+
+            // Build path to gamelist.xml: ~/ES-DE/gamelists/<systemname>/gamelist.xml
+            val gamelistFile = File(esdeRoot, "gamelists/$systemName/gamelist.xml")
+
+            android.util.Log.d("MainActivity", "Looking for gamelist: ${gamelistFile.absolutePath}")
+
+            if (!gamelistFile.exists()) {
+                android.util.Log.d("MainActivity", "Gamelist file not found for system: $systemName")
+                return null
+            }
+
+            // Parse XML to find the game's description
+            val xmlContent = gamelistFile.readText()
+
+            // Sanitize the game filename for comparison
+            val sanitizedFilename = sanitizeGameFilename(gameFilename)
+
+            // Look for the game entry with matching path
+            // Match pattern: <path>./filename</path>
+            val pathPattern = "<path>\\./\\Q$sanitizedFilename\\E</path>".toRegex()
+            val pathMatch = pathPattern.find(xmlContent)
+
+            if (pathMatch == null) {
+                android.util.Log.d("MainActivity", "Game not found in gamelist: $sanitizedFilename")
+                return null
+            }
+
+            // Find the <desc> tag after this <path> tag
+            val gameStartIndex = pathMatch.range.first
+
+            // Search for <desc>...</desc> within this game entry (before next <game> tag)
+            val remainingXml = xmlContent.substring(gameStartIndex)
+            val nextGameIndex = remainingXml.indexOf("<game>", startIndex = 1)
+            val searchSpace = if (nextGameIndex > 0) {
+                remainingXml.substring(0, nextGameIndex)
+            } else {
+                remainingXml
+            }
+
+            // Extract description text between <desc> and </desc>
+            val descPattern = "<desc>([\\s\\S]*?)</desc>".toRegex()
+            val descMatch = descPattern.find(searchSpace)
+
+            return if (descMatch != null) {
+                val description = descMatch.groupValues[1].trim()
+                android.util.Log.d("MainActivity", "Found description: ${description.take(100)}...")
+                description
+            } else {
+                android.util.Log.d("MainActivity", "No description found for game: $sanitizedFilename")
+                null
+            }
+
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error parsing gamelist.xml", e)
+            return null
+        }
+    }
+
     private fun updateWidgetsForCurrentGame() {
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame START ═══")
         android.util.Log.d("MainActivity", "isSystemScrollActive: $isSystemScrollActive")
@@ -4421,26 +4547,38 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                             findImageInFolder(systemName, gameName, gameFilename, "fanart")
                         OverlayWidget.ImageType.TITLE_SCREEN ->
                             findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
-                        OverlayWidget.ImageType.SYSTEM_LOGO -> null  // ADDED: System logos don't belong in screensaver
+                        OverlayWidget.ImageType.GAME_DESCRIPTION -> null  // NEW: Text widget, handled separately
+                        OverlayWidget.ImageType.SYSTEM_LOGO -> null
                     }
 
                     android.util.Log.d("MainActivity", "  Image file: ${imageFile?.absolutePath ?: "NULL"}")
                     android.util.Log.d("MainActivity", "  Image exists: ${imageFile?.exists()}")
 
                     // ALWAYS create the widget, even if image doesn't exist
-                    val widgetToAdd = if (imageFile != null && imageFile.exists()) {
-                        android.util.Log.d("MainActivity", "  Creating widget with new image")
-                        widget.copy(imagePath = imageFile.absolutePath)
-                    } else {
-                        android.util.Log.d("MainActivity", "  No valid image found, using empty path")
-                        // Store game name in widget ID for marquee text fallback
-                        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-                            widget.copy(
-                                imagePath = "",
-                                id = "widget_${gameName}"
-                            )
-                        } else {
-                            widget.copy(imagePath = "")
+                    val widgetToAdd = when {
+                        // NEW: Handle description text widget
+                        widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
+                            val description = getGameDescription(systemName, gameFilename)
+                            android.util.Log.d("MainActivity", "  Updating description widget: ${description?.take(50)}")
+                            widget.copy(imagePath = description ?: "")
+                        }
+                        // Handle image widgets
+                        imageFile != null && imageFile.exists() -> {
+                            android.util.Log.d("MainActivity", "  Creating widget with new image")
+                            widget.copy(imagePath = imageFile.absolutePath)
+                        }
+                        // No image found
+                        else -> {
+                            android.util.Log.d("MainActivity", "  No valid image found, using empty path")
+                            // Store game name in widget ID for marquee text fallback
+                            if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                                widget.copy(
+                                    imagePath = "",
+                                    id = "widget_${gameName}"
+                                )
+                            } else {
+                                widget.copy(imagePath = "")
+                            }
                         }
                     }
 

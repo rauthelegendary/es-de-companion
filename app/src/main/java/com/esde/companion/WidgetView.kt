@@ -17,6 +17,20 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+/**
+ * ScrollView that never intercepts touch events - only auto-scrolls programmatically
+ */
+class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) {
+    override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+        // Never intercept - let parent handle all touches
+        return false
+    }
+
+    override fun onTouchEvent(ev: MotionEvent?): Boolean {
+        // Never handle touches - only programmatic scrolling allowed
+        return false
+    }
+}
 class WidgetView(
     context: Context,
     val widget: OverlayWidget,
@@ -25,6 +39,8 @@ class WidgetView(
 ) : RelativeLayout(context) {
 
     private val imageView: ImageView
+    private val textView: android.widget.TextView
+    private val scrollView: AutoScrollOnlyView  // CHANGED
     private val deleteButton: ImageButton
     private val settingsButton: ImageButton
 
@@ -56,6 +72,9 @@ class WidgetView(
     // Snap to grid settings
     private var snapToGrid = false
     private var gridSize = 50f
+    private var scrollJob: Runnable? = null
+    private val scrollSpeed = 1  // pixels per frame
+    private val scrollDelay = 30L  // milliseconds between scroll updates
 
     enum class ResizeCorner {
         NONE,
@@ -66,6 +85,43 @@ class WidgetView(
     }
 
     init {
+        // Create scroll view for text (will be hidden for image widgets)
+        // Create scroll view for text (will be hidden for image widgets)
+        scrollView = AutoScrollOnlyView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.MATCH_PARENT
+            )
+            visibility = View.GONE
+            isVerticalScrollBarEnabled = false  // Hide scrollbar for cleaner look
+
+            // NEW: Completely disable all touch interaction - auto-scroll only
+            isClickable = false
+            isFocusable = false
+            isFocusableInTouchMode = false
+
+            // Never intercept touch events
+            setOnTouchListener { _, _ -> false }
+        }
+
+        // Also make TextView non-interactive
+        textView = android.widget.TextView(context).apply {
+            layoutParams = LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                LayoutParams.WRAP_CONTENT
+            )
+            textSize = 16f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(20, 20, 20, 20)
+            setBackgroundColor(android.graphics.Color.parseColor("#66000000"))
+
+            // Make completely non-interactive
+            isClickable = false
+            isFocusable = false
+            isFocusableInTouchMode = false
+        }
+        scrollView.addView(textView)
+
         // Create ImageView for the widget content
         imageView = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER  // Keeps image centered and scaled
@@ -73,6 +129,9 @@ class WidgetView(
             maxHeight = Int.MAX_VALUE
             maxWidth = Int.MAX_VALUE
         }
+
+        // Add both views (only one will be visible at a time)
+        addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
 
         val buttonSize = (handleSize * 1.2f).toInt()
@@ -314,6 +373,35 @@ class WidgetView(
     }
 
     private fun loadWidgetImage() {
+        // NEW: Handle text-based widgets (game description) FIRST, before checking if path is empty
+        if (widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+            imageView.visibility = View.GONE
+
+            val description = widget.imagePath
+            if (description.isNotEmpty()) {
+                // Show scrollView with background when there's text
+                scrollView.visibility = View.VISIBLE
+                textView.text = description
+                textView.setBackgroundColor(android.graphics.Color.parseColor("#4D000000"))  // Show background
+                android.util.Log.d("WidgetView", "Game description loaded: ${description.take(100)}...")
+
+                // Start auto-scrolling after a short delay
+                postDelayed({
+                    startAutoScroll()
+                }, 2000)
+            } else {
+                // Hide scrollView completely when there's no text
+                scrollView.visibility = View.GONE
+                textView.text = ""
+                android.util.Log.d("WidgetView", "No description available - hiding widget")
+            }
+            return
+        }
+
+        // Existing code for image widgets - hide text view, show image view
+        scrollView.visibility = View.GONE
+        imageView.visibility = View.VISIBLE
+
         if (widget.imagePath.isEmpty()) {
             // Only show text fallback for MARQUEE type
             if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
@@ -591,8 +679,6 @@ class WidgetView(
         settingsButton.visibility = if (shouldShow) VISIBLE else GONE
 
         android.util.Log.d("WidgetView", "Delete button visibility: ${deleteButton.visibility}, Settings button visibility: ${settingsButton.visibility}")
-        android.util.Log.d("WidgetView", "Settings button visibility: ${settingsButton.visibility}")
-        android.util.Log.d("WidgetView", "Settings button parent: ${settingsButton.parent}")
     }
 
     private fun showDeleteDialog() {
@@ -677,5 +763,46 @@ class WidgetView(
     fun clearImage() {
         Glide.with(context).clear(imageView)
         imageView.setImageDrawable(null)
+    }
+
+    private fun startAutoScroll() {
+        stopAutoScroll()  // Stop any existing scroll
+
+        scrollJob = object : Runnable {
+            override fun run() {
+                val maxScroll = textView.height - scrollView.height
+                if (maxScroll > 0) {
+                    val currentScroll = scrollView.scrollY
+
+                    // Scroll down
+                    if (currentScroll < maxScroll) {
+                        scrollView.scrollTo(0, currentScroll + scrollSpeed)
+                        postDelayed(this, scrollDelay)
+                    } else {
+                        // Reached bottom, pause then reset
+                        postDelayed({
+                            scrollView.scrollTo(0, 0)
+                            // Restart scrolling after pause
+                            postDelayed(this, 2000)
+                        }, 2000)
+                    }
+                }
+            }
+        }
+
+        post(scrollJob!!)
+    }
+
+    private fun stopAutoScroll() {
+        scrollJob?.let {
+            removeCallbacks(it)
+            scrollJob = null
+        }
+    }
+
+    // Update onDetachedFromWindow to stop scrolling
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        stopAutoScroll()
     }
 }
