@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
-import android.graphics.Canvas
 import android.os.Bundle
 import android.os.Environment
 import android.os.FileObserver
@@ -17,7 +16,6 @@ import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.EditText
@@ -43,7 +41,6 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import android.app.ActivityOptions
 import android.provider.Settings
-import android.hardware.display.DisplayManager
 import android.net.Uri
 import androidx.appcompat.app.AlertDialog
 import java.io.File
@@ -55,10 +52,13 @@ import androidx.media3.ui.PlayerView
 import android.os.Handler
 import android.os.Looper
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import com.esde.companion.ost.MusicDownloader
 import com.esde.companion.ost.MusicPlayer
 import com.esde.companion.ost.MusicRepository
 import kotlinx.coroutines.launch
+import kotlin.apply
 
 class MainActivity : AppCompatActivity() {
 
@@ -144,6 +144,8 @@ class MainActivity : AppCompatActivity() {
     // Dynamic debouncing for fast scrolling - separate tracking for systems and games
     private val imageLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var imageLoadRunnable: Runnable? = null
+    private var musicLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var musicLoadRunnable: Runnable? = null
     private var lastSystemScrollTime = 0L
     private var lastGameScrollTime = 0L
 
@@ -161,6 +163,11 @@ class MainActivity : AppCompatActivity() {
     private var lastGameStartTime = 0L
     private var lastGameEndTime = 0L
     private val GAME_EVENT_DEBOUNCE = 2000L  // 2 seconds
+
+    private val scriptManager = ScriptManager(this)
+
+    private lateinit var musicRepository: MusicRepository
+    private lateinit var musicPlayer: MusicPlayer
 
     // Broadcast receiver for app install/uninstall events
     private val appChangeReceiver = object : BroadcastReceiver() {
@@ -244,9 +251,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    private lateinit var musicRepository: MusicRepository
-    private lateinit var musicPlayer: MusicPlayer
     
     private fun updateDimmingOverlay() {
         val dimmingPercent = prefs.getInt("dimming", 25)
@@ -267,6 +271,17 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        musicRepository = MusicRepository(this, MusicDownloader())
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+        val musicExoPlayer = ExoPlayer.Builder(this).build()
+        musicExoPlayer.setAudioAttributes(audioAttributes, true) // true = handle audio focus automatically
+
+        musicPlayer = MusicPlayer(musicRepository, musicExoPlayer)
+
 
         prefs = getSharedPreferences("ESDESecondScreenPrefs", MODE_PRIVATE)
         appLaunchPrefs = AppLaunchPreferences(this)
@@ -365,9 +380,6 @@ class MainActivity : AppCompatActivity() {
         // Register volume change listener for real-time updates
         registerVolumeListener()
         registerSecondaryVolumeObserver()
-
-        musicRepository = MusicRepository(this, MusicDownloader())
-        musicPlayer = MusicPlayer(musicRepository, ExoPlayer.Builder(this).build())
     }
 
     private fun checkAndLaunchSetupWizard() {
@@ -414,7 +426,7 @@ class MainActivity : AppCompatActivity() {
         // Check immediately without retry
         if (scriptsPath == null || scriptsPath.startsWith("/storage/emulated/0")) {
             android.util.Log.d("MainActivity", "Scripts on internal storage - checking immediately")
-            val hasCorrectScripts = checkForCorrectScripts()
+            val hasCorrectScripts = scriptManager.checkScriptValidity(scriptsPath)
             if (!hasCorrectScripts) {
                 android.util.Log.d("MainActivity", "Scripts missing/outdated on internal storage - showing dialog")
 
@@ -459,7 +471,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Either accessible now or max attempts reached - check scripts
-        val hasCorrectScripts = checkForCorrectScripts()
+        val hasCorrectScripts = scriptManager.checkScriptValidity(scriptsPath)
 
         if (!hasCorrectScripts) {
             if (isAccessible) {
@@ -515,265 +527,6 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Dismiss", null)
             .setIcon(android.R.drawable.ic_dialog_alert)
             .show()
-    }
-
-    private fun checkForCorrectScripts(): Boolean {
-        // Get scripts path (return false if not set)
-        val scriptsPath = prefs.getString("scripts_path", null) ?: return false
-        val scriptsDir = File(scriptsPath)
-
-        // Define required scripts with their expected content signatures
-        val requiredScripts = mapOf(
-            "game-select/esdecompanion-game-select.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_game_filename.txt",
-                "esde_game_name.txt",
-                "esde_game_system.txt",
-                // NEW: Check that it's NOT using basename (old version)
-                "!basename"
-            ),
-            "system-select/esdecompanion-system-select.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_system_name.txt"
-            ),
-            "game-start/esdecompanion-game-start.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_gamestart_filename.txt",
-                "esde_gamestart_name.txt",
-                "esde_gamestart_system.txt",
-                // NEW: Check that it's NOT using basename or clean_filename (old version)
-                "!basename",
-                "!clean_filename"
-            ),
-            "game-end/esdecompanion-game-end.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_gameend_filename.txt",
-                "esde_gameend_name.txt",
-                "esde_gameend_system.txt",
-                // NEW: Check that it's NOT using basename or clean_filename (old version)
-                "!basename",
-                "!clean_filename"
-            ),
-            "screensaver-start/esdecompanion-screensaver-start.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_screensaver_start.txt"
-            ),
-            "screensaver-end/esdecompanion-screensaver-end.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_screensaver_end.txt"
-            ),
-            "screensaver-game-select/esdecompanion-screensaver-game-select.sh" to listOf(
-                "LOG_DIR=\"/storage/emulated/0/ES-DE Companion/logs\"",
-                "esde_screensavergameselect_filename.txt",
-                "esde_screensavergameselect_name.txt",
-                "esde_screensavergameselect_system.txt",
-                // NEW: Check that it's NOT using basename or clean_filename (old version)
-                "!basename",
-                "!clean_filename"
-            )
-        )
-
-        // Check each script exists and contains expected content
-        for ((scriptPath, expectedContent) in requiredScripts) {
-            val scriptFile = File(scriptsDir, scriptPath)
-
-            // Check if file exists
-            if (!scriptFile.exists()) {
-                return false
-            }
-
-            // Read and validate content
-            try {
-                val content = scriptFile.readText()
-
-                // Check if all expected strings are present in the content
-                for (expected in expectedContent) {
-                    if (expected.startsWith("!")) {
-                        // Negative check - this string should NOT be present (old version)
-                        val unwantedString = expected.substring(1)
-                        if (content.contains(unwantedString)) {
-                            android.util.Log.w("MainActivity", "Script contains old code: $scriptPath (found: $unwantedString)")
-                            return false // Script is outdated
-                        }
-                    } else {
-                        // Positive check - this string SHOULD be present
-                        if (!content.contains(expected)) {
-                            return false
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("MainActivity", "Error reading script: $scriptPath", e)
-                return false
-            }
-        }
-
-        // All scripts exist with correct content
-        return true
-    }
-
-    /**
-     * Show dialog when old scripts are detected
-     */
-    private fun showScriptsUpdateAvailableDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Script Update Available")
-            .setMessage("Your ES-DE integration scripts need to be updated to support games in subfolders.\n\n" +
-                    "Changes:\n" +
-                    "• Scripts now pass full file paths\n" +
-                    "• App handles subfolder detection\n" +
-                    "• Improves compatibility with organized ROM collections\n\n" +
-                    "Would you like to update the scripts now?")
-            .setPositiveButton("Update Scripts") { _, _ ->
-                updateScriptsDirectly()
-            }
-            .setNegativeButton("Later") { _, _ ->
-                // User declined - show a toast reminder
-                Toast.makeText(
-                    this,
-                    "You can update scripts anytime from Settings",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-            .setIcon(android.R.drawable.ic_dialog_info)
-            .show()
-    }
-
-    /**
-     * Update scripts directly without going through wizard
-     */
-    private fun updateScriptsDirectly() {
-        val scriptsPath = prefs.getString("scripts_path", "/storage/emulated/0/ES-DE/scripts")
-            ?: "/storage/emulated/0/ES-DE/scripts"
-
-        try {
-            val scriptsDir = File(scriptsPath)
-
-            // Create all script subdirectories
-            val gameSelectDir = File(scriptsDir, "game-select")
-            val systemSelectDir = File(scriptsDir, "system-select")
-            val gameStartDir = File(scriptsDir, "game-start")
-            val gameEndDir = File(scriptsDir, "game-end")
-            val screensaverStartDir = File(scriptsDir, "screensaver-start")
-            val screensaverEndDir = File(scriptsDir, "screensaver-end")
-            val screensaverGameSelectDir = File(scriptsDir, "screensaver-game-select")
-
-            gameSelectDir.mkdirs()
-            systemSelectDir.mkdirs()
-            gameStartDir.mkdirs()
-            gameEndDir.mkdirs()
-            screensaverStartDir.mkdirs()
-            screensaverEndDir.mkdirs()
-            screensaverGameSelectDir.mkdirs()
-
-            // 1. esdecompanion-game-select.sh
-            val gameSelectScriptFile = File(gameSelectDir, "esdecompanion-game-select.sh")
-            gameSelectScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_game_filename.txt"
-echo -n "${'$'}2" > "${'$'}LOG_DIR/esde_game_name.txt"
-echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_game_system.txt"
-""")
-            gameSelectScriptFile.setExecutable(true)
-
-            // 2. esdecompanion-system-select.sh
-            val systemSelectScriptFile = File(systemSelectDir, "esdecompanion-system-select.sh")
-            systemSelectScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-printf "%s" "${'$'}1" > "${'$'}LOG_DIR/esde_system_name.txt" &
-""")
-            systemSelectScriptFile.setExecutable(true)
-
-            // 3. esdecompanion-game-start.sh
-            val gameStartScriptFile = File(gameStartDir, "esdecompanion-game-start.sh")
-            gameStartScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_gamestart_filename.txt"
-echo -n "${'$'}2" > "${'$'}LOG_DIR/esde_gamestart_name.txt"
-echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_gamestart_system.txt"
-""")
-            gameStartScriptFile.setExecutable(true)
-
-            // 4. esdecompanion-game-end.sh
-            val gameEndScriptFile = File(gameEndDir, "esdecompanion-game-end.sh")
-            gameEndScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_gameend_filename.txt"
-echo -n "${'$'}2" > "${'$'}LOG_DIR/esde_gameend_name.txt"
-echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_gameend_system.txt"
-""")
-            gameEndScriptFile.setExecutable(true)
-
-            // 5. esdecompanion-screensaver-start.sh
-            val screensaverStartScriptFile = File(screensaverStartDir, "esdecompanion-screensaver-start.sh")
-            screensaverStartScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_screensaver_start.txt"
-
-""")
-            screensaverStartScriptFile.setExecutable(true)
-
-            // 6. esdecompanion-screensaver-end.sh
-            val screensaverEndScriptFile = File(screensaverEndDir, "esdecompanion-screensaver-end.sh")
-            screensaverEndScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_screensaver_end.txt"
-
-""")
-            screensaverEndScriptFile.setExecutable(true)
-
-            // 7. esdecompanion-screensaver-game-select.sh
-            val screensaverGameSelectScriptFile = File(screensaverGameSelectDir, "esdecompanion-screensaver-game-select.sh")
-            screensaverGameSelectScriptFile.writeText("""#!/bin/bash
-
-LOG_DIR="/storage/emulated/0/ES-DE Companion/logs"
-mkdir -p "${'$'}LOG_DIR"
-
-echo -n "${'$'}1" > "${'$'}LOG_DIR/esde_screensavergameselect_filename.txt"
-echo -n "${'$'}2" > "${'$'}LOG_DIR/esde_screensavergameselect_name.txt"
-echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
-""")
-            screensaverGameSelectScriptFile.setExecutable(true)
-
-            // Show success message
-            Toast.makeText(
-                this,
-                "Scripts updated successfully!",
-                Toast.LENGTH_LONG
-            ).show()
-
-            // Start verification
-            Handler(Looper.getMainLooper()).postDelayed({
-                startScriptVerification()
-            }, 1000)
-
-        } catch (e: Exception) {
-            // Show error message
-            Toast.makeText(
-                this,
-                "Error updating scripts: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
-            android.util.Log.e("MainActivity", "Error updating scripts", e)
-        }
     }
 
     private fun createDefaultWidgets() {
@@ -833,6 +586,58 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     /**
+     * Show dialog when old scripts are detected
+     */
+    private fun showScriptsUpdateAvailableDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Script Update Available")
+            .setMessage("Your ES-DE integration scripts need to be updated to support games in subfolders.\n\n" +
+                    "Changes:\n" +
+                    "• Scripts now pass full file paths\n" +
+                    "• App handles subfolder detection\n" +
+                    "• Improves compatibility with organized ROM collections\n\n" +
+                    "Would you like to update the scripts now?")
+            .setPositiveButton("Update Scripts") { _, _ ->
+                updateScriptsDirectly()
+            }
+            .setNegativeButton("Later") { _, _ ->
+                // User declined - show a toast reminder
+                Toast.makeText(
+                    this,
+                    "You can update scripts anytime from Settings",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            .setIcon(android.R.drawable.ic_dialog_info)
+            .show()
+    }
+
+    private fun updateScriptsDirectly() {
+        try {
+            scriptManager.updateScriptsIfNeeded(prefs.getString("scripts_path", "/storage/emulated/0/ES-DE/scripts"))
+            // Show success message
+            Toast.makeText(
+                this,
+                "Scripts updated successfully!",
+                Toast.LENGTH_LONG
+            ).show()
+
+            // Start verification
+            Handler(Looper.getMainLooper()).postDelayed({
+                startScriptVerification()
+            }, 1000)
+        } catch (e: Exception) {
+            // Show error message
+            Toast.makeText(
+                this,
+                "Error updating scripts: ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+            android.util.Log.e("MainActivity", "Error updating scripts", e)
+        }
+    }
+
+    /**
      * Sanitize a full game path to just the filename for media lookup
      * Handles:
      * - Subfolders: "subfolder/game.zip" -> "game.zip"
@@ -853,9 +658,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         super.onPause()
         // Cancel any pending video delay timers (prevent video loading while in settings)
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
+        musicLoadRunnable?.let {musicLoadHandler?.removeCallbacks { it }}
         // Stop and release video player when app goes to background
         // This fixes video playback issues on devices with identical display names (e.g., Ayaneo Pocket DS)
         releasePlayer()
+        releaseMusicPlayer()
     }
 
     override fun onResume() {
@@ -1216,6 +1023,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Stop video immediately
         releasePlayer()
+        releaseMusicPlayer()
 
         // Show overlay instantly without animation
         blackOverlay.visibility = View.VISIBLE
@@ -1902,6 +1710,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
         // Release video player
         releasePlayer()
+        releaseMusicPlayer()
         videoDelayHandler = null
     }
 
@@ -1915,6 +1724,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             android.util.Log.d("MainActivity", "Window focus lost - something is on top of app")
             // Stop videos when we lose focus (game launched on same screen)
             releasePlayer()
+            releaseMusicPlayer()
         }
     }
 
@@ -1964,10 +1774,22 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Cancel any pending image load
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
+        musicLoadRunnable?.let { musicLoadHandler.removeCallbacks(it) }
 
         // Schedule new image load with appropriate delay (0 for games = instant)
         imageLoadRunnable = Runnable {
             loadGameInfo()
+        }
+
+        musicLoadRunnable = Runnable {
+            loadGameMusic()
+        }
+
+        musicPlayer.stopPlaying()
+        if(isFastScrolling) {
+            musicLoadHandler.postDelayed(musicLoadRunnable!!, delay)
+        } else {
+            musicLoadRunnable!!.run()
         }
 
         if (delay > 0) {
@@ -2317,6 +2139,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         try {
             // Stop any video playback when switching to system view
             releasePlayer()
+            releaseMusicPlayer()
 
             val logsDir = File(getLogsPath())
             val systemFile = File(logsDir, "esde_system_name.txt")
@@ -2456,11 +2279,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             // Try to find game-specific artwork
             val gameImage = findGameImage(systemName, gameName, gameNameRaw)
 
-            //ADDED FOR MUSIC
-            lifecycleScope.launch {
-                currentGameName?.let { musicPlayer.onGameFocused(it)}
-            }
-
             if (gameImage != null && gameImage.exists()) {
                 // Game has its own artwork - use it
                 loadImageWithAnimation(gameImage, gameImageView)
@@ -2484,6 +2302,44 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         } catch (e: Exception) {
             // Don't clear images on exception - keep last valid images
             android.util.Log.e("MainActivity", "Error loading game info", e)
+        }
+    }
+
+    private fun loadGameMusic() {
+        try {
+            val logsDir = File(getLogsPath())
+            val gameFile = File(logsDir, "esde_game_filename.txt")
+            if (!gameFile.exists()) return
+
+            val gameNameRaw = gameFile.readText().trim()  // Full path from script
+            val gameName =
+                sanitizeGameFilename(gameNameRaw).substringBeforeLast('.')  // FIXED: Sanitize first, then strip extension
+
+            // Read the display name from ES-DE if available
+            val gameDisplayNameFile = File(logsDir, "esde_game_name.txt")
+            val gameDisplayName = if (gameDisplayNameFile.exists()) {
+                gameDisplayNameFile.readText().trim()
+            } else {
+                gameName  // Fallback to filename-based name
+            }
+
+            val systemFile = File(logsDir, "esde_game_system.txt")
+            if (!systemFile.exists()) return
+            val systemName = systemFile.readText().trim()
+
+            //ADDED FOR MUSIC
+            lifecycleScope.launch {
+                android.util.Log.d("MainActivity", "about to go to music player ")
+
+                currentGameName?.let {
+                    if (currentGameName != gameDisplayName) {
+                        musicPlayer.onGameFocused(gameDisplayName, gameName, systemName)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Don't clear images on exception - keep last valid images
+            android.util.Log.e("MainActivity", "Error loading game music", e)
         }
     }
 
@@ -2898,6 +2754,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             videoView.visibility = View.GONE
             hideWidgets()
             releasePlayer()
+            releaseMusicPlayer()
         }
 
         // Set playing state
@@ -3033,6 +2890,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Stop any videos
         releasePlayer()
+        releaseMusicPlayer()
 
         // Update browsing state to the game that's now playing
         if (playingGameFilename != null) {
@@ -3108,6 +2966,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             videoView.visibility = View.GONE
             hideWidgets()
             releasePlayer()
+            releaseMusicPlayer()
             return  // ADDED: Exit early, don't process anything else
         }
 
@@ -3127,6 +2986,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Stop any videos
         releasePlayer()
+        releaseMusicPlayer()
     }
 
     /**
@@ -3775,6 +3635,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }  // ADDED
             }  // ADDED
         }
+    }
+
+    private fun releaseMusicPlayer() {
+        musicLoadRunnable?.let { musicLoadHandler.removeCallbacks(it) }
+        musicPlayer.stopPlaying()
     }
 
     /**
