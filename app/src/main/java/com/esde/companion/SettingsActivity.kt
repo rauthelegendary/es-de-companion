@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -2636,6 +2637,10 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
     private fun setupSwipeGesture() {
         val scrollView = findViewById<android.widget.ScrollView>(R.id.settingsScrollView)
+        val settingsBackButton = findViewById<ImageButton>(R.id.settingsBackButton)
+        settingsBackButton.setOnClickListener {
+            onBackPressedDispatcher.onBackPressed()
+        }
 
         val gestureDetector = GestureDetectorCompat(this, object : GestureDetector.SimpleOnGestureListener() {
             private val SWIPE_THRESHOLD = 150
