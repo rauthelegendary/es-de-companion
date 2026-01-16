@@ -4566,15 +4566,13 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             widgetContainer.addView(gridOverlayView, 0)  // Add as first child (behind widgets)
             android.util.Log.d("MainActivity", "Grid overlay recreated and added")
         } else {
-            // Remove grid overlay completely
+            // Remove grid overlay completely (but keep widget container visible)
             if (gridOverlayView != null) {
                 widgetContainer.removeView(gridOverlayView)
                 gridOverlayView = null
                 android.util.Log.d("MainActivity", "Grid overlay removed")
             }
-            // CRITICAL: Hide the widget container when grid is not showing
-            widgetContainer.visibility = View.GONE
-            android.util.Log.d("MainActivity", "Widget container hidden (no grid to show)")
+            // Don't hide the widget container - widgets should still be visible
         }
     }
 
