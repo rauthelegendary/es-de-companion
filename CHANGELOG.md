@@ -2,6 +2,7 @@
 
 ## [0.4.0] - TBC
 - Added Widget System with support for separate widgets for system and game list views
+    - Long press on main screen to access widget menu
     - System View Widget - System Logo
     - Game View Widgets - Marquee, 2D Box, 3D Box, Mix Image, Back Cover, Physical Media, Screenshot, Fanart, Title Screen, Game Description
     - Widget Edit Mode On/Off
