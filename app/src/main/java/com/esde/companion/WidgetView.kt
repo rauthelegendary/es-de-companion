@@ -365,6 +365,10 @@ class WidgetView(
                 isResizing = false
                 resizeCorner = ResizeCorner.NONE
 
+                // Convert current absolute positions to percentages
+                val displayMetrics = context.resources.displayMetrics
+                widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
+
                 // Save widget state
                 onUpdate(widget)
 
@@ -717,6 +721,11 @@ class WidgetView(
         }
 
         android.util.Log.d("WidgetView", "About to save all widgets")
+
+        // ========== START: Update percentages before saving ==========
+        val displayMetrics = context.resources.displayMetrics
+        widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
+        // ========== END: Update percentages before saving ==========
 
         // Save all widgets
         val mainActivity = context as? MainActivity

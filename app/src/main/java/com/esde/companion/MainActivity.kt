@@ -4250,6 +4250,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 widgetContext = OverlayWidget.WidgetContext.SYSTEM
             )
 
+            widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
+
             addWidgetToScreen(widget)
 
             android.widget.Toast.makeText(
@@ -4312,6 +4314,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     widgetContext = OverlayWidget.WidgetContext.GAME
                 )
 
+                widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
+
                 addWidgetToScreen(widget)
 
                 android.widget.Toast.makeText(
@@ -4356,6 +4360,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 zIndex = nextZIndex,
                 widgetContext = OverlayWidget.WidgetContext.GAME
             )
+
+            widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
             addWidgetToScreen(widget)
 

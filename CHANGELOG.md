@@ -2,16 +2,16 @@
 
 ## [0.4.0] - TBC
 - Added Widget System with support for separate widgets for system and game list views
-    - System View - System Logo
-    - Game View - Marquee, 2D Box, 3D Box, Mix Image, Back Cover, Physical Media, Screenshot, Fanart, Title Screen, Game Description
-    - Widget Edit mode On/Off
+    - System View Widget - System Logo
+    - Game View Widgets - Marquee, 2D Box, 3D Box, Mix Image, Back Cover, Physical Media, Screenshot, Fanart, Title Screen, Game Description
+    - Widget Edit Mode On/Off
     - Snap to Grid On/Off
     - Show Grid On/Off
     - Layer control to adjust widget stacking order
     - Adjustable transparency for game description widget
-    - Option to size images to fit to container or fill container with cropping
+    - Option to size widget images to fit to container or fill container with cropping
 - Split system and game view backgrounds - Independent background images for system browsing and game browsing
-- Solid color background option - New option to use solid colors instead of images for either view
+- Solid color background option - Option to use solid colors instead of images for either view
 - Improved fallback text - System logo and game marquee widgets now show fallback text with truncation for long names
 - Added back button in settings menu
 - PSP default logo updated to blue version for better visibility
