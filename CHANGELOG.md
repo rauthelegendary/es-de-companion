@@ -1,6 +1,6 @@
 # 🔄 Changelog
 
-## [0.4.0] - TBC
+## [0.4.0] - 2026-01-18
 - Added Widget System with support for separate widgets for system and game list views
     - Long press on main screen to access widget menu
     - System View Widget - System Logo
