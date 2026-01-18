@@ -124,6 +124,7 @@ class MainActivity : AppCompatActivity() {
     private var videoDelayRunnable: Runnable? = null
     private var currentVideoPath: String? = null
     private var volumeChangeReceiver: BroadcastReceiver? = null
+    private var isActivityVisible = true  // Track onStart/onStop - most reliable signal
 
     // Flag to skip reload in onResume (used when returning from settings with no changes)
     private var skipNextReload = false
@@ -926,6 +927,19 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        isActivityVisible = true
+        android.util.Log.d("MainActivity", "Activity VISIBLE (onStart) - videos allowed if other conditions met")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isActivityVisible = false
+        android.util.Log.d("MainActivity", "Activity NOT VISIBLE (onStop) - blocking videos")
+        releasePlayer()
     }
 
     private fun updateBlurEffect() {
@@ -1981,12 +1995,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         super.onWindowFocusChanged(hasFocus)
         hasWindowFocus = hasFocus
 
+        // Don't use focus changes to block videos - too unreliable
+        // Just log for debugging
         if (hasFocus) {
-            android.util.Log.d("MainActivity", "Window focus gained - app is on top")
+            android.util.Log.d("MainActivity", "Window focus gained")
         } else {
-            android.util.Log.d("MainActivity", "Window focus lost - something is on top of app")
-            // Stop videos when we lose focus (game launched on same screen)
-            releasePlayer()
+            android.util.Log.d("MainActivity", "Window focus lost (ignoring for video blocking)")
         }
     }
 
@@ -2077,13 +2091,54 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
                         return when (ext) {
                             "svg" -> {
-                                // Load SVG with specific dimensions if provided
                                 val svg = com.caverock.androidsvg.SVG.getFromInputStream(logoFile.inputStream())
+
                                 if (width > 0 && height > 0) {
-                                    svg.documentWidth = width.toFloat()
-                                    svg.documentHeight = height.toFloat()
+                                    // Create bitmap at target dimensions
+                                    val bitmap = android.graphics.Bitmap.createBitmap(
+                                        width,
+                                        height,
+                                        android.graphics.Bitmap.Config.ARGB_8888
+                                    )
+                                    val canvas = android.graphics.Canvas(bitmap)
+
+                                    val viewBox = svg.documentViewBox
+                                    if (viewBox != null) {
+                                        // SVG has viewBox - let AndroidSVG handle scaling
+                                        svg.setDocumentWidth(width.toFloat())
+                                        svg.setDocumentHeight(height.toFloat())
+                                        svg.renderToCanvas(canvas)
+                                        android.util.Log.d("MainActivity", "User SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
+                                    } else {
+                                        // No viewBox - manually scale using document dimensions
+                                        val docWidth = svg.documentWidth
+                                        val docHeight = svg.documentHeight
+
+                                        if (docWidth > 0 && docHeight > 0) {
+                                            val scaleX = width.toFloat() / docWidth
+                                            val scaleY = height.toFloat() / docHeight
+                                            val scale = minOf(scaleX, scaleY)
+
+                                            val scaledWidth = docWidth * scale
+                                            val scaledHeight = docHeight * scale
+                                            val translateX = (width - scaledWidth) / 2f
+                                            val translateY = (height - scaledHeight) / 2f
+
+                                            canvas.translate(translateX, translateY)
+                                            canvas.scale(scale, scale)
+                                            svg.renderToCanvas(canvas)
+                                            android.util.Log.d("MainActivity", "User SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
+                                        }
+                                    }
+
+                                    // Return drawable with no intrinsic dimensions
+                                    object : android.graphics.drawable.BitmapDrawable(resources, bitmap) {
+                                        override fun getIntrinsicWidth(): Int = -1
+                                        override fun getIntrinsicHeight(): Int = -1
+                                    }
+                                } else {
+                                    android.graphics.drawable.PictureDrawable(svg.renderToPicture())
                                 }
-                                android.graphics.drawable.PictureDrawable(svg.renderToPicture())
                             }
                             else -> {
                                 // Load bitmap formats (PNG, JPG, WebP) with downscaling
@@ -2099,13 +2154,52 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             val svgPath = "system_logos/$baseFileName.svg"
             val svg = com.caverock.androidsvg.SVG.getFromAsset(assets, svgPath)
 
-            // Set dimensions if provided
             if (width > 0 && height > 0) {
-                svg.documentWidth = width.toFloat()
-                svg.documentHeight = height.toFloat()
-            }
+                // Create bitmap at target dimensions
+                val bitmap = android.graphics.Bitmap.createBitmap(
+                    width,
+                    height,
+                    android.graphics.Bitmap.Config.ARGB_8888
+                )
+                val canvas = android.graphics.Canvas(bitmap)
 
-            android.graphics.drawable.PictureDrawable(svg.renderToPicture())
+                val viewBox = svg.documentViewBox
+                if (viewBox != null) {
+                    // SVG has viewBox - let AndroidSVG handle scaling
+                    svg.setDocumentWidth(width.toFloat())
+                    svg.setDocumentHeight(height.toFloat())
+                    svg.renderToCanvas(canvas)
+                    android.util.Log.d("MainActivity", "Built-in SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
+                } else {
+                    // No viewBox - manually scale using document dimensions
+                    val docWidth = svg.documentWidth
+                    val docHeight = svg.documentHeight
+
+                    if (docWidth > 0 && docHeight > 0) {
+                        val scaleX = width.toFloat() / docWidth
+                        val scaleY = height.toFloat() / docHeight
+                        val scale = minOf(scaleX, scaleY)
+
+                        val scaledWidth = docWidth * scale
+                        val scaledHeight = docHeight * scale
+                        val translateX = (width - scaledWidth) / 2f
+                        val translateY = (height - scaledHeight) / 2f
+
+                        canvas.translate(translateX, translateY)
+                        canvas.scale(scale, scale)
+                        svg.renderToCanvas(canvas)
+                        android.util.Log.d("MainActivity", "Built-in SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
+                    }
+                }
+
+                // Return drawable with no intrinsic dimensions
+                object : android.graphics.drawable.BitmapDrawable(resources, bitmap) {
+                    override fun getIntrinsicWidth(): Int = -1
+                    override fun getIntrinsicHeight(): Int = -1
+                }
+            } else {
+                android.graphics.drawable.PictureDrawable(svg.renderToPicture())
+            }
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Failed to load logo for $systemName", e)
             // Return text-based drawable as fallback
@@ -3970,27 +4064,38 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         // Cancel any pending video load
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
 
-        // Hybrid blocking approach to handle different device scenarios:
+        // Only trust isActivityVisible (onStart/onStop) - it's the only truly reliable signal
+        // on devices with identical display names.
         //
-        // Scenario 1: Game launches on SAME screen as Companion
-        //   - hasWindowFocus becomes false (game window is on top)
-        //   - onPause() does NOT fire (Companion is still "active" behind game)
-        //   - Block: !hasWindowFocus
+        // We ignore hasWindowFocus because:
+        // - It can be false even when Companion is visible (dialogs, system UI)
+        // - It's unreliable on devices with identical display names
         //
-        // Scenario 2: Game launches on OTHER screen
-        //   - hasWindowFocus may be unreliable (identical display names)
-        //   - onPause() DOES fire (Companion is backgrounded by system)
-        //   - Block: lifecycle state check
+        // onStop() ONLY fires when activity is truly not visible, making it perfect for:
+        // - Game launched on other screen (Companion backgrounded)
+        // - App minimized/switched away
         //
-        // We block videos if EITHER condition indicates we shouldn't play:
+        // onStop() does NOT fire when:
+        // - Game launched on SAME screen (Companion still visible, just covered)
+        // - Dialogs appear
+        // - System UI overlays
 
-        val isInBackground = lifecycle.currentState != androidx.lifecycle.Lifecycle.State.RESUMED
+        // For same-screen game launches, we rely on ES-DE game-start events instead.
 
-        if (!hasWindowFocus || isInBackground) {
-            android.util.Log.d("MainActivity", "Video blocked - hasWindowFocus: $hasWindowFocus, isInBackground: $isInBackground")
+        if (!isActivityVisible) {
+            android.util.Log.d("MainActivity", "Video blocked - activity not visible (onStop called)")
             releasePlayer()
             return
         }
+
+        // Additional check: If ES-DE reports a game is playing, block videos
+        // This handles same-screen game launches where onStop doesn't fire
+        if (isGamePlaying) {
+            android.util.Log.d("MainActivity", "Video blocked - game is playing (ES-DE event)")
+            releasePlayer()
+            return
+        }
+
 
         if (isScreensaverActive) {
             android.util.Log.d("MainActivity", "Video blocked - screensaver active")
@@ -3999,6 +4104,13 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         }
 
         if (!isVideoEnabled()) {
+            releasePlayer()
+            return
+        }
+
+        // Block videos during widget edit mode
+        if (!widgetsLocked) {
+            android.util.Log.d("MainActivity", "Video blocked - widget edit mode active")
             releasePlayer()
             return
         }
@@ -4023,13 +4135,23 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
 
                 videoDelayRunnable = Runnable {
-                    // Double-check conditions before loading video after delay
-                    val isStillInBackground = lifecycle.currentState != androidx.lifecycle.Lifecycle.State.RESUMED
+                    // Include widget edit mode check
+                    // Only check reliable signals
+                    val shouldAllowDelayedVideo = isActivityVisible &&   // Still visible
+                            !isGamePlaying &&      // No game running
+                            !isScreensaverActive &&   // Screensaver not active
+                            widgetsLocked          // Widget edit mode OFF
 
-                    if (hasWindowFocus && !isStillInBackground && !isScreensaverActive) {
+                    if (shouldAllowDelayedVideo) {
                         loadVideo(videoPath)
                     } else {
-                        android.util.Log.d("MainActivity", "Video delayed load cancelled - conditions changed")
+                        val reasons = mutableListOf<String>()
+                        if (!isActivityVisible) reasons.add("not visible")
+                        if (isGamePlaying) reasons.add("game playing")
+                        if (isScreensaverActive) reasons.add("screensaver")
+                        if (!widgetsLocked) reasons.add("widget edit mode")
+
+                        android.util.Log.d("MainActivity", "Video delayed load cancelled - ${reasons.joinToString(", ")}")
                     }
                 }
 
@@ -4240,6 +4362,25 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
         // Save lock state to preferences
         prefs.edit().putBoolean("widgets_locked", widgetsLocked).apply()
+
+        // Handle video playback and widget reload when toggling widget lock
+        if (widgetsLocked) {
+            // Locked (edit mode OFF) - videos can resume if other conditions allow
+            android.util.Log.d("MainActivity", "Widget edit mode OFF - allowing videos")
+            // Reload current state to potentially start videos
+            if (isSystemScrollActive) {
+                loadSystemImage()
+            } else if (!isGamePlaying) {
+                loadGameInfo()
+            }
+        } else {
+            // Unlocked (edit mode ON) - stop videos and reload widgets
+            android.util.Log.d("MainActivity", "Widget edit mode ON - blocking videos and reloading widgets")
+            releasePlayer()
+
+            // Reload widgets with current images so they're visible during editing
+            updateWidgetsForCurrentGame()
+        }
     }
 
     private fun createWidget(imageType: OverlayWidget.ImageType) {

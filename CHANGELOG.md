@@ -1,5 +1,9 @@
 # 🔄 Changelog
 
+## [0.4.1] - 2026-01-19
+- Fixed videos not playing on Ayaneo Pocket DS
+- Fixed some system logos not scaling correctly
+
 ## [0.4.0] - 2026-01-18
 - Added Widget System with support for separate widgets for system and game list views
     - Long press on main screen to access widget menu
