@@ -1,6 +1,10 @@
 # 🔄 Changelog
 
-## [0.4.1] - 2026-01-19
+## [0.4.2] - 2026-01-19
+- Fix some text being unreadable with Android Light mode on
+- Fixed system logos being hidden when turning on edit widget mode
+
+- ## [0.4.1] - 2026-01-19
 - Fixed videos not playing on Ayaneo Pocket DS
 - Fixed some system logos not scaling correctly
 
