@@ -3030,16 +3030,17 @@ Your ES-DE Companion is now configured and ready to use!
 
 🎮 Quick Tips:
 
-• Swipe up anywhere to open the app drawer
-• Tap the hamburger button (☰) to access the app settings
-• Long-press any app to choose which screen it launches on
-• Swipe right in settings to quickly close it
+- Long press to open widget menu
+- Swipe up anywhere to open the app drawer
+- Tap the hamburger button (☰) to access the app settings
+- Long-press any app to choose which screen it launches on
+- Swipe right in settings to quickly close it
 
 📱 Using with ES-DE:
 
-• Browse games in ES-DE to see artwork on this screen
-• Game videos will play if enabled in settings
-• System logos appear when browsing systems
+- Browse games in ES-DE to see artwork on this screen
+- Game videos will play if enabled in settings
+- System logos appear when browsing systems
 
 🏠 Recommended Setup:
 
@@ -3057,19 +3058,12 @@ Enjoy your enhanced retro gaming experience!
 
         scrollView.addView(messageText)
 
-        // Show dialog with TWO buttons
+        // Show dialog with single button
         val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setCustomTitle(titleContainer)
             .setView(scrollView)
-            .setPositiveButton("Learn About Widgets") { _, _ ->
-                // Close settings and trigger widget tutorial in MainActivity
-                val intent = Intent()
-                intent.putExtra("SHOW_WIDGET_TUTORIAL", true)
-                setResult(Activity.RESULT_OK, intent)
-                finish()
-            }
-            .setNegativeButton("Finish Setup") { _, _ ->
-                // Just close settings normally
+            .setPositiveButton("Continue") { _, _ ->
+                // Close settings and trigger script verification
                 if (triggerVerification) {
                     val intent = Intent()
                     intent.putExtra("START_SCRIPT_VERIFICATION", true)

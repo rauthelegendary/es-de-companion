@@ -8,7 +8,7 @@
   >
 </a>
 
-![Version](https://img.shields.io/badge/version-0.4.3-blue)
+![Version](https://img.shields.io/badge/version-0.4.4-blue)
 ![Android](https://img.shields.io/badge/Android-10%2B-green)
 
 

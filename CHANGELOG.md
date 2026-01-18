@@ -1,5 +1,9 @@
 # 🔄 Changelog
 
+## [0.4.4] - 2026-01-19
+- Modified widget onboarding at end of quick setup
+- Added a 100ms minimum double tap time for the double tap to enable black screen function to avoid accidental activations
+
 ## [0.4.3] - 2026-01-19
 - Added widget onboarding help dialog
 

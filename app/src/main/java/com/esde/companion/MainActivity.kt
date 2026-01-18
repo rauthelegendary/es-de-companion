@@ -136,6 +136,7 @@ class MainActivity : AppCompatActivity() {
     private var tapCount = 0
     private var lastTapTime = 0L
     private val DOUBLE_TAP_TIMEOUT = 300L // 300ms window for double-tap
+    private val MIN_TAP_INTERVAL = 100L // 100ms minimum time between taps (prevents accidental fast touches)
 
     // Scripts verification
     private var isWaitingForScriptVerification = false
@@ -1529,26 +1530,40 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         if (!isDrawerOpen && blackOverlayEnabled) {
             if (ev.action == MotionEvent.ACTION_DOWN) {
                 val currentTime = System.currentTimeMillis()
+                val timeSinceLastTap = currentTime - lastTapTime
+
+                android.util.Log.d("MainActivity", "Double-tap detection: timeSinceLastTap=${timeSinceLastTap}ms, tapCount=$tapCount")
 
                 // Reset tap count if too much time has passed
-                if (currentTime - lastTapTime > DOUBLE_TAP_TIMEOUT) {
+                if (timeSinceLastTap > DOUBLE_TAP_TIMEOUT) {
+                    android.util.Log.d("MainActivity", "Tap timeout exceeded (${timeSinceLastTap}ms > ${DOUBLE_TAP_TIMEOUT}ms) - resetting tap count")
                     tapCount = 0
                 }
 
-                tapCount++
-                lastTapTime = currentTime
+                // Only count tap if enough time has passed since last tap OR it's the first tap
+                // (prevents accidental fast touches like brushing the screen)
+                if (lastTapTime == 0L || timeSinceLastTap >= MIN_TAP_INTERVAL) {
+                    tapCount++
+                    lastTapTime = currentTime
 
-                // Check for triple-tap
-                if (tapCount >= 2) {
-                    tapCount = 0 // Reset counter
+                    android.util.Log.d("MainActivity", "Tap registered - new tapCount=$tapCount")
 
-                    // Toggle black overlay
-                    if (isBlackOverlayShown) {
-                        hideBlackOverlay()
-                    } else {
-                        showBlackOverlay()
+                    // Check for double-tap
+                    if (tapCount >= 2) {
+                        android.util.Log.d("MainActivity", "Double-tap threshold reached! Toggling black overlay")
+                        tapCount = 0 // Reset counter
+
+                        // Toggle black overlay
+                        if (isBlackOverlayShown) {
+                            hideBlackOverlay()
+                        } else {
+                            showBlackOverlay()
+                        }
+                        return true
                     }
-                    return true
+                } else {
+                    // Tap was too fast after previous tap - ignore it
+                    android.util.Log.d("MainActivity", "Tap IGNORED - too fast (${timeSinceLastTap}ms < ${MIN_TAP_INTERVAL}ms)")
                 }
             }
         }
@@ -2122,6 +2137,18 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 "✓ Connection successful! ES-DE is communicating properly.",
                 Toast.LENGTH_LONG
             ).show()
+
+            // Check if this is first time seeing widget tutorial after setup
+            val hasSeenWidgetTutorial = prefs.getBoolean("widget_tutorial_shown", false)
+            val hasCompletedSetup = prefs.getBoolean("setup_completed", false)
+
+            if (!hasSeenWidgetTutorial && hasCompletedSetup) {
+                // Show widget tutorial after successful verification following setup
+                android.util.Log.d("MainActivity", "Showing widget tutorial after setup verification")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    showWidgetSystemTutorial(fromUpdate = false)
+                }, 1000)  // 1 second after verification success
+            }
         }
     }
 
@@ -3536,7 +3563,16 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         android.util.Log.d("MainActivity", "Saved pre-screensaver state: system=$systemBeforeScreensaver, game=$gameNameBeforeScreensaver, isSystemView=$wasInSystemViewBeforeScreensaver")
 
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
-        android.util.Log.d("MainActivity", "Screensaver behavior: $screensaverBehavior")
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        android.util.Log.d("MainActivity", "SCREENSAVER START - PREFERENCE CHECK")
+        android.util.Log.d("MainActivity", "Screensaver behavior preference: $screensaverBehavior")
+        android.util.Log.d("MainActivity", "Current state:")
+        android.util.Log.d("MainActivity", "  - currentSystemName: $currentSystemName")
+        android.util.Log.d("MainActivity", "  - currentGameFilename: $currentGameFilename")
+        android.util.Log.d("MainActivity", "  - isSystemScrollActive: $isSystemScrollActive")
+        android.util.Log.d("MainActivity", "  - isScreensaverActive: $isScreensaverActive")
+        android.util.Log.d("MainActivity", "  - screensaverInitialized: $screensaverInitialized")
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         // CRITICAL: If black screen, clear everything IMMEDIATELY
         if (screensaverBehavior == "black_screen") {
@@ -3556,6 +3592,9 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             "game_image" -> {
                 // Game images will be loaded by handleScreensaverGameSelect events
                 android.util.Log.d("MainActivity", "Screensaver behavior: game_image - waiting for game select events")
+                android.util.Log.d("MainActivity", "  - Will load game images when screensaver-game-select events arrive")
+                android.util.Log.d("MainActivity", "  - gameImageView visibility: ${gameImageView.visibility}")
+                android.util.Log.d("MainActivity", "  - videoView visibility: ${videoView.visibility}")
             }
             "default_image" -> {
                 // Show default/fallback image immediately
@@ -3698,7 +3737,16 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Handle screensaver game select event (for slideshow/video screensavers)
      */
     private fun handleScreensaverGameSelect() {
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        android.util.Log.d("MainActivity", "SCREENSAVER GAME SELECT EVENT")
+
         val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+        android.util.Log.d("MainActivity", "Screensaver behavior from prefs: $screensaverBehavior")
+        android.util.Log.d("MainActivity", "Screensaver variables:")
+        android.util.Log.d("MainActivity", "  - screensaverGameFilename: $screensaverGameFilename")
+        android.util.Log.d("MainActivity", "  - screensaverGameName: $screensaverGameName")
+        android.util.Log.d("MainActivity", "  - screensaverSystemName: $screensaverSystemName")
+        android.util.Log.d("MainActivity", "  - screensaverInitialized: $screensaverInitialized")
 
         // If black screen, don't load anything
         if (screensaverBehavior == "black_screen") {
@@ -3718,6 +3766,11 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
             when (screensaverBehavior) {
                 "game_image" -> {
+                    android.util.Log.d("MainActivity", "Processing game_image behavior")
+                    android.util.Log.d("MainActivity", "  - System: $screensaverSystemName")
+                    android.util.Log.d("MainActivity", "  - Game: $gameName")
+                    android.util.Log.d("MainActivity", "  - Filename: $screensaverGameFilename")
+
                     // Load the screensaver game's artwork
                     val gameImage = findGameImage(
                         screensaverSystemName!!,
@@ -3725,15 +3778,24 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         screensaverGameFilename!!
                     )
 
+                    android.util.Log.d("MainActivity", "  - Found image path: $gameImage")
+                    android.util.Log.d("MainActivity", "  - Image exists: ${gameImage?.exists()}")
+
                     if (gameImage != null && gameImage.exists()) {
+                        android.util.Log.d("MainActivity", "  ✓ Loading game image via loadImageWithAnimation()")
+                        android.util.Log.d("MainActivity", "  - Before load - gameImageView visibility: ${gameImageView.visibility}")
                         loadImageWithAnimation(gameImage, gameImageView)
                     } else {
+                        android.util.Log.e("MainActivity", "  ✗ Game image not found or doesn't exist")
+                        android.util.Log.d("MainActivity", "  - Falling back to default background")
                         loadFallbackBackground()
                     }
 
                     // NEW: Make sure views are visible
                     gameImageView.visibility = View.VISIBLE
                     videoView.visibility = View.GONE
+                    android.util.Log.d("MainActivity", "  - After load - gameImageView visibility: ${gameImageView.visibility}")
+                    android.util.Log.d("MainActivity", "  - After load - videoView visibility: ${videoView.visibility}")
 
                     // CRITICAL: Set current game context BEFORE loading widgets
                     // This ensures widgets load images from the correct system folder
@@ -3747,11 +3809,17 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     updateWidgetsForCurrentGame()
                 }
                 "default_image" -> {
+                    android.util.Log.d("MainActivity", "Processing default_image behavior")
+                    android.util.Log.d("MainActivity", "  ⚠ WARNING: Screensaver is using default_image behavior")
+                    android.util.Log.d("MainActivity", "  - If user selected 'game_image', this indicates preference wasn't loaded correctly")
+
                     loadFallbackBackground(forceCustomImageOnly = true)
 
                     // NEW: Make sure views are visible
                     gameImageView.visibility = View.VISIBLE
                     videoView.visibility = View.GONE
+                    android.util.Log.d("MainActivity", "  - gameImageView visibility: ${gameImageView.visibility}")
+                    android.util.Log.d("MainActivity", "  - videoView visibility: ${videoView.visibility}")
 
                     // DEBUG: Log visibility state
                     android.util.Log.d("MainActivity", "After setting visibility: gameImageView=${gameImageView.visibility}, videoView=${videoView.visibility}")
@@ -3770,6 +3838,8 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
             }
         }
+        android.util.Log.d("MainActivity", "Screensaver game select complete")
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
     private fun updateWidgetsForScreensaverGame() {
