@@ -2000,7 +2000,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                                         screensaverInitialized = false
 
                                         // Apply screensaver behavior preferences
-                                        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+                                        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
                                         android.util.Log.d("MainActivity", "Applying screensaver behavior: $screensaverBehavior")
 
                                         // Handle black screen preference
@@ -3562,7 +3562,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         gameNameBeforeScreensaver = currentGameName
         android.util.Log.d("MainActivity", "Saved pre-screensaver state: system=$systemBeforeScreensaver, game=$gameNameBeforeScreensaver, isSystemView=$wasInSystemViewBeforeScreensaver")
 
-        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
         android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         android.util.Log.d("MainActivity", "SCREENSAVER START - PREFERENCE CHECK")
         android.util.Log.d("MainActivity", "Screensaver behavior preference: $screensaverBehavior")
@@ -3740,7 +3740,7 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         android.util.Log.d("MainActivity", "SCREENSAVER GAME SELECT EVENT")
 
-        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
         android.util.Log.d("MainActivity", "Screensaver behavior from prefs: $screensaverBehavior")
         android.util.Log.d("MainActivity", "Screensaver variables:")
         android.util.Log.d("MainActivity", "  - screensaverGameFilename: $screensaverGameFilename")

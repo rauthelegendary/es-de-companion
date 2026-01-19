@@ -1217,7 +1217,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupGameLaunchBehavior() {
-        // Load saved game launch behavior (default: "default_image")
+        // Load saved game launch behavior (default: "game_image")
         val gameLaunchBehavior = prefs.getString(GAME_LAUNCH_BEHAVIOR_KEY, "game_image") ?: "game_image"
 
         // Set initial chip selection
@@ -1244,7 +1244,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupScreensaverBehavior() {
-        // Load saved screensaver behavior (default: "default_image")
+        // Load saved screensaver behavior (default: "game_image")
         val screensaverBehavior = prefs.getString(SCREENSAVER_BEHAVIOR_KEY, "game_image") ?: "game_image"
 
         // Set initial chip selection
