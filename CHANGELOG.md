@@ -2,6 +2,7 @@
 
 ## [0.4.5] - 2026-01-19
 - Fixed incorrect default for screensaver image type
+- Removed focus from widgets when using built-in controls
 
 ## [0.4.4] - 2026-01-19
 - Modified widget onboarding at end of quick setup
