@@ -11,6 +11,17 @@ class WidgetManager(private val context: Context) {
     private val gson = Gson()
 
     fun saveWidgets(widgets: List<OverlayWidget>) {
+        // ========== START: Convert to percentages before saving ==========
+        val displayMetrics = context.resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        // Convert all widgets to percentages
+        widgets.forEach { widget ->
+            widget.toPercentages(screenWidth, screenHeight)
+        }
+        // ========== END: Convert to percentages before saving ==========
+
         val json = gson.toJson(widgets)
         prefs.edit().putString("widgets", json).apply()
     }
@@ -18,7 +29,20 @@ class WidgetManager(private val context: Context) {
     fun loadWidgets(): List<OverlayWidget> {
         val json = prefs.getString("widgets", null) ?: return emptyList()
         val type = object : TypeToken<List<OverlayWidget>>() {}.type
-        return gson.fromJson(json, type)
+        val widgets: List<OverlayWidget> = gson.fromJson(json, type)
+
+        // ========== START: Convert from percentages after loading ==========
+        val displayMetrics = context.resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        // Convert all widgets from percentages to current screen dimensions
+        widgets.forEach { widget ->
+            widget.fromPercentages(screenWidth, screenHeight)
+        }
+        // ========== END: Convert from percentages after loading ==========
+
+        return widgets
     }
 
     fun deleteWidget(widgetId: String) {

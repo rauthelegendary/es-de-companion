@@ -16,9 +16,12 @@ import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.RelativeLayout
 import android.widget.Toast
@@ -90,6 +93,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var androidSettingsButton: ImageButton
     private lateinit var prefs: SharedPreferences
     private lateinit var appLaunchPrefs: AppLaunchPreferences
+    private lateinit var mediaFileLocator: MediaFileLocator
 
     private lateinit var blackOverlay: View
     private var isBlackOverlayShown = false
@@ -112,7 +116,9 @@ class MainActivity : AppCompatActivity() {
     private var longPressTriggered = false
     private var touchDownX = 0f
     private var touchDownY = 0f
-    private val LONG_PRESS_TIMEOUT = 500L
+    private val LONG_PRESS_TIMEOUT by lazy {
+        ViewConfiguration.getLongPressTimeout().toLong()
+    }
     private var widgetMenuShowing = false
     private var widgetMenuDialog: android.app.AlertDialog? = null
 
@@ -143,6 +149,7 @@ class MainActivity : AppCompatActivity() {
     private var videoDelayRunnable: Runnable? = null
     private var currentVideoPath: String? = null
     private var volumeChangeReceiver: BroadcastReceiver? = null
+    private var isActivityVisible = true  // Track onStart/onStop - most reliable signal
 
     // Flag to skip reload in onResume (used when returning from settings with no changes)
     private var skipNextReload = false
@@ -153,7 +160,16 @@ class MainActivity : AppCompatActivity() {
     // Double-tap detection variables
     private var tapCount = 0
     private var lastTapTime = 0L
-    private val DOUBLE_TAP_TIMEOUT = 300L // 300ms window for double-tap
+    // Standard Android double-tap timeout (max time between taps)
+    private val DOUBLE_TAP_TIMEOUT by lazy {
+        ViewConfiguration.getDoubleTapTimeout().toLong() // Default: 300ms
+    }
+    // Custom minimum interval to prevent accidental activations (100ms)
+    // This is intentionally higher than Android's internal 40ms hardware filter:
+    // - 40ms filters touch controller artifacts (hardware-level)
+    // - 100ms filters user errors like screen brushing (UX-level)
+    // Still imperceptible to users while significantly reducing false positives
+    private val MIN_TAP_INTERVAL = 100L // 100ms minimum time between taps (prevents accidental fast touches)
 
     // Scripts verification
     private var isWaitingForScriptVerification = false
@@ -215,6 +231,13 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
+            val showWidgetTutorial = result.data?.getBooleanExtra("SHOW_WIDGET_TUTORIAL", false) ?: false
+            if (showWidgetTutorial) {
+                // Delay slightly to let UI settle after settings closes
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    showWidgetSystemTutorial(fromUpdate = false)
+                }, 500)
+            }
             val needsRecreate = result.data?.getBooleanExtra("NEEDS_RECREATE", false) ?: false
             val appsHiddenChanged = result.data?.getBooleanExtra("APPS_HIDDEN_CHANGED", false) ?: false
             val closeDrawer = result.data?.getBooleanExtra("CLOSE_DRAWER", false) ?: false
@@ -249,19 +272,45 @@ class MainActivity : AppCompatActivity() {
                 handleScreensaverStart()
                 // Skip reload in onResume to prevent override
                 skipNextReload = true
+            } else if (imagePreferenceChanged) {
+                // Image preference changed - reload appropriate view
+                if (isGamePlaying) {
+                    // Game is playing - update game launch display
+                    android.util.Log.d("MainActivity", "Image preference changed during gameplay - reloading display")
+                    handleGameStart()
+                    skipNextReload = true
+                } else if (isSystemScrollActive) {
+                    // In system view - reload system image with new preference
+                    android.util.Log.d("MainActivity", "Image preference changed in system view - reloading system image")
+                    loadSystemImage()
+                    skipNextReload = true
+                } else {
+                    // In game browsing view - reload game image with new preference
+                    android.util.Log.d("MainActivity", "Image preference changed in game view - reloading game image")
+                    loadGameInfo()
+                    skipNextReload = true
+                }
             } else if (customBackgroundChanged) {
                 // Custom background changed - reload to apply changes
                 if (isSystemScrollActive) {
                     loadSystemImage()
-                } else {
+                } else if (!isGamePlaying) {
+                    // Only reload if not playing - if playing, customBackgroundChanged won't affect display
                     loadGameInfo()
+                } else {
+                    // Game is playing - skip reload since game launch behavior controls display
+                    skipNextReload = true
                 }
-            } else if (videoSettingsChanged || logoSizeChanged || mediaPathChanged || imagePreferenceChanged || logoTogglesChanged) {
+            } else if (videoSettingsChanged || logoSizeChanged || mediaPathChanged || logoTogglesChanged) {
                 // Settings that affect displayed content changed - reload to apply changes
                 if (isSystemScrollActive) {
                     loadSystemImage()
-                } else {
+                } else if (!isGamePlaying) {
+                    // Only reload if not playing - if playing, these settings don't affect game launch display
                     loadGameInfo()
+                } else {
+                    // Game is playing - skip reload
+                    skipNextReload = true
                 }
             } else {
                 // No settings changed that require reload - skip the reload in onResume
@@ -325,6 +374,10 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("ESDESecondScreenPrefs", MODE_PRIVATE)
         appLaunchPrefs = AppLaunchPreferences(this)
+        mediaFileLocator = MediaFileLocator(prefs)
+
+        // Check if we should show widget tutorial for updating users
+        checkAndShowWidgetTutorialForUpdate()
 
         rootLayout = findViewById(R.id.rootLayout)
         gameImageView = findViewById(R.id.gameImageView)
@@ -424,6 +477,77 @@ class MainActivity : AppCompatActivity() {
         registerSecondaryVolumeObserver()
     }
 
+    private fun checkAndShowWidgetTutorialForUpdate() {
+        android.util.Log.d("MainActivity", "=== checkAndShowWidgetTutorialForUpdate CALLED ===")
+        try {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            val currentVersion = packageInfo.versionName ?: "0.4.3"
+            android.util.Log.d("MainActivity", "Current version from package: $currentVersion")
+
+            val lastSeenVersion = prefs.getString("last_seen_app_version", "0.0.0") ?: "0.0.0"
+            android.util.Log.d("MainActivity", "Last seen version from prefs: $lastSeenVersion")
+
+            val hasSeenWidgetTutorial = prefs.getBoolean("widget_tutorial_shown", false)
+            android.util.Log.d("MainActivity", "Has seen widget tutorial: $hasSeenWidgetTutorial")
+
+            // Check if default widgets were created (indicates not a fresh install)
+            val hasCreatedDefaultWidgets = prefs.getBoolean("default_widgets_created", false)
+            android.util.Log.d("MainActivity", "Has created default widgets: $hasCreatedDefaultWidgets")
+
+            // NEW LOGIC:
+            // Show tutorial if:
+            // 1. User hasn't seen it yet AND
+            // 2. EITHER they're updating from an older version OR they have default widgets (not fresh install)
+            val isOlderVersion = lastSeenVersion != "0.0.0" && isVersionLessThan(lastSeenVersion, currentVersion)
+            val shouldShowTutorial = !hasSeenWidgetTutorial && (isOlderVersion || hasCreatedDefaultWidgets)
+
+            android.util.Log.d("MainActivity", "Should show tutorial: $shouldShowTutorial")
+            android.util.Log.d("MainActivity", "  - hasSeenWidgetTutorial: $hasSeenWidgetTutorial")
+            android.util.Log.d("MainActivity", "  - isOlderVersion: $isOlderVersion")
+            android.util.Log.d("MainActivity", "  - hasCreatedDefaultWidgets: $hasCreatedDefaultWidgets")
+
+            if (shouldShowTutorial) {
+                android.util.Log.d("MainActivity", "✓ Showing widget tutorial")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    showWidgetSystemTutorial(fromUpdate = true)
+                }, 3000)
+            }
+
+            // Always update the version tracking
+            prefs.edit().putString("last_seen_app_version", currentVersion).apply()
+            android.util.Log.d("MainActivity", "Saved current version to prefs: $currentVersion")
+
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error in version check for widget tutorial", e)
+        }
+    }
+
+    /**
+     * Compare two version strings (e.g., "0.3.3" < "0.3.4")
+     * Returns true if v1 < v2
+     */
+    private fun isVersionLessThan(v1: String, v2: String): Boolean {
+        try {
+            val parts1 = v1.split(".").map { it.toIntOrNull() ?: 0 }
+            val parts2 = v2.split(".").map { it.toIntOrNull() ?: 0 }
+
+            // Compare each part
+            for (i in 0 until maxOf(parts1.size, parts2.size)) {
+                val p1 = parts1.getOrNull(i) ?: 0
+                val p2 = parts2.getOrNull(i) ?: 0
+
+                if (p1 < p2) return true
+                if (p1 > p2) return false
+            }
+
+            // Versions are equal
+            return false
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error comparing versions: $v1 vs $v2", e)
+            return false
+        }
+    }
+
     private fun checkAndLaunchSetupWizard() {
         // Check if setup has been completed
         val hasCompletedSetup = prefs.getBoolean("setup_completed", false)
@@ -456,6 +580,145 @@ class MainActivity : AppCompatActivity() {
 
         // For script check, wait for SD card if needed (setup is complete and has permissions)
         checkScriptsWithRetry()
+    }
+
+    /**
+     * Show comprehensive widget system tutorial dialog
+     * @param fromUpdate - True if showing because user updated the app
+     */
+    private fun showWidgetSystemTutorial(fromUpdate: Boolean = false) {
+        // Get current version dynamically
+        val currentVersion = try {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        } catch (e: Exception) {
+            "0.4.3"  // Fallback version
+        }
+
+        // Create custom title view with emoji
+        val titleContainer = android.widget.LinearLayout(this)
+        titleContainer.orientation = android.widget.LinearLayout.HORIZONTAL
+        titleContainer.setPadding(60, 40, 60, 20)
+        titleContainer.gravity = android.view.Gravity.CENTER
+
+        val titleText = android.widget.TextView(this)
+        titleText.text = if (fromUpdate) "🆕 Widget Overlay System" else "📐 Widget Overlay System"
+        titleText.textSize = 24f
+        titleText.setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+        titleText.gravity = android.view.Gravity.CENTER
+
+        titleContainer.addView(titleText)
+
+        // Create scrollable message view
+        val scrollView = android.widget.ScrollView(this)
+        val messageText = android.widget.TextView(this)
+
+        val updatePrefix = if (fromUpdate) {
+            "New in version 0.4.0+! The widget overlay system lets you create customizable displays on top of game artwork.\n\n"
+        } else {
+            ""
+        }
+
+        messageText.text = """
+${updatePrefix}🎨 What Are Widgets?
+
+Widgets are overlay elements that display game/system artwork like marquees, box art, screenshots, and more. You can position and size them however you want!
+
+🔓 Widget Edit Mode
+
+Widgets are LOCKED by default to prevent accidental changes. To edit widgets:
+
+1. Long-press anywhere on screen → Widget menu appears
+2. Toggle "Widget Edit Mode: OFF" to ON
+3. Now you can create, move, resize, and delete widgets
+
+➕ Creating Widgets
+
+1. Unlock widgets (see above)
+2. Open widget menu (long-press screen)
+3. Tap "Add Widget"
+4. Choose widget type (Marquee, Box Art, Screenshot, etc.)
+
+✏️ Editing Widgets
+
+Select: Tap a widget to select it (shows purple border)
+Move: Drag selected widget to reposition
+Resize: Drag the corner handles (⌙ shapes) on selected widgets
+Delete: Tap the X button on selected widget
+Settings: Tap the ⚙ button for layer ordering options
+
+📐 Grid System
+
+Snap to Grid: Makes positioning precise and aligned
+Show Grid: Visual grid overlay to help with alignment
+
+Both options in the widget menu!
+
+🔒 Important: Lock Widgets When Done
+
+After arranging your widgets, toggle Edit Mode back to OFF. This prevents accidental changes during normal use.
+
+💡 Tips
+
+• Widgets are context-aware - create separate layouts for games vs systems
+• Use "Bring to Front" / "Send to Back" to layer widgets
+• Each widget updates automatically when you browse in ES-DE
+• System logos work for both built-in and custom system logos
+
+Access this help anytime from the widget menu!
+"""
+
+        messageText.textSize = 16f
+        messageText.setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+        messageText.setPadding(60, 20, 60, 20)
+
+        scrollView.addView(messageText)
+
+        // Create "don't show again" checkbox
+        val checkboxContainer = android.widget.LinearLayout(this)
+        checkboxContainer.orientation = android.widget.LinearLayout.HORIZONTAL
+        checkboxContainer.setPadding(60, 10, 60, 20)
+        checkboxContainer.gravity = android.view.Gravity.CENTER_VERTICAL
+
+        val checkbox = android.widget.CheckBox(this)
+        checkbox.text = "Don't show this automatically again"
+        checkbox.setTextColor(android.graphics.Color.parseColor("#999999"))
+        checkbox.textSize = 14f
+
+        checkboxContainer.addView(checkbox)
+
+        // Create main container
+        val mainContainer = android.widget.LinearLayout(this)
+        mainContainer.orientation = android.widget.LinearLayout.VERTICAL
+        mainContainer.addView(scrollView)
+        mainContainer.addView(checkboxContainer)
+
+        // Show dialog
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setCustomTitle(titleContainer)
+            .setView(mainContainer)
+            .setPositiveButton("Got It!") { _, _ ->
+                // Mark as shown
+                prefs.edit().putBoolean("widget_tutorial_shown", true).apply()
+
+                // If user checked "don't show again", mark preference
+                if (checkbox.isChecked) {
+                    prefs.edit().putBoolean("widget_tutorial_dont_show_auto", true).apply()
+                }
+            }
+            .setCancelable(true)
+            .create()
+
+        // Dark theme for dialog
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.setOnShowListener {
+            dialog.window?.setBackgroundDrawable(
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#1A1A1A"))
+            )
+        }
+
+        dialog.show()
+
+        android.util.Log.d("MainActivity", "Widget tutorial dialog shown (fromUpdate: $fromUpdate)")
     }
 
     /**
@@ -753,6 +1016,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        isActivityVisible = true
+        android.util.Log.d("MainActivity", "Activity VISIBLE (onStart) - videos allowed if other conditions met")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isActivityVisible = false
+        android.util.Log.d("MainActivity", "Activity NOT VISIBLE (onStop) - blocking videos")
+        releasePlayer()
+    }
+
     private fun updateBlurEffect() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             val blurRadius = prefs.getInt("blur", 0)
@@ -809,8 +1085,23 @@ class MainActivity : AppCompatActivity() {
         android.util.Log.d("MainActivity", "Logs path: $path")
         return path
     }
-    private fun loadFallbackBackground() {
-        android.util.Log.d("MainActivity", "═══ loadFallbackBackground CALLED ═══")
+    private fun loadFallbackBackground(forceCustomImageOnly: Boolean = false) {
+        android.util.Log.d("MainActivity", "═══ loadFallbackBackground CALLED (forceCustomImageOnly=$forceCustomImageOnly) ═══")
+
+        // CRITICAL: Only check solid color preference if NOT forcing custom image only
+        // When forceCustomImageOnly=true (screensaver/game launch "default_image" behavior),
+        // we skip the solid color check and go straight to custom background image
+        if (!forceCustomImageOnly) {
+            val gameImagePref = prefs.getString("game_image_preference", "fanart") ?: "fanart"
+            if (gameImagePref == "solid_color") {
+                val solidColor = prefs.getInt("game_background_color", android.graphics.Color.parseColor("#1A1A1A"))
+                android.util.Log.d("MainActivity", "Game view solid color selected - using color: ${String.format("#%06X", 0xFFFFFF and solidColor)}")
+                val drawable = android.graphics.drawable.ColorDrawable(solidColor)
+                gameImageView.setImageDrawable(drawable)
+                gameImageView.visibility = View.VISIBLE
+                return
+            }
+        }
 
         // Check if user has set a custom background
         val customBackgroundPath = prefs.getString("custom_background_uri", null)
@@ -972,18 +1263,6 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
-            override fun onLongPress(e: MotionEvent) {
-                // Only show widget menu if drawer is closed, NOT in system view, AND not touching a widget
-                if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN &&
-                    !isSystemScrollActive) {  // Added check for system view
-                    // Check if long press is on a widget
-                    val isTouchingWidget = isTouchOnWidget(e.x, e.y)
-                    if (!isTouchingWidget) {
-                        showCreateWidgetMenu()
-                    }
-                }
-            }
-
             override fun onFling(
                 e1: MotionEvent?,
                 e2: MotionEvent,
@@ -1024,6 +1303,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return false
+    }
+
+    /**
+     * Cancel any pending long press - called by WidgetView when interaction starts
+     */
+    fun cancelLongPress() {
+        longPressRunnable?.let {
+            longPressHandler?.removeCallbacks(it)
+            longPressTriggered = false
+        }
     }
 
     /**
@@ -1112,13 +1401,15 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                // Cancel long press if finger moves
+                // Cancel long press if finger moves beyond touch slop threshold
                 val deltaX = kotlin.math.abs(ev.x - touchDownX)
                 val deltaY = kotlin.math.abs(ev.y - touchDownY)
-                if (deltaX > 10 || deltaY > 10) {
+                val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+
+                if (deltaX > touchSlop || deltaY > touchSlop) {
                     longPressRunnable?.let {
                         longPressHandler?.removeCallbacks(it)
-                        longPressTriggered = false  // ADDED: Reset flag when movement cancels
+                        longPressTriggered = false
                     }
                 }
             }
@@ -1163,18 +1454,44 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleBlackOverlayTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.action == MotionEvent.ACTION_DOWN) {
-            if(checkForDoubleTap()) {
-                // Toggle black overlay
-                if (isBlackOverlayShown) {
-                    hideBlackOverlay()
-                } else {
-                    showBlackOverlay()
+         if (ev.action == MotionEvent.ACTION_DOWN) {
+                val currentTime = System.currentTimeMillis()
+                val timeSinceLastTap = currentTime - lastTapTime
+
+                android.util.Log.d("MainActivity", "Double-tap detection: timeSinceLastTap=${timeSinceLastTap}ms, tapCount=$tapCount")
+
+                // Reset tap count if too much time has passed
+                if (timeSinceLastTap > DOUBLE_TAP_TIMEOUT) {
+                    android.util.Log.d("MainActivity", "Tap timeout exceeded (${timeSinceLastTap}ms > ${DOUBLE_TAP_TIMEOUT}ms) - resetting tap count")
+                    tapCount = 0
                 }
-                return true
+
+                // Only count tap if enough time has passed since last tap OR it's the first tap
+                // (prevents accidental fast touches like brushing the screen)
+                if (lastTapTime == 0L || timeSinceLastTap >= MIN_TAP_INTERVAL) {
+                    tapCount++
+                    lastTapTime = currentTime
+
+                    android.util.Log.d("MainActivity", "Tap registered - new tapCount=$tapCount")
+
+                    // Check for double-tap
+                    if (tapCount >= 2) {
+                        android.util.Log.d("MainActivity", "Double-tap threshold reached! Toggling black overlay")
+                        tapCount = 0 // Reset counter
+
+                        // Toggle black overlay
+                        if (isBlackOverlayShown) {
+                            hideBlackOverlay()
+                        } else {
+                            showBlackOverlay()
+                        }
+                        return true
+                    }
+                } else {
+                    // Tap was too fast after previous tap - ignore it
+                    android.util.Log.d("MainActivity", "Tap IGNORED - too fast (${timeSinceLastTap}ms < ${MIN_TAP_INTERVAL}ms)")
+                }
             }
-        }
-        return false
     }
 
     private fun handleVideoTouchEvent(ev: MotionEvent): Boolean {
@@ -1544,9 +1861,41 @@ class MainActivity : AppCompatActivity() {
                                     handleScreensaverEnd(endReason)
                                 }
                                 "esde_screensavergameselect_filename.txt" -> {
-                                    // Only process if screensaver is active
+                                    // DEFENSIVE FIX: Auto-initialize screensaver state if screensaver-start event was missed
                                     if (!isScreensaverActive) {
-                                        return@postDelayed
+                                        android.util.Log.w("MainActivity", "⚠️ FALLBACK: Screensaver game-select fired without screensaver-start event!")
+                                        android.util.Log.w("MainActivity", "Auto-initializing screensaver state as defensive fallback")
+
+                                        // Save pre-screensaver state NOW (before any games are browsed)
+                                        wasInSystemViewBeforeScreensaver = isSystemScrollActive
+                                        systemBeforeScreensaver = currentSystemName
+                                        gameFilenameBeforeScreensaver = currentGameFilename
+                                        gameNameBeforeScreensaver = currentGameName
+                                        android.util.Log.d("MainActivity", "Saved pre-screensaver state: system=$systemBeforeScreensaver, game=$gameNameBeforeScreensaver, isSystemView=$wasInSystemViewBeforeScreensaver")
+
+                                        // Enable screensaver mode
+                                        isScreensaverActive = true
+                                        screensaverInitialized = false
+
+                                        // Apply screensaver behavior preferences
+                                        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+                                        android.util.Log.d("MainActivity", "Applying screensaver behavior: $screensaverBehavior")
+
+                                        // Handle black screen preference
+                                        if (screensaverBehavior == "black_screen") {
+                                            android.util.Log.d("MainActivity", "Black screen behavior - clearing display")
+                                            Glide.with(this@MainActivity).clear(gameImageView)
+                                            gameImageView.setImageDrawable(null)
+                                            gameImageView.visibility = View.GONE
+                                            videoView.visibility = View.GONE
+                                            releasePlayer()
+                                            gridOverlayView?.visibility = View.GONE
+                                        }
+
+                                        // Clear widgets (will be loaded by handleScreensaverGameSelect)
+                                        widgetContainer.removeAllViews()
+                                        activeWidgets.clear()
+                                        android.util.Log.d("MainActivity", "Fallback initialization complete - widgets cleared")
                                     }
 
                                     // Read screensaver game info
@@ -1666,6 +2015,18 @@ class MainActivity : AppCompatActivity() {
                 "✓ Connection successful! ES-DE is communicating properly.",
                 Toast.LENGTH_LONG
             ).show()
+
+            // Check if this is first time seeing widget tutorial after setup
+            val hasSeenWidgetTutorial = prefs.getBoolean("widget_tutorial_shown", false)
+            val hasCompletedSetup = prefs.getBoolean("setup_completed", false)
+
+            if (!hasSeenWidgetTutorial && hasCompletedSetup) {
+                // Show widget tutorial after successful verification following setup
+                android.util.Log.d("MainActivity", "Showing widget tutorial after setup verification")
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    showWidgetSystemTutorial(fromUpdate = false)
+                }, 1000)  // 1 second after verification success
+            }
         }
     }
 
@@ -1760,10 +2121,12 @@ class MainActivity : AppCompatActivity() {
         super.onWindowFocusChanged(hasFocus)
         hasWindowFocus = hasFocus
 
+        // Don't use focus changes to block videos - too unreliable
+        // Just log for debugging
         if (hasFocus) {
-            android.util.Log.d("MainActivity", "Window focus gained - app is on top")
+            android.util.Log.d("MainActivity", "Window focus gained")
         } else {
-            android.util.Log.d("MainActivity", "Window focus lost - something is on top of app")
+            android.util.Log.d("MainActivity", "Window focus lost (ignoring for video blocking)")
             // Stop videos when we lose focus (game launched on same screen)
             releasePlayer()
             releaseMusicPlayer()
@@ -1857,13 +2220,54 @@ class MainActivity : AppCompatActivity() {
 
                         return when (ext) {
                             "svg" -> {
-                                // Load SVG with specific dimensions if provided
                                 val svg = com.caverock.androidsvg.SVG.getFromInputStream(logoFile.inputStream())
+
                                 if (width > 0 && height > 0) {
-                                    svg.documentWidth = width.toFloat()
-                                    svg.documentHeight = height.toFloat()
+                                    // Create bitmap at target dimensions
+                                    val bitmap = android.graphics.Bitmap.createBitmap(
+                                        width,
+                                        height,
+                                        android.graphics.Bitmap.Config.ARGB_8888
+                                    )
+                                    val canvas = android.graphics.Canvas(bitmap)
+
+                                    val viewBox = svg.documentViewBox
+                                    if (viewBox != null) {
+                                        // SVG has viewBox - let AndroidSVG handle scaling
+                                        svg.setDocumentWidth(width.toFloat())
+                                        svg.setDocumentHeight(height.toFloat())
+                                        svg.renderToCanvas(canvas)
+                                        android.util.Log.d("MainActivity", "User SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
+                                    } else {
+                                        // No viewBox - manually scale using document dimensions
+                                        val docWidth = svg.documentWidth
+                                        val docHeight = svg.documentHeight
+
+                                        if (docWidth > 0 && docHeight > 0) {
+                                            val scaleX = width.toFloat() / docWidth
+                                            val scaleY = height.toFloat() / docHeight
+                                            val scale = minOf(scaleX, scaleY)
+
+                                            val scaledWidth = docWidth * scale
+                                            val scaledHeight = docHeight * scale
+                                            val translateX = (width - scaledWidth) / 2f
+                                            val translateY = (height - scaledHeight) / 2f
+
+                                            canvas.translate(translateX, translateY)
+                                            canvas.scale(scale, scale)
+                                            svg.renderToCanvas(canvas)
+                                            android.util.Log.d("MainActivity", "User SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
+                                        }
+                                    }
+
+                                    // Return drawable with no intrinsic dimensions
+                                    object : android.graphics.drawable.BitmapDrawable(resources, bitmap) {
+                                        override fun getIntrinsicWidth(): Int = -1
+                                        override fun getIntrinsicHeight(): Int = -1
+                                    }
+                                } else {
+                                    android.graphics.drawable.PictureDrawable(svg.renderToPicture())
                                 }
-                                android.graphics.drawable.PictureDrawable(svg.renderToPicture())
                             }
                             else -> {
                                 // Load bitmap formats (PNG, JPG, WebP) with downscaling
@@ -1879,13 +2283,52 @@ class MainActivity : AppCompatActivity() {
             val svgPath = "system_logos/$baseFileName.svg"
             val svg = com.caverock.androidsvg.SVG.getFromAsset(assets, svgPath)
 
-            // Set dimensions if provided
             if (width > 0 && height > 0) {
-                svg.documentWidth = width.toFloat()
-                svg.documentHeight = height.toFloat()
-            }
+                // Create bitmap at target dimensions
+                val bitmap = android.graphics.Bitmap.createBitmap(
+                    width,
+                    height,
+                    android.graphics.Bitmap.Config.ARGB_8888
+                )
+                val canvas = android.graphics.Canvas(bitmap)
 
-            android.graphics.drawable.PictureDrawable(svg.renderToPicture())
+                val viewBox = svg.documentViewBox
+                if (viewBox != null) {
+                    // SVG has viewBox - let AndroidSVG handle scaling
+                    svg.setDocumentWidth(width.toFloat())
+                    svg.setDocumentHeight(height.toFloat())
+                    svg.renderToCanvas(canvas)
+                    android.util.Log.d("MainActivity", "Built-in SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
+                } else {
+                    // No viewBox - manually scale using document dimensions
+                    val docWidth = svg.documentWidth
+                    val docHeight = svg.documentHeight
+
+                    if (docWidth > 0 && docHeight > 0) {
+                        val scaleX = width.toFloat() / docWidth
+                        val scaleY = height.toFloat() / docHeight
+                        val scale = minOf(scaleX, scaleY)
+
+                        val scaledWidth = docWidth * scale
+                        val scaledHeight = docHeight * scale
+                        val translateX = (width - scaledWidth) / 2f
+                        val translateY = (height - scaledHeight) / 2f
+
+                        canvas.translate(translateX, translateY)
+                        canvas.scale(scale, scale)
+                        svg.renderToCanvas(canvas)
+                        android.util.Log.d("MainActivity", "Built-in SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
+                    }
+                }
+
+                // Return drawable with no intrinsic dimensions
+                object : android.graphics.drawable.BitmapDrawable(resources, bitmap) {
+                    override fun getIntrinsicWidth(): Int = -1
+                    override fun getIntrinsicHeight(): Int = -1
+                }
+            } else {
+                android.graphics.drawable.PictureDrawable(svg.renderToPicture())
+            }
         } catch (e: Exception) {
             android.util.Log.w("MainActivity", "Failed to load logo for $systemName", e)
             // Return text-based drawable as fallback
@@ -2194,6 +2637,25 @@ class MainActivity : AppCompatActivity() {
             currentGameName = null  // Clear game info when in system view
             currentGameFilename = null
 
+            // ========== START: Check solid color FIRST ==========
+            // CRITICAL: Check if solid color is selected for system view BEFORE checking for custom images
+            val systemImagePref = prefs.getString("system_image_preference", "fanart") ?: "fanart"
+            if (systemImagePref == "solid_color") {
+                val solidColor = prefs.getInt("system_background_color", android.graphics.Color.parseColor("#1A1A1A"))
+                android.util.Log.d("MainActivity", "System view solid color selected - using color: ${String.format("#%06X", 0xFFFFFF and solidColor)}")
+                val drawable = android.graphics.drawable.ColorDrawable(solidColor)
+                gameImageView.setImageDrawable(drawable)
+                gameImageView.visibility = View.VISIBLE
+
+                isSystemScrollActive = true
+
+                // Update system widgets after setting solid color
+                updateWidgetsForCurrentSystem()
+                showWidgets()
+                return
+            }
+            // ========== END: Check solid color FIRST ==========
+
             // Handle ES-DE auto-collections
             val baseFileName = when (systemName.lowercase()) {
                 "all" -> "auto-allgames"
@@ -2217,8 +2679,8 @@ class MainActivity : AppCompatActivity() {
 
             if (imageToUse == null) {
                 val mediaBase = File(getMediaBasePath(), systemName)
-                val imagePref = prefs.getString("image_preference", "fanart") ?: "fanart"
-                val prioritizedFolders = if (imagePref == "screenshot") {
+                // Use system_image_preference instead of image_preference
+                val prioritizedFolders = if (systemImagePref == "screenshot") {
                     listOf("screenshots", "fanart")
                 } else {
                     listOf("fanart", "screenshots")
@@ -2328,16 +2790,27 @@ class MainActivity : AppCompatActivity() {
             // Check if we have widgets - if so, hide old marquee system
             val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
 
-            // Try to find game-specific artwork
-            val gameImage = findGameImage(systemName, gameName, gameNameRaw)
-
-            if (gameImage != null && gameImage.exists()) {
-                // Game has its own artwork - use it
-                loadImageWithAnimation(gameImage, gameImageView)
+            // Check if solid color is selected for game view
+            val gameImagePref = prefs.getString("game_image_preference", "fanart") ?: "fanart"
+            if (gameImagePref == "solid_color") {
+                val solidColor = prefs.getInt("game_background_color", android.graphics.Color.parseColor("#1A1A1A"))
+                val drawable = android.graphics.drawable.ColorDrawable(solidColor)
+                gameImageView.setImageDrawable(drawable)
             } else {
-                // No game artwork - show fallback background
-                loadFallbackBackground()
+                // Try to find game-specific artwork
+                val gameImage = findGameImage(systemName, gameName, gameNameRaw)
+
+                if (gameImage != null && gameImage.exists()) {
+                    // Game has its own artwork - use it
+                    loadImageWithAnimation(gameImage, gameImageView)
+                } else {
+                    // No game artwork - show fallback background
+                    loadFallbackBackground()
+                }
             }
+
+            // Update game widgets after loading game image
+            updateWidgetsForCurrentGame()
 
             // Handle video playback for the current game
             // Pass both stripped name and raw filename (like images do)
@@ -2345,15 +2818,14 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("MainActivity", "  systemName: $systemName")
             android.util.Log.d("MainActivity", "  gameName (stripped): $gameName")
             android.util.Log.d("MainActivity", "  gameNameRaw (full path): $gameNameRaw")
-            handleVideoForGame(systemName, gameName, gameNameRaw)
+            val videoWillPlay = handleVideoForGame(systemName, gameName, gameNameRaw)
 
-            // Update game widgets after loading game image
-            updateWidgetsForCurrentGame()
-            // Don't show widgets if screensaver is active
-            if (!isScreensaverActive) {
+            // Show widgets only if screensaver is not active AND video won't play
+            if (!isScreensaverActive && !videoWillPlay) {
                 showWidgets()
+                android.util.Log.d("MainActivity", "Showing widgets - no screensaver and no video")
             } else {
-                android.util.Log.d("MainActivity", "Screensaver active - not showing widgets from loadGameInfo")
+                android.util.Log.d("MainActivity", "Not showing widgets - screensaver: $isScreensaverActive, video will play: $videoWillPlay")
             }
 
         } catch (e: Exception) {
@@ -2428,48 +2900,18 @@ class MainActivity : AppCompatActivity() {
     private fun findImageInDir(
         dir: File,
         strippedName: String,
-        rawName: String,
-        fullPath: String,
-        extensions: List<String>
+        fullGamePath: String
     ): File? {
-        if (!dir.exists() || !dir.isDirectory) return null
+        // Get image preference
+        val imagePref = prefs.getString("game_image_preference", "fanart") ?: "fanart"
 
-        // Extract subfolder path if present (everything before the filename)
-        val subfolder = fullPath.substringBeforeLast("/", "").substringAfterLast("/", "")
-
-        // Try in order of specificity:
-        // 1. Exact subfolder match: <media_type>/<subfolder>/filename.ext
-        // 2. Root level with stripped name: <media_type>/filename.ext
-        // 3. Root level with raw name: <media_type>/filename.ext
-
-        // 1. Try subfolder match if subfolder exists
-        if (subfolder.isNotEmpty()) {
-            val subfolderDir = File(dir, subfolder)
-            if (subfolderDir.exists() && subfolderDir.isDirectory) {
-                for (name in listOf(strippedName, rawName)) {
-                    for (ext in extensions) {
-                        val file = File(subfolderDir, "$name.$ext")
-                        if (file.exists()) {
-                            android.util.Log.d("MainActivity", "Found media in subfolder: ${file.absolutePath}")
-                            return file
-                        }
-                    }
-                }
-            }
+        // Return null if solid color is selected - handled in loadGameInfo()
+        if (imagePref == "solid_color") {
+            return null
         }
 
-        // 2 & 3. Try root level (original behavior)
-        for (name in listOf(strippedName, rawName)) {
-            for (ext in extensions) {
-                val file = File(dir, "$name.$ext")
-                if (file.exists()) {
-                    android.util.Log.d("MainActivity", "Found media in root: ${file.absolutePath}")
-                    return file
-                }
-            }
-        }
-
-        return null
+        val preferScreenshot = (imagePref == "screenshot")
+        return mediaFileLocator.findGameBackgroundImage(systemName, fullGamePath, preferScreenshot)
     }
 
     /**
@@ -2861,13 +3303,12 @@ class MainActivity : AppCompatActivity() {
                             gameImageView.visibility = View.VISIBLE
                             videoView.visibility = View.GONE
 
-                            val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-                            if (hasWidgets) {
-                                widgetContainer.visibility = View.VISIBLE
-                            }
+                            // Load and show widgets for game image behavior
+                            updateWidgetsForCurrentGame()
+                            showWidgets()
                         }
                         "default_image" -> {
-                            loadFallbackBackground()
+                            loadFallbackBackground(forceCustomImageOnly = true)
                             gameImageView.visibility = View.VISIBLE
                             videoView.visibility = View.GONE
 
@@ -2882,58 +3323,64 @@ class MainActivity : AppCompatActivity() {
             // Normal game launch (not from screensaver)
             android.util.Log.d("MainActivity", "Game start - normal launch")
 
-// Check what was showing before game started
-            val wasInGameView = !isSystemScrollActive && currentGameFilename != null
-
-// Only update display if NOT black (already handled at top)
+            // Only update display if NOT black (already handled at top)
             if (gameLaunchBehavior != "black_screen") {
-                // If we were already in game view with game_image behavior, keep the display
-                if (wasInGameView && gameLaunchBehavior == "game_image") {
-                    android.util.Log.d("MainActivity", "Already showing game image - keeping current display and reloading widgets")
+                // ALWAYS update display when behavior changes - don't try to be clever about it
+                android.util.Log.d("MainActivity", "Updating display for game launch behavior: $gameLaunchBehavior")
 
-                    // Keep the display but reload widgets since they may have changed
-                    // This ensures widgets show up even when launching the same game again
-                    updateWidgetsForCurrentGame()
-                    showWidgets()
+                when (gameLaunchBehavior) {
+                    "game_image" -> {
+                        // Get game info from memory or log files
+                        var filename = playingGameFilename
+                        var systemName = currentSystemName
 
-                    android.util.Log.d("MainActivity", "Widgets reloaded for same game launch")
-                } else {
-                    // Need to update display
-                    android.util.Log.d("MainActivity", "Updating display for game launch")
+                        // If not in memory, read from log files
+                        if (filename == null || systemName == null) {
+                            android.util.Log.d("MainActivity", "No game info in memory, reading from logs")
+                            val logsDir = File(getLogsPath())
+                            val gameFile = File(logsDir, "esde_game_filename.txt")
+                            val systemFile = File(logsDir, "esde_game_system.txt")
 
-                    when (gameLaunchBehavior) {
-                        "game_image" -> {
-                            val filename = playingGameFilename
-                            val systemName = currentSystemName
-
-                            if (filename != null && systemName != null) {
-                                val gameName = sanitizeGameFilename(filename).substringBeforeLast('.')
-                                val gameImage = findGameImage(systemName, gameName, filename)
-
-                                if (gameImage != null && gameImage.exists()) {
-                                    loadImageWithAnimation(gameImage, gameImageView)
-                                } else {
-                                    loadFallbackBackground()
-                                }
-                            }
-
-                            gameImageView.visibility = View.VISIBLE
-                            videoView.visibility = View.GONE
-
-                            val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
-                            if (hasWidgets) {
-                                widgetContainer.visibility = View.VISIBLE
+                            if (gameFile.exists() && systemFile.exists()) {
+                                filename = gameFile.readText().trim()
+                                systemName = systemFile.readText().trim()
+                                android.util.Log.d("MainActivity", "Read from logs: filename=$filename, system=$systemName")
                             }
                         }
-                        "default_image" -> {
+
+                        if (filename != null && systemName != null) {
+                            val gameName = sanitizeGameFilename(filename).substringBeforeLast('.')
+                            val gameImage = findGameImage(systemName, gameName, filename)
+
+                            if (gameImage != null && gameImage.exists()) {
+                                android.util.Log.d("MainActivity", "Loading game image: ${gameImage.name}")
+                                loadImageWithAnimation(gameImage, gameImageView)
+                            } else {
+                                android.util.Log.d("MainActivity", "No game image found, using fallback")
+                                loadFallbackBackground()
+                            }
+                        } else {
+                            android.util.Log.d("MainActivity", "No game info available, using fallback")
                             loadFallbackBackground()
-                            gameImageView.visibility = View.VISIBLE
-                            videoView.visibility = View.GONE
-
-                            // Load and show widgets
-                            updateWidgetsForCurrentGame()
-                            showWidgets()
                         }
+
+                        gameImageView.visibility = View.VISIBLE
+                        videoView.visibility = View.GONE
+
+                        // CRITICAL: Always update and show widgets for game_image behavior
+                        android.util.Log.d("MainActivity", "Updating widgets for game_image behavior")
+                        updateWidgetsForCurrentGame()
+                        showWidgets()
+                    }
+                    "default_image" -> {
+                        android.util.Log.d("MainActivity", "Loading custom background for default_image behavior")
+                        loadFallbackBackground(forceCustomImageOnly = true)
+                        gameImageView.visibility = View.VISIBLE
+                        videoView.visibility = View.GONE
+
+                        // Load and show widgets
+                        updateWidgetsForCurrentGame()
+                        showWidgets()
                     }
                 }
             }
@@ -3012,8 +3459,17 @@ class MainActivity : AppCompatActivity() {
         gameNameBeforeScreensaver = currentGameName
         android.util.Log.d("MainActivity", "Saved pre-screensaver state: system=$systemBeforeScreensaver, game=$gameNameBeforeScreensaver, isSystemView=$wasInSystemViewBeforeScreensaver")
 
-        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
-        android.util.Log.d("MainActivity", "Screensaver behavior: $screensaverBehavior")
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        android.util.Log.d("MainActivity", "SCREENSAVER START - PREFERENCE CHECK")
+        android.util.Log.d("MainActivity", "Screensaver behavior preference: $screensaverBehavior")
+        android.util.Log.d("MainActivity", "Current state:")
+        android.util.Log.d("MainActivity", "  - currentSystemName: $currentSystemName")
+        android.util.Log.d("MainActivity", "  - currentGameFilename: $currentGameFilename")
+        android.util.Log.d("MainActivity", "  - isSystemScrollActive: $isSystemScrollActive")
+        android.util.Log.d("MainActivity", "  - isScreensaverActive: $isScreensaverActive")
+        android.util.Log.d("MainActivity", "  - screensaverInitialized: $screensaverInitialized")
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         // CRITICAL: If black screen, clear everything IMMEDIATELY
         if (screensaverBehavior == "black_screen") {
@@ -3034,6 +3490,9 @@ class MainActivity : AppCompatActivity() {
             "game_image" -> {
                 // Game images will be loaded by handleScreensaverGameSelect events
                 android.util.Log.d("MainActivity", "Screensaver behavior: game_image - waiting for game select events")
+                android.util.Log.d("MainActivity", "  - Will load game images when screensaver-game-select events arrive")
+                android.util.Log.d("MainActivity", "  - gameImageView visibility: ${gameImageView.visibility}")
+                android.util.Log.d("MainActivity", "  - videoView visibility: ${videoView.visibility}")
             }
             "default_image" -> {
                 // Show default/fallback image immediately
@@ -3094,6 +3553,10 @@ class MainActivity : AppCompatActivity() {
                         currentGameFilename = screensaverGameFilename
                         android.util.Log.d("MainActivity", "Updated currentGameFilename to screensaver game: $currentGameFilename")
                     }
+
+                    // CRITICAL: Set to game view mode so widgets load correctly
+                    isSystemScrollActive = false
+                    android.util.Log.d("MainActivity", "Set isSystemScrollActive = false for game launch")
 
                     // Don't clear screensaver variables yet - handleGameStart needs them
                     // The game-start event will handle the display
@@ -3173,7 +3636,16 @@ class MainActivity : AppCompatActivity() {
      * Handle screensaver game select event (for slideshow/video screensavers)
      */
     private fun handleScreensaverGameSelect() {
-        val screensaverBehavior = prefs.getString("screensaver_behavior", "default_image") ?: "default_image"
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        android.util.Log.d("MainActivity", "SCREENSAVER GAME SELECT EVENT")
+
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+        android.util.Log.d("MainActivity", "Screensaver behavior from prefs: $screensaverBehavior")
+        android.util.Log.d("MainActivity", "Screensaver variables:")
+        android.util.Log.d("MainActivity", "  - screensaverGameFilename: $screensaverGameFilename")
+        android.util.Log.d("MainActivity", "  - screensaverGameName: $screensaverGameName")
+        android.util.Log.d("MainActivity", "  - screensaverSystemName: $screensaverSystemName")
+        android.util.Log.d("MainActivity", "  - screensaverInitialized: $screensaverInitialized")
 
         // If black screen, don't load anything
         if (screensaverBehavior == "black_screen") {
@@ -3193,6 +3665,11 @@ class MainActivity : AppCompatActivity() {
 
             when (screensaverBehavior) {
                 "game_image" -> {
+                    android.util.Log.d("MainActivity", "Processing game_image behavior")
+                    android.util.Log.d("MainActivity", "  - System: $screensaverSystemName")
+                    android.util.Log.d("MainActivity", "  - Game: $gameName")
+                    android.util.Log.d("MainActivity", "  - Filename: $screensaverGameFilename")
+
                     // Load the screensaver game's artwork
                     val gameImage = findGameImage(
                         screensaverSystemName!!,
@@ -3200,15 +3677,24 @@ class MainActivity : AppCompatActivity() {
                         screensaverGameFilename!!
                     )
 
+                    android.util.Log.d("MainActivity", "  - Found image path: $gameImage")
+                    android.util.Log.d("MainActivity", "  - Image exists: ${gameImage?.exists()}")
+
                     if (gameImage != null && gameImage.exists()) {
+                        android.util.Log.d("MainActivity", "  ✓ Loading game image via loadImageWithAnimation()")
+                        android.util.Log.d("MainActivity", "  - Before load - gameImageView visibility: ${gameImageView.visibility}")
                         loadImageWithAnimation(gameImage, gameImageView)
                     } else {
+                        android.util.Log.e("MainActivity", "  ✗ Game image not found or doesn't exist")
+                        android.util.Log.d("MainActivity", "  - Falling back to default background")
                         loadFallbackBackground()
                     }
 
                     // NEW: Make sure views are visible
                     gameImageView.visibility = View.VISIBLE
                     videoView.visibility = View.GONE
+                    android.util.Log.d("MainActivity", "  - After load - gameImageView visibility: ${gameImageView.visibility}")
+                    android.util.Log.d("MainActivity", "  - After load - videoView visibility: ${videoView.visibility}")
 
                     // CRITICAL: Set current game context BEFORE loading widgets
                     // This ensures widgets load images from the correct system folder
@@ -3222,11 +3708,17 @@ class MainActivity : AppCompatActivity() {
                     updateWidgetsForCurrentGame()
                 }
                 "default_image" -> {
-                    loadFallbackBackground()
+                    android.util.Log.d("MainActivity", "Processing default_image behavior")
+                    android.util.Log.d("MainActivity", "  ⚠ WARNING: Screensaver is using default_image behavior")
+                    android.util.Log.d("MainActivity", "  - If user selected 'game_image', this indicates preference wasn't loaded correctly")
+
+                    loadFallbackBackground(forceCustomImageOnly = true)
 
                     // NEW: Make sure views are visible
                     gameImageView.visibility = View.VISIBLE
                     videoView.visibility = View.GONE
+                    android.util.Log.d("MainActivity", "  - gameImageView visibility: ${gameImageView.visibility}")
+                    android.util.Log.d("MainActivity", "  - videoView visibility: ${videoView.visibility}")
 
                     // DEBUG: Log visibility state
                     android.util.Log.d("MainActivity", "After setting visibility: gameImageView=${gameImageView.visibility}, videoView=${videoView.visibility}")
@@ -3245,13 +3737,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        android.util.Log.d("MainActivity", "Screensaver game select complete")
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
     private fun updateWidgetsForScreensaverGame() {
         android.util.Log.d("MainActivity", "═══ updateWidgetsForScreensaverGame START ═══")
 
-        // Clear existing widgets
-        widgetContainer.removeAllViews()
+        // Clear existing widgets but preserve grid overlay
+        val childCount = widgetContainer.childCount
+        for (i in childCount - 1 downTo 0) {
+            val child = widgetContainer.getChildAt(i)
+            if (child !is GridOverlayView) {
+                widgetContainer.removeView(child)
+            }
+        }
         activeWidgets.clear()
 
         val systemName = screensaverSystemName
@@ -3532,70 +4032,16 @@ class MainActivity : AppCompatActivity() {
      * @return Video file path or null if not found
      */
     private fun findVideoForGame(systemName: String?, strippedName: String?, rawName: String?): String? {
-        if (systemName == null || strippedName == null) {
-            android.util.Log.d("MainActivity", "findVideoForGame - systemName or strippedName is null")
+        if (systemName == null || rawName == null) {
+            android.util.Log.d("MainActivity", "findVideoForGame - systemName or rawName is null")
             return null
         }
-
-        val mediaPath = prefs.getString("media_path", "/storage/emulated/0/ES-DE/downloaded_media")
-            ?: return null
 
         android.util.Log.d("MainActivity", "findVideoForGame - Looking for video:")
         android.util.Log.d("MainActivity", "  systemName: $systemName")
-        android.util.Log.d("MainActivity", "  strippedName: $strippedName")
         android.util.Log.d("MainActivity", "  rawName: $rawName")
 
-        val videoExtensions = listOf("mp4", "mkv", "avi", "wmv", "mov", "webm")
-        val videoDir = File(mediaPath, "$systemName/videos")
-
-        if (!videoDir.exists()) {
-            android.util.Log.d("MainActivity", "Video directory does not exist: ${videoDir.absolutePath}")
-            return null
-        }
-
-        // Sanitize the raw name (which is now the full path)
-        val sanitizedRawName = if (rawName != null) sanitizeGameFilename(rawName) else null
-
-        android.util.Log.d("MainActivity", "  sanitizedRawName: $sanitizedRawName")
-
-        // Extract subfolder if present
-        val subfolder = rawName?.substringBeforeLast("/", "")?.substringAfterLast("/", "") ?: ""
-
-        android.util.Log.d("MainActivity", "  subfolder: $subfolder")
-
-        // Try subfolder first if it exists
-        if (subfolder.isNotEmpty()) {
-            val subfolderDir = File(videoDir, subfolder)
-            android.util.Log.d("MainActivity", "  Checking subfolder: ${subfolderDir.absolutePath}")
-            if (subfolderDir.exists() && subfolderDir.isDirectory) {
-                for (name in listOfNotNull(strippedName, sanitizedRawName)) {
-                    for (ext in videoExtensions) {
-                        val videoFile = File(subfolderDir, "$name.$ext")
-                        android.util.Log.d("MainActivity", "    Trying: ${videoFile.absolutePath}")
-                        if (videoFile.exists()) {
-                            android.util.Log.d("MainActivity", "Found video in subfolder: ${videoFile.absolutePath}")
-                            return videoFile.absolutePath
-                        }
-                    }
-                }
-            }
-        }
-
-        // Try root level
-        android.util.Log.d("MainActivity", "  Checking root level: ${videoDir.absolutePath}")
-        for (name in listOfNotNull(strippedName, sanitizedRawName)) {
-            for (ext in videoExtensions) {
-                val videoFile = File(videoDir, "$name.$ext")
-                android.util.Log.d("MainActivity", "    Trying: ${videoFile.absolutePath}")
-                if (videoFile.exists()) {
-                    android.util.Log.d("MainActivity", "Found video in root: ${videoFile.absolutePath}")
-                    return videoFile.absolutePath
-                }
-            }
-        }
-
-        android.util.Log.d("MainActivity", "No video found for system: $systemName, game: $strippedName")
-        return null
+        return mediaFileLocator.findVideoFile(systemName, rawName)
     }
 
     /**
@@ -3761,37 +4207,38 @@ class MainActivity : AppCompatActivity() {
         // Cancel any pending video load
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
 
-        // Hybrid blocking approach to handle different device scenarios:
-        //
-        // Scenario 1: Game launches on SAME screen as Companion
-        //   - hasWindowFocus becomes false (game window is on top)
-        //   - onPause() does NOT fire (Companion is still "active" behind game)
-        //   - Block: !hasWindowFocus
-        //
-        // Scenario 2: Game launches on OTHER screen
-        //   - hasWindowFocus may be unreliable (identical display names)
-        //   - onPause() DOES fire (Companion is backgrounded by system)
-        //   - Block: lifecycle state check
-        //
-        // We block videos if EITHER condition indicates we shouldn't play:
-
-        val isInBackground = lifecycle.currentState != androidx.lifecycle.Lifecycle.State.RESUMED
-
-        if (!hasWindowFocus || isInBackground) {
-            android.util.Log.d("MainActivity", "Video blocked - hasWindowFocus: $hasWindowFocus, isInBackground: $isInBackground")
+        // Only trust isActivityVisible (onStart/onStop) - it's the only truly reliable signal
+        // on devices with identical display names.
+        if (!isActivityVisible) {
+            android.util.Log.d("MainActivity", "Video blocked - activity not visible (onStop called)")
             releasePlayer()
-            return
+            return false
+        }
+
+        // Additional check: If ES-DE reports a game is playing, block videos
+        // This handles same-screen game launches where onStop doesn't fire
+        if (isGamePlaying) {
+            android.util.Log.d("MainActivity", "Video blocked - game is playing (ES-DE event)")
+            releasePlayer()
+            return false
         }
 
         if (isScreensaverActive) {
             android.util.Log.d("MainActivity", "Video blocked - screensaver active")
             releasePlayer()
-            return
+            return false
         }
 
         if (!isVideoEnabled() && !override) {
             releasePlayer()
-            return
+            return false
+        }
+
+        // Block videos during widget edit mode
+        if (!widgetsLocked) {
+            android.util.Log.d("MainActivity", "Video blocked - widget edit mode active")
+            releasePlayer()
+            return false
         }
 
         // Pass the raw name (full path) to findVideoForGame
@@ -3809,6 +4256,7 @@ class MainActivity : AppCompatActivity() {
                     releaseMusicPlayer()
                     player?.volume = getSystemVolume()
                 }
+                return true  // Video will play
             } else {
                 // Delayed - show image first, then video
                 releasePlayer() // Stop any current video
@@ -3818,26 +4266,38 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 videoDelayRunnable = Runnable {
-                    // Double-check conditions before loading video after delay
-                    val isStillInBackground = lifecycle.currentState != androidx.lifecycle.Lifecycle.State.RESUMED
+                    // Include widget edit mode check
+                    // Only check reliable signals
+                    val shouldAllowDelayedVideo = isActivityVisible &&   // Still visible
+                            !isGamePlaying &&      // No game running
+                            !isScreensaverActive &&   // Screensaver not active
+                            widgetsLocked          // Widget edit mode OFF
 
-                    if (hasWindowFocus && !isStillInBackground && !isScreensaverActive) {
+                    if (shouldAllowDelayedVideo) {
                         loadVideo(videoPath)
                         if(override){
                             releaseMusicPlayer()
                             player?.volume = getSystemVolume()
                         }
                     } else {
-                        android.util.Log.d("MainActivity", "Video delayed load cancelled - conditions changed")
+                        val reasons = mutableListOf<String>()
+                        if (!isActivityVisible) reasons.add("not visible")
+                        if (isGamePlaying) reasons.add("game playing")
+                        if (isScreensaverActive) reasons.add("screensaver")
+                        if (!widgetsLocked) reasons.add("widget edit mode")
+
+                        android.util.Log.d("MainActivity", "Video delayed load cancelled - ${reasons.joinToString(", ")}")
                     }
                 }
 
                 videoDelayHandler?.postDelayed(videoDelayRunnable!!, delay)
+                return true  // Video will play (after delay)
             }
         } else {
             // No video found, release player
             android.util.Log.d("MainActivity", "No video found for system: $systemName, game: $strippedName")
             releasePlayer()
+            return false
         }
     }
 
@@ -3898,6 +4358,7 @@ class MainActivity : AppCompatActivity() {
         if (widgetMenuDialog?.isShowing == true) return
         activeWidgets.forEach { it.deselect() }
 
+
         val rootLayout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
         }
@@ -3924,15 +4385,6 @@ class MainActivity : AppCompatActivity() {
 
         rootLayout.addView(flipper)
 
-        val dialog = android.app.AlertDialog.Builder(this)
-            .setView(rootLayout) // Set our custom tabbed view
-            .setNegativeButton("Cancel") { _, _ -> }
-            .setOnDismissListener {
-                widgetMenuShowing = false
-                widgetMenuDialog = null
-            }
-            .create()
-
         musicContainer.addView(createMusicMenuView(dialog))
 
         //tab switch logic
@@ -3948,56 +4400,117 @@ class MainActivity : AppCompatActivity() {
             override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
         })
 
-        //Widget selection
-        widgetListView.setOnItemClickListener { _, _, which, _ ->
-            when {
-                which == 0 -> {
-                    toggleWidgetLock()
-                    dialog.dismiss()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { showCreateWidgetMenu() }
-                }
-                which == 1 -> {
-                    toggleSnapToGrid()
-                    dialog.dismiss()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { showCreateWidgetMenu() }
-                }
-                which == 2 -> {
-                    toggleShowGrid()
-                    dialog.dismiss()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { showCreateWidgetMenu() }
-                }
-                which == 3 -> {} // Separator
-                isSystemScrollActive && which == 4 -> {
-                    if (widgetsLocked) {
-                        android.widget.Toast.makeText(this, "Unlock widgets first.", android.widget.Toast.LENGTH_SHORT).show()
-                    } else {
-                        createWidget(OverlayWidget.ImageType.SYSTEM_LOGO)
-                        dialog.dismiss()
-                    }
-                }
-                !isSystemScrollActive -> {
-                    if (widgetsLocked) {
-                        android.widget.Toast.makeText(this, "Unlock widgets first.", android.widget.Toast.LENGTH_SHORT).show()
-                        return@setOnItemClickListener
-                    }
+        // Get references to chips
+        val chipLockWidgets = dialogView.findViewById<com.google.android.material.chip.Chip>(R.id.chipLockWidgets)
+        val chipSnapToGrid = dialogView.findViewById<com.google.android.material.chip.Chip>(R.id.chipSnapToGrid)
+        val chipShowGrid = dialogView.findViewById<com.google.android.material.chip.Chip>(R.id.chipShowGrid)
+        val widgetOptionsContainer = dialogView.findViewById<LinearLayout>(R.id.widgetOptionsContainer)
+        val btnCancel = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCancelWidgetMenu)
+        val btnHelp = dialogView.findViewById<android.widget.Button>(R.id.btnWidgetHelp)
 
-                    val imageType = when (which) {
-                        4 -> OverlayWidget.ImageType.MARQUEE
-                        5 -> OverlayWidget.ImageType.BOX_2D
-                        6 -> OverlayWidget.ImageType.BOX_3D
-                        7 -> OverlayWidget.ImageType.MIX_IMAGE
-                        8 -> OverlayWidget.ImageType.BACK_COVER
-                        9 -> OverlayWidget.ImageType.PHYSICAL_MEDIA
-                        10 -> OverlayWidget.ImageType.SCREENSHOT
-                        11 -> OverlayWidget.ImageType.FANART
-                        12 -> OverlayWidget.ImageType.TITLE_SCREEN
-                        13 -> OverlayWidget.ImageType.GAME_DESCRIPTION
-                        else -> return@setOnItemClickListener
-                    }
+        // Set chip states and text
+        chipLockWidgets.isChecked = !widgetsLocked  // Inverted: checked = edit mode ON
+        chipLockWidgets.text = if (widgetsLocked) "Widget Edit Mode: OFF" else "Widget Edit Mode: ON"
+
+        chipSnapToGrid.isChecked = snapToGrid
+        chipSnapToGrid.text = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
+
+        chipShowGrid.isChecked = showGrid
+        chipShowGrid.text = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
+
+
+        // Inflate the custom dialog view
+        val dialogView = layoutInflater.inflate(R.layout.dialog_widget_menu, null)
+
+        // Create the dialog
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(true)
+            .setOnDismissListener {
+                widgetMenuShowing = false
+                widgetMenuDialog = null
+                android.util.Log.d("MainActivity", "Widget menu dismissed, flags reset")
+
+                // Refresh widgets based on current view state
+                if (isSystemScrollActive) {
+                    // In system view - refresh system widgets
+                    android.util.Log.d("MainActivity", "Refreshing system widgets after dialog dismiss")
+                    updateWidgetsForCurrentSystem()
+                } else if (currentGameFilename != null && currentSystemName != null) {
+                    // In game view - refresh game widgets
+                    android.util.Log.d("MainActivity", "Refreshing game widgets after dialog dismiss")
+                    updateWidgetsForCurrentGame()
+                }
+            }
+            .create()
+
+        // Chip click listeners
+        chipLockWidgets.setOnClickListener {
+            toggleWidgetLock()
+            chipLockWidgets.text = if (widgetsLocked) "Widget Edit Mode: OFF" else "Widget Edit Mode: ON"
+        }
+
+        chipSnapToGrid.setOnClickListener {
+            toggleSnapToGrid()
+            chipSnapToGrid.text = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
+        }
+
+        chipShowGrid.setOnClickListener {
+            toggleShowGrid()
+            chipShowGrid.text = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
+        }
+
+        btnHelp.setOnClickListener {
+            dialog.dismiss()
+            showWidgetSystemTutorial(fromUpdate = false)
+        }
+
+        // Populate widget options based on current view
+        val widgetOptions = if (isSystemScrollActive) {
+            // System view - only system logo option
+            listOf("System Logo" to OverlayWidget.ImageType.SYSTEM_LOGO)
+        } else {
+            // Game view - all game image types
+            listOf(
+                "Marquee" to OverlayWidget.ImageType.MARQUEE,
+                "2D Box" to OverlayWidget.ImageType.BOX_2D,
+                "3D Box" to OverlayWidget.ImageType.BOX_3D,
+                "Mix Image" to OverlayWidget.ImageType.MIX_IMAGE,
+                "Back Cover" to OverlayWidget.ImageType.BACK_COVER,
+                "Physical Media" to OverlayWidget.ImageType.PHYSICAL_MEDIA,
+                "Screenshot" to OverlayWidget.ImageType.SCREENSHOT,
+                "Fanart" to OverlayWidget.ImageType.FANART,
+                "Title Screen" to OverlayWidget.ImageType.TITLE_SCREEN,
+                "Game Description" to OverlayWidget.ImageType.GAME_DESCRIPTION
+            )
+        }
+
+        // Add each widget option as a styled item
+        widgetOptions.forEach { (label, imageType) ->
+            val itemView = layoutInflater.inflate(R.layout.item_widget_option, widgetOptionsContainer, false)
+            val textView = itemView.findViewById<TextView>(R.id.widgetOptionText)
+            textView.text = label
+
+            itemView.setOnClickListener {
+                // Check if locked before creating
+                if (widgetsLocked) {
+                    android.widget.Toast.makeText(
+                        this,
+                        "Cannot create widgets while locked. Unlock widgets first.",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
                     createWidget(imageType)
                     dialog.dismiss()
                 }
             }
+
+            widgetOptionsContainer.addView(itemView)
+        }
+
+        // Cancel button
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
         }
 
         widgetMenuDialog = dialog
@@ -4121,6 +4634,25 @@ class MainActivity : AppCompatActivity() {
 
         // Save lock state to preferences
         prefs.edit().putBoolean("widgets_locked", widgetsLocked).apply()
+
+        // Handle video playback and widget reload when toggling widget lock
+        if (widgetsLocked) {
+            // Locked (edit mode OFF) - videos can resume if other conditions allow
+            android.util.Log.d("MainActivity", "Widget edit mode OFF - allowing videos")
+            // Reload current state to potentially start videos
+            if (isSystemScrollActive) {
+                loadSystemImage()
+            } else if (!isGamePlaying) {
+                loadGameInfo()
+            }
+        } else {
+            // Unlocked (edit mode ON) - stop videos and reload widgets
+            android.util.Log.d("MainActivity", "Widget edit mode ON - blocking videos and reloading widgets")
+            releasePlayer()
+
+            // Reload widgets with current images so they're visible during editing
+            updateWidgetsForCurrentGame()
+        }
     }
 
     private fun createWidget(imageType: OverlayWidget.ImageType) {
@@ -4162,6 +4694,8 @@ class MainActivity : AppCompatActivity() {
                 zIndex = nextZIndex,
                 widgetContext = OverlayWidget.WidgetContext.SYSTEM
             )
+
+            widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
             addWidgetToScreen(widget)
 
@@ -4225,6 +4759,8 @@ class MainActivity : AppCompatActivity() {
                     widgetContext = OverlayWidget.WidgetContext.GAME
                 )
 
+                widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
+
                 addWidgetToScreen(widget)
 
                 android.widget.Toast.makeText(
@@ -4269,6 +4805,8 @@ class MainActivity : AppCompatActivity() {
                 zIndex = nextZIndex,
                 widgetContext = OverlayWidget.WidgetContext.GAME
             )
+
+            widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
             addWidgetToScreen(widget)
 
@@ -4339,10 +4877,16 @@ class MainActivity : AppCompatActivity() {
             val systemWidgets = allWidgets.filter { it.widgetContext == OverlayWidget.WidgetContext.SYSTEM }
             android.util.Log.d("MainActivity", "Loaded ${systemWidgets.size} system widgets from storage")
 
-            // Clear existing widget views
-            widgetContainer.removeAllViews()
+            // Clear existing widget views but preserve grid overlay
+            val childCount = widgetContainer.childCount
+            for (i in childCount - 1 downTo 0) {
+                val child = widgetContainer.getChildAt(i)
+                if (child !is GridOverlayView) {
+                    widgetContainer.removeView(child)
+                }
+            }
             activeWidgets.clear()
-            android.util.Log.d("MainActivity", "Cleared widget container")
+            android.util.Log.d("MainActivity", "Cleared widget container (preserved grid)")
 
             // Sort widgets by z-index
             val sortedWidgets = systemWidgets.sortedBy { it.zIndex }
@@ -4389,17 +4933,7 @@ class MainActivity : AppCompatActivity() {
         gameFilename: String,
         folder: String
     ): File? {
-        val extensions = listOf("jpg", "png", "webp")
-        val sanitizedFilename = sanitizeGameFilename(gameFilename)
-        val sanitizedName = sanitizedFilename.substringBeforeLast('.')
-
-        return findImageInDir(
-            File(getMediaBasePath(), "$systemName/$folder"),
-            sanitizedName,
-            sanitizedFilename,
-            gameFilename,
-            extensions
-        )
+        return mediaFileLocator.findImageInFolder(systemName, gameName, gameFilename, folder)
     }
 
     /**
@@ -4493,10 +5027,16 @@ class MainActivity : AppCompatActivity() {
                 val gameWidgets = allWidgets.filter { it.widgetContext == OverlayWidget.WidgetContext.GAME }
                 android.util.Log.d("MainActivity", "Loaded ${gameWidgets.size} game widgets from storage")
 
-                // Clear existing widget views
-                widgetContainer.removeAllViews()
+                // Clear existing widget views but preserve grid overlay
+                val childCount = widgetContainer.childCount
+                for (i in childCount - 1 downTo 0) {
+                    val child = widgetContainer.getChildAt(i)
+                    if (child !is GridOverlayView) {
+                        widgetContainer.removeView(child)
+                    }
+                }
                 activeWidgets.clear()
-                android.util.Log.d("MainActivity", "Cleared widget container")
+                android.util.Log.d("MainActivity", "Cleared widget container (preserved grid)")
 
                 // Sort widgets by z-index - CHANGED to use gameWidgets
                 val sortedWidgets = gameWidgets.sortedBy { it.zIndex }
@@ -4660,6 +5200,36 @@ class MainActivity : AppCompatActivity() {
         android.util.Log.d("MainActivity", "Showing widgets/grid")
     }
 
+    fun saveAllWidgets() {
+        android.util.Log.d("MainActivity", "saveAllWidgets called, active widgets count: ${activeWidgets.size}")
+        activeWidgets.forEachIndexed { index, widgetView ->
+            android.util.Log.d("MainActivity", "Widget $index: type=${widgetView.widget.imageType}, id=${widgetView.widget.id}, context=${widgetView.widget.widgetContext}")
+        }
+
+        // Load ALL existing widgets
+        val allExistingWidgets = widgetManager.loadWidgets().toMutableList()
+        android.util.Log.d("MainActivity", "Loaded ${allExistingWidgets.size} existing widgets from storage")
+
+        // Determine which context we're currently in
+        val currentContext = if (isSystemScrollActive) {
+            OverlayWidget.WidgetContext.SYSTEM
+        } else {
+            OverlayWidget.WidgetContext.GAME
+        }
+        android.util.Log.d("MainActivity", "Current context: $currentContext")
+
+        // Remove widgets of the CURRENT context only
+        val widgetsToKeep = allExistingWidgets.filter { it.widgetContext != currentContext }
+        android.util.Log.d("MainActivity", "Keeping ${widgetsToKeep.size} widgets from OTHER context")
+
+        // Add current active widgets (they're all from the current context)
+        val updatedWidgets = widgetsToKeep + activeWidgets.map { it.widget }
+        android.util.Log.d("MainActivity", "Total widgets to save: ${updatedWidgets.size}")
+
+        widgetManager.saveWidgets(updatedWidgets)
+        android.util.Log.d("MainActivity", "Widgets saved")
+    }
+
     private fun updateGridOverlay() {
         if (showGrid && widgetContainer.visibility == View.VISIBLE) {
             // Always recreate grid overlay to ensure it's properly attached
@@ -4787,9 +5357,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveAllWidgetsWithZIndex() {
-        val widgets = activeWidgets.map { it.widget }
-        widgetManager.saveWidgets(widgets)
-        android.util.Log.d("MainActivity", "Saved ${widgets.size} widgets with z-indices")
+        // Load ALL existing widgets
+        val allExistingWidgets = widgetManager.loadWidgets().toMutableList()
+        android.util.Log.d("MainActivity", "saveAllWidgetsWithZIndex: Loaded ${allExistingWidgets.size} existing widgets from storage")
+
+        // Determine which context we're currently in
+        val currentContext = if (isSystemScrollActive) {
+            OverlayWidget.WidgetContext.SYSTEM
+        } else {
+            OverlayWidget.WidgetContext.GAME
+        }
+        android.util.Log.d("MainActivity", "saveAllWidgetsWithZIndex: Current context: $currentContext")
+
+        // Remove widgets of the CURRENT context only
+        val widgetsToKeep = allExistingWidgets.filter { it.widgetContext != currentContext }
+        android.util.Log.d("MainActivity", "saveAllWidgetsWithZIndex: Keeping ${widgetsToKeep.size} widgets from OTHER context")
+
+        // Add current active widgets (they're all from the current context)
+        val updatedWidgets = widgetsToKeep + activeWidgets.map { it.widget }
+        android.util.Log.d("MainActivity", "saveAllWidgetsWithZIndex: Total widgets to save: ${updatedWidgets.size}")
+
+        widgetManager.saveWidgets(updatedWidgets)
+        android.util.Log.d("MainActivity", "saveAllWidgetsWithZIndex: Saved ${updatedWidgets.size} widgets with z-indices")
     }
 
     fun deselectAllWidgets() {

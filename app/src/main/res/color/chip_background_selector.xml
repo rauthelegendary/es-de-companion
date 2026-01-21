@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Selected state -->
+    <!-- Selected state - Orange -->
     <item android:color="#FFB74D" android:state_checked="true"/>
-    <!-- Unselected state -->
+    <!-- Unselected state - Dark -->
     <item android:color="#1A1A1A"/>
 </selector>

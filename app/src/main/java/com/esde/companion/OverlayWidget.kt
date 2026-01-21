@@ -12,7 +12,14 @@ data class OverlayWidget(
     var width: Float,
     var height: Float,
     var zIndex: Int = 0,
-    val widgetContext: WidgetContext = WidgetContext.GAME
+    var backgroundOpacity: Float = 0.2f,
+    var scaleType: ScaleType = ScaleType.FIT,
+    val widgetContext: WidgetContext = WidgetContext.GAME,  // ← ADD COMMA HERE
+    // Store positions and sizes as percentages for cross-resolution support
+    var xPercent: Float? = null,
+    var yPercent: Float? = null,
+    var widthPercent: Float? = null,
+    var heightPercent: Float? = null
 ) {
     enum class ImageType {
         MARQUEE,
@@ -31,5 +38,33 @@ data class OverlayWidget(
     enum class WidgetContext {
         GAME,    // Shows in game view
         SYSTEM   // Shows in system view
+    }
+
+    enum class ScaleType {
+        FIT,      // Fit to container with no cropping (default)
+        CROP      // Fill container with cropping (centerCrop)
+    }
+
+    /**
+     * Convert absolute pixels to percentages based on screen dimensions
+     */
+    fun toPercentages(screenWidth: Int, screenHeight: Int) {
+        xPercent = (x / screenWidth) * 100f
+        yPercent = (y / screenHeight) * 100f
+        widthPercent = (width / screenWidth) * 100f
+        heightPercent = (height / screenHeight) * 100f
+    }
+
+    /**
+     * Convert percentages to absolute pixels based on screen dimensions
+     */
+    fun fromPercentages(screenWidth: Int, screenHeight: Int) {
+        // Only apply percentages if they exist (for migration)
+        if (xPercent != null && yPercent != null && widthPercent != null && heightPercent != null) {
+            x = (xPercent!! / 100f) * screenWidth
+            y = (yPercent!! / 100f) * screenHeight
+            width = (widthPercent!! / 100f) * screenWidth
+            height = (heightPercent!! / 100f) * screenHeight
+        }
     }
 }

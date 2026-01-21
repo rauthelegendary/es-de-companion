@@ -1,34 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/settingsScrollView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#0A0A0A">
 
-    <LinearLayout
+    <!-- Fixed Header -->
+    <RelativeLayout
+        android:id="@+id/settingsHeader"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:layout_alignParentTop="true"
+        android:background="#1A1A1A"
+        android:padding="16dp"
+        android:elevation="4dp">
 
-        <!-- Header -->
+        <ImageButton
+            android:id="@+id/settingsBackButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_alignParentStart="true"
+            android:layout_centerVertical="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_arrow_back"
+            android:contentDescription="Back to Main Screen"
+            app:tint="#FFFFFF" />
+
         <TextView
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
             android:text="Settings"
             android:textColor="#FFFFFF"
-            android:textSize="28sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="8dp" />
+            android:textSize="24sp"
+            android:textStyle="bold" />
 
-        <TextView
+    </RelativeLayout>
+
+    <!-- Scrollable Content -->
+    <ScrollView
+        android:id="@+id/settingsScrollView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/settingsHeader">
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Customize your experience"
-            android:textColor="#999999"
-            android:textSize="14sp"
-            android:layout_marginBottom="16dp" />
+            android:orientation="vertical"
+            android:padding="16dp">
 
         <!-- Quick Setup Button -->
         <Button
@@ -84,11 +104,11 @@
                         android:letterSpacing="0.1" />
                 </LinearLayout>
 
-                <!-- Image Priority -->
+                <!-- System View Background Priority -->
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Background Image Priority"
+                    android:text="System View Background Image"
                     android:textColor="#FFFFFF"
                     android:textSize="16sp"
                     android:textStyle="bold"
@@ -97,21 +117,21 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Which image type to prefer for backgrounds"
+                    android:text="Which background to use when browsing systems"
                     android:textColor="#999999"
                     android:textSize="13sp"
                     android:layout_marginBottom="8dp" />
 
                 <com.google.android.material.chip.ChipGroup
-                    android:id="@+id/imagePreferenceChipGroup"
+                    android:id="@+id/systemImagePreferenceChipGroup"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="20dp"
+                    android:layout_marginBottom="8dp"
                     app:singleSelection="true"
                     app:selectionRequired="true">
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/imagePrefFanart"
+                        android:id="@+id/systemImagePrefFanart"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Fanart"
@@ -122,7 +142,7 @@
                         app:chipStrokeWidth="2dp" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/imagePrefScreenshot"
+                        android:id="@+id/systemImagePrefScreenshot"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="Screenshot"
@@ -132,7 +152,134 @@
                         app:chipStrokeColor="#FFB74D"
                         app:chipStrokeWidth="2dp" />
 
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/systemImagePrefSolidColor"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Solid Color"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
                 </com.google.android.material.chip.ChipGroup>
+
+                <!-- System Color Picker (shown when Solid Color is selected) -->
+                <LinearLayout
+                    android:id="@+id/systemColorPickerLayout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Background Color"
+                        android:textColor="#999999"
+                        android:textSize="13sp"
+                        android:layout_marginBottom="8dp" />
+
+                    <Button
+                        android:id="@+id/systemColorPickerButton"
+                        android:layout_width="120dp"
+                        android:layout_height="50dp"
+                        android:text="Select Color"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
+                <!-- Game View Background Priority -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Game View Background Image"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Which background to use when browsing games"
+                    android:textColor="#999999"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="8dp" />
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/gameImagePreferenceChipGroup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="8dp"
+                    app:singleSelection="true"
+                    app:selectionRequired="true">
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/gameImagePrefFanart"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Fanart"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/gameImagePrefScreenshot"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Screenshot"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/gameImagePrefSolidColor"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Solid Color"
+                        android:textColor="#FFFFFF"
+                        android:checkable="true"
+                        app:chipBackgroundColor="@color/chip_background_selector"
+                        app:chipStrokeColor="#FFB74D"
+                        app:chipStrokeWidth="2dp" />
+
+                </com.google.android.material.chip.ChipGroup>
+
+                <!-- Game Color Picker (shown when Solid Color is selected) -->
+                <LinearLayout
+                    android:id="@+id/gameColorPickerLayout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    android:layout_marginBottom="20dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Background Color"
+                        android:textColor="#999999"
+                        android:textSize="13sp"
+                        android:layout_marginBottom="8dp" />
+
+                    <Button
+                        android:id="@+id/gameColorPickerButton"
+                        android:layout_width="120dp"
+                        android:layout_height="50dp"
+                        android:text="Select Color"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
 
                 <!-- Video Support -->
                 <TextView
@@ -734,7 +881,7 @@
                         android:id="@+id/gameLaunchGameImage"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Game Image"
+                        android:text="Game View Image"
                         android:textColor="#FFFFFF"
                         android:checkable="true"
                         android:checked="true"
@@ -796,7 +943,7 @@
                         android:id="@+id/screensaverGameImage"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Game Image"
+                        android:text="Game View Image"
                         android:textColor="#FFFFFF"
                         android:checkable="true"
                         android:checked="true"
@@ -1402,7 +1549,7 @@
                 android:id="@+id/versionText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="ES-DE Companion v0.3.3"
+                android:text="ES-DE Companion"
                 android:textColor="#666666"
                 android:textSize="12sp"
                 android:layout_marginBottom="4dp" />
@@ -1416,6 +1563,7 @@
 
         </LinearLayout>
 
-    </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
 
-</ScrollView>
+</RelativeLayout>
