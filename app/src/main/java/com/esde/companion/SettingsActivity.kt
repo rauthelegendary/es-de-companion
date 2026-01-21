@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var videoAudioChipGroup: ChipGroup
     private lateinit var gameLaunchBehaviorChipGroup: ChipGroup
     private lateinit var screensaverBehaviorChipGroup: ChipGroup
-    private lateinit var blackOverlayChipGroup: ChipGroup
+    private lateinit var doubleTapChipGroup: ChipGroup
 
     private var initialDimming: Int = 0
     private var initialBlur: Int = 0
@@ -85,6 +85,8 @@ class SettingsActivity : AppCompatActivity() {
     private var logoTogglesChanged: Boolean = false
     private var gameLaunchBehaviorChanged: Boolean = false
     private var screensaverBehaviorChanged: Boolean = false
+    private var doubleTapFunctionalityChanged: Boolean = true
+
     private var customBackgroundChanged: Boolean = false
 
     private var pathSelectionType = PathSelection.MEDIA
@@ -425,7 +427,7 @@ class SettingsActivity : AppCompatActivity() {
             videoAudioChipGroup = findViewById(R.id.videoAudioChipGroup)
             gameLaunchBehaviorChipGroup = findViewById(R.id.gameLaunchBehaviorChipGroup)
             screensaverBehaviorChipGroup = findViewById(R.id.screensaverBehaviorChipGroup)
-            blackOverlayChipGroup = findViewById(R.id.blackOverlayChipGroup)
+            doubleTapChipGroup = findViewById(R.id.doubleTapChipGroup)
             android.util.Log.d("SettingsActivity", "Video settings found")
 
             customBackgroundPathText = findViewById(R.id.customBackgroundPathText)
@@ -507,7 +509,7 @@ class SettingsActivity : AppCompatActivity() {
             setupGameLaunchBehavior()
             android.util.Log.d("SettingsActivity", "Game launch behavior setup")
             setupScreensaverBehavior()
-            setupBlackOverlay()
+            setupDoubleTapFunctionality()
             android.util.Log.d("SettingsActivity", "Screensaver behavior setup")
 
             updateMediaPathDisplay()
@@ -957,19 +959,34 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupBlackOverlay() {
+    private fun setupDoubleTapFunctionality() {
         // Load saved black overlay enabled state (default: false/off)
-        val blackOverlayEnabled = prefs.getBoolean(BLACK_OVERLAY_ENABLED_KEY, false)
+        val savedMode = prefs.getString(DOUBLE_TAP_BEHAVIOR_KEY, "off")
 
         // Set initial chip selection
-        val chipToCheck = if (blackOverlayEnabled) R.id.blackOverlayOn else R.id.blackOverlayOff
-        blackOverlayChipGroup.check(chipToCheck)
+        val chipIdToCheck = when (savedMode) {
+            "black_overlay" -> R.id.blackOverlayOn
+            "video" -> R.id.doubleTapVideoOn
+            else -> R.id.doubleTapOff // Default to Off
+        }
+        doubleTapChipGroup.check(chipIdToCheck)
 
         // Setup listener
-        blackOverlayChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        doubleTapChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            // Google's ChipGroup returns a list of IDs, we just want the first one
             if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.blackOverlayOn
-                prefs.edit().putBoolean(BLACK_OVERLAY_ENABLED_KEY, enabled).apply()
+                val selectedId = checkedIds[0]
+
+                // Convert the selected UI ID back into a number to save
+                val modeToSave = when (selectedId) {
+                    R.id.blackOverlayOn -> "black_overlay"
+                    R.id.doubleTapVideoOn -> "video"
+                    else -> "off"
+                }
+
+                // Save the integer
+                prefs.edit().putString(DOUBLE_TAP_BEHAVIOR_KEY, modeToSave).apply()
+                doubleTapFunctionalityChanged = true
             }
         }
     }
@@ -2497,7 +2514,7 @@ Enjoy your enhanced retro gaming experience! ✨
         const val VIDEO_AUDIO_ENABLED_KEY = "video_audio_enabled"
         const val GAME_LAUNCH_BEHAVIOR_KEY = "game_launch_behavior"
         const val SCREENSAVER_BEHAVIOR_KEY = "screensaver_behavior"
-        const val BLACK_OVERLAY_ENABLED_KEY = "black_overlay_enabled"
+        const val DOUBLE_TAP_BEHAVIOR_KEY = "double_tap_behavior"
         const val CUSTOM_BACKGROUND_KEY = "custom_background_uri"  // ADD THIS LINE
     }
 }

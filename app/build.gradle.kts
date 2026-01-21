@@ -4,6 +4,7 @@ import java.io.FileInputStream
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("kotlin-kapt")
 }
 android {
     namespace = "com.esde.companion"
@@ -17,7 +18,13 @@ android {
         versionName = "0.3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters.add("arm64-v8a")
+            abiFilters.add("armeabi-v7a")
+        }
     }
+
 
     signingConfigs {
         create("release") {
@@ -86,8 +93,16 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.2.0")
     implementation ("com.github.TeamNewPipe:NewPipeExtractor:v0.25.0")
-    implementation ("com.github.maxrave-dev:kotlin-youtubeExtractor:0.0.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.facebook.shimmer:shimmer:0.5.0")
+    implementation("be.tarsos.dsp:core:2.5")
+    implementation("be.tarsos.dsp:jvm:2.5")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    val room_version = "2.6.1"
+    implementation("androidx.room:room-runtime:$room_version")
+    implementation("androidx.room:room-ktx:$room_version")
+    kapt("androidx.room:room-compiler:$room_version")
 
     implementation("com.google.code.gson:gson:2.10.1")
 

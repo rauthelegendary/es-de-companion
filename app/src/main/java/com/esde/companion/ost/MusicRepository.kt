@@ -1,13 +1,14 @@
 package com.esde.companion.ost
 
-import android.content.Context
 import android.os.Environment
 import android.util.Log
+import com.esde.companion.ost.loudness.LoudnessService
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
 
 class MusicRepository(
-    private val context: Context,
-    private val downloader: MusicDownloader
+    private val downloader: MusicDownloader,
+    private val loudnessService: LoudnessService
 ) {
     private val musicDir: File? = File("${Environment.getExternalStorageDirectory()}/ES-DE Companion/music/")
     private val supportedExtensions = listOf("m4a", "mp3", "ogg", "opus", "wav")
@@ -34,7 +35,7 @@ class MusicRepository(
         return systemDir
     }
 
-    suspend fun getMusicFile(gameTitle: String, gameFileName: String, system: String): File? {
+    suspend fun getMusicFile(gameTitle: String, gameFileName: String, system: String): Song? {
         val systemDir: File? = getSystemFolder(system)
         var file = findExistingMusicFile(gameFileName, systemDir)
 
@@ -43,7 +44,19 @@ class MusicRepository(
             file = downloader.downloadGameMusic(gameTitle, gameFileName, system, systemDir)
         }
 
-        Log.d("CoroutineDebug", "Music file exists!")
-        return file
+        if(file != null) {
+            Log.d("CoroutineDebug", "Music file exists!")
+            return Song(file, loudnessService.getOrComputeLoudness(file))
+        }
+        return null
+    }
+
+    suspend fun getAllPotentialResults(query: String, gameTitle: String, system: String): List<StreamInfoItem> {
+        return downloader.getYoutubeSearchResultsFiltered(query, gameTitle, system, false)
+    }
+
+    suspend fun manualSelection(gameFilename: String, system: String, url: String) {
+        val systemDir: File? = getSystemFolder(system)
+        downloader.downloadGameMusicWithUrl( gameFilename, systemDir, url)
     }
 }

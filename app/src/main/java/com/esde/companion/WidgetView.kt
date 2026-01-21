@@ -2,19 +2,25 @@ package com.esde.companion
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.view.View
 import android.view.MotionEvent
+import com.bumptech.glide.request.target.CustomTarget
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import com.bumptech.glide.Glide
+import com.bumptech.glide.request.transition.Transition
+import com.esde.companion.animators.GlintDrawable
+import com.facebook.shimmer.Shimmer
+import com.facebook.shimmer.ShimmerFrameLayout
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -39,6 +45,7 @@ class WidgetView(
 ) : RelativeLayout(context) {
 
     private val imageView: ImageView
+    private var shimmerContainer: ShimmerFrameLayout? = null
     private val textView: android.widget.TextView
     private val scrollView: AutoScrollOnlyView  // CHANGED
     private val deleteButton: ImageButton
@@ -132,7 +139,47 @@ class WidgetView(
 
         // Add both views (only one will be visible at a time)
         addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-        addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+
+        /*//Add shimmer container if this is a Marquee
+        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+            val shimmerContainer = ShimmerFrameLayout(context).apply {
+                layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+
+                // Configure the White Glint
+                val shimmer = Shimmer.ColorHighlightBuilder()
+                    .setBaseAlpha(1.0f)
+                    .setHighlightAlpha(1.0f)
+                    .setDuration(750)
+                    .setBaseColor(android.graphics.Color.argb(0, 255, 255, 255))
+                    .setHighlightColor(Color.WHITE)  // The glint color
+                    .setRepeatDelay(8000) // Adjust wait time between glints
+                    .setIntensity(0.3f)
+                    .setDropoff(0.9f)
+                    .setTilt(25f)
+                    .setAutoStart(true)
+                    .build()
+                setShimmer(shimmer)
+
+                // Put the ImageView INSIDE the shimmer
+                // Force the image to fill the shimmer container
+                addView(imageView, FrameLayout.LayoutParams(
+                    LayoutParams.MATCH_PARENT,
+                    LayoutParams.MATCH_PARENT
+                ))
+            }
+
+            shimmerContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            shimmerContainer.clipChildren = true
+            // Add the SHIMMER to the RelativeLayout instead of the raw ImageView
+            addView(shimmerContainer)
+        } else {
+
+         */
+            // Standard behavior: Add the ImageView directly
+            addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+       // }
 
         val buttonSize = (handleSize * 1.2f).toInt()
         val buttonSpacing = 10  // Space between buttons
@@ -373,7 +420,6 @@ class WidgetView(
     }
 
     private fun loadWidgetImage() {
-        // NEW: Handle text-based widgets (game description) FIRST, before checking if path is empty
         if (widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
             imageView.visibility = View.GONE
 
@@ -458,10 +504,28 @@ class WidgetView(
             if (file.exists()) {
                 // ✨ UPDATED SECTION - Better scaling for images
                 Glide.with(context)
+                    .asDrawable()
                     .load(file)
                     .override(widget.width.toInt(), widget.height.toInt())  // ✅ Scale to container size
                     .fitCenter()
-                    .into(imageView)
+                    .into(object : com.bumptech.glide.request.target.CustomTarget<Drawable>() {
+                        override fun onResourceReady(resource: Drawable, transition: com.bumptech.glide.request.transition.Transition<in Drawable>?) {
+                            if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                                // Wrap the fresh resource in our GlintDrawable
+                                val shiny = GlintDrawable(resource)
+                                imageView.setImageDrawable(shiny)
+                                shiny.start() // Start the animation
+                            } else {
+                                imageView.setImageDrawable(resource)
+                            }
+                        }
+
+                        override fun onLoadCleared(placeholder: Drawable?) {
+                            // Stop animation and clear to avoid memory leaks
+                            (imageView.drawable as? GlintDrawable)?.stop()
+                            imageView.setImageDrawable(null)
+                        }
+                    })
                 android.util.Log.d("WidgetView", "Loaded custom logo file with full scaling: ${widget.imagePath}")
             } else {
                 // Only show text fallback for MARQUEE type
@@ -806,5 +870,13 @@ class WidgetView(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         stopAutoScroll()
+    }
+
+    fun onDestroy() {
+        val currentDrawable = imageView.drawable
+        if (currentDrawable is GlintDrawable) {
+            currentDrawable.stop()
+        }
+        imageView.setImageDrawable(null)
     }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="tag_pan_zoom_animator" type="id"/>
+    <item name="tag_base_scale_applied" type="id" />
+    <item name="tag_base_scale" type="id" />
+    <item name="tag_logo_shine" type="id" />
+</resources>

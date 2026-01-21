@@ -51,15 +51,30 @@ import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import android.os.Handler
 import android.os.Looper
+import android.widget.FrameLayout
+import android.widget.ListView
+import android.widget.ProgressBar
+import android.widget.RelativeLayout.LayoutParams
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
+import com.bumptech.glide.signature.ObjectKey
+import com.esde.companion.OverlayWidget.ImageType
 import com.esde.companion.ost.MusicDownloader
 import com.esde.companion.ost.MusicPlayer
 import com.esde.companion.ost.MusicRepository
 import kotlinx.coroutines.launch
 import kotlin.apply
-import com.esde.companion.ResizableWidgetContainer
+import com.esde.companion.animators.PanZoomAnimator
+import com.esde.companion.ost.loudness.AppDatabase
+import com.esde.companion.ost.loudness.LoudnessService
+import com.facebook.shimmer.Shimmer
+import com.facebook.shimmer.ShimmerFrameLayout
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withContext
+import kotlin.toString
 
 class MainActivity : AppCompatActivity() {
 
@@ -153,6 +168,7 @@ class MainActivity : AppCompatActivity() {
     private var imageLoadRunnable: Runnable? = null
     private var musicLoadHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var musicLoadRunnable: Runnable? = null
+    private var musicSearchJob: Job? = null
     private var lastSystemScrollTime = 0L
     private var lastGameScrollTime = 0L
 
@@ -175,6 +191,10 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var musicRepository: MusicRepository
     private lateinit var musicPlayer: MusicPlayer
+
+
+    private lateinit var musicProgressBar: ProgressBar
+    private lateinit var musicResultsListView: ListView
 
     // Broadcast receiver for app install/uninstall events
     private val appChangeReceiver = object : BroadcastReceiver() {
@@ -279,7 +299,20 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        musicRepository = MusicRepository(this, MusicDownloader())
+        val database = AppDatabase.getDatabase(this)
+        val loudnessDao = database.loudnessDao()
+        /**lifecycleScope.launch(Dispatchers.IO) {
+            loudnessDao.clearAllLoudnessData()
+        }**/
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://www.steamgriddb.com/api/v2/")
+            .addConverterFactory(GsonConverterFactory.create()) // This is the magic JSON bit
+            .build()
+
+        val service = retrofit.create(SteamGridDBService::class.java)
+
+        musicRepository = MusicRepository(MusicDownloader(), LoudnessService(loudnessDao))
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -686,6 +719,7 @@ class MainActivity : AppCompatActivity() {
 
         // Update video volume based on current system volume
         updateVideoVolume()
+        updateMusicPlayerVolume()
 
         // Clear search bar
         if (::appSearchBar.isInitialized) {
@@ -832,9 +866,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Load an image with animation based on user preference
-     */
+
+
     private fun loadImageWithAnimation(
         imageFile: File,
         targetView: ImageView,
@@ -842,7 +875,6 @@ class MainActivity : AppCompatActivity() {
     ) {
         val animationStyle = prefs.getString("animation_style", "scale_fade") ?: "scale_fade"
 
-        // Get custom settings if using custom style
         val duration = if (animationStyle == "custom") {
             prefs.getInt("animation_duration", 250)
         } else {
@@ -855,112 +887,83 @@ class MainActivity : AppCompatActivity() {
             0.95f
         }
 
-        when (animationStyle) {
-            "none" -> {
-                // No animation - instant display with crossfade disabled
-                Glide.with(this)
-                    .load(imageFile)
-                    .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(imageFile))) // Cache invalidation
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
-                    .dontAnimate()  // Disable all transitions
-                    .listener(object : RequestListener<Drawable> {
-                        override fun onLoadFailed(
-                            e: GlideException?,
-                            model: Any?,
-                            target: com.bumptech.glide.request.target.Target<Drawable>,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            onComplete?.invoke()
-                            return false
-                        }
+        // Always stop any existing Ken Burns
+        PanZoomAnimator.stopPanZoom(targetView)
 
-                        override fun onResourceReady(
-                            resource: Drawable,
-                            model: Any,
-                            target: com.bumptech.glide.request.target.Target<Drawable>?,
-                            dataSource: DataSource,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            onComplete?.invoke()
-                            return false
-                        }
-                    })
-                    .into(targetView)
-            }
-            "fade" -> {
-                // Use Glide's built-in crossfade transition
-                Glide.with(this)
-                    .load(imageFile)
-                    .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(imageFile))) // Cache invalidation
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
-                    .transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(duration))
-                    .listener(object : RequestListener<Drawable> {
-                        override fun onLoadFailed(
-                            e: GlideException?,
-                            model: Any?,
-                            target: com.bumptech.glide.request.target.Target<Drawable>,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            onComplete?.invoke()
-                            return false
-                        }
+        val baseRequest = Glide.with(this)
+            .load(imageFile)
+            .signature(ObjectKey(getFileSignature(imageFile)))
+            .diskCacheStrategy(DiskCacheStrategy.ALL)
 
-                        override fun onResourceReady(
-                            resource: Drawable,
-                            model: Any,
-                            target: com.bumptech.glide.request.target.Target<Drawable>?,
-                            dataSource: DataSource,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            onComplete?.invoke()
-                            return false
-                        }
-                    })
-                    .into(targetView)
-            }
-            else -> {
-                // "scale_fade" - Use Glide crossfade + custom scale animation
-                Glide.with(this)
-                    .load(imageFile)
-                    .signature(com.bumptech.glide.signature.ObjectKey(getFileSignature(imageFile))) // Cache invalidation
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
-                    .transition(com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions.withCrossFade(duration))
-                    .listener(object : RequestListener<Drawable> {
-                        override fun onLoadFailed(
-                            e: GlideException?,
-                            model: Any?,
-                            target: com.bumptech.glide.request.target.Target<Drawable>,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            onComplete?.invoke()
-                            return false
-                        }
+        val glideRequest = when (animationStyle) {
+            "none" -> baseRequest.dontAnimate()
+            else -> baseRequest.transition(
+                DrawableTransitionOptions.withCrossFade(duration)
+            )
+        }
 
-                        override fun onResourceReady(
-                            resource: Drawable,
-                            model: Any,
-                            target: com.bumptech.glide.request.target.Target<Drawable>?,
-                            dataSource: DataSource,
-                            isFirstResource: Boolean
-                        ): Boolean {
-                            // Apply scale animation on top of Glide's crossfade
-                            targetView.scaleX = scaleAmount
-                            targetView.scaleY = scaleAmount
-                            targetView.animate()
-                                .scaleX(1f)
-                                .scaleY(1f)
-                                .setDuration(duration.toLong())
-                                .setInterpolator(DecelerateInterpolator())
-                                .withEndAction {
+        glideRequest
+            .listener(object : RequestListener<Drawable> {
+
+                override fun onLoadFailed(
+                    e: GlideException?,
+                    model: Any?,
+                    target: com.bumptech.glide.request.target.Target<Drawable>,
+                    isFirstResource: Boolean
+                ): Boolean {
+                    onComplete?.invoke()
+                    return false
+                }
+
+                override fun onResourceReady(
+                    resource: Drawable,
+                    model: Any,
+                    target: com.bumptech.glide.request.target.Target<Drawable>?,
+                    dataSource: DataSource,
+                    isFirstResource: Boolean
+                ): Boolean {
+                    PanZoomAnimator.stopPanZoom(targetView)
+                    targetView.setTag(R.id.tag_base_scale_applied, false)
+                    PanZoomAnimator.applyBaseScaleOnce(gameImageView)
+
+                    targetView.post {
+                        val baseScale =
+                            targetView.getTag(R.id.tag_base_scale) as? Float
+                                ?: return@post
+
+                        when (animationStyle) {
+                            "scale_fade", "custom" -> {
+
+                                val startScale = baseScale * scaleAmount
+
+                                targetView.scaleX = startScale
+                                targetView.scaleY = startScale
+
+                                targetView.animate()
+                                    .scaleX(baseScale)
+                                    .scaleY(baseScale)
+                                    .setDuration(duration.toLong())
+                                    .setInterpolator(DecelerateInterpolator())
+                                    .withEndAction {
+                                        PanZoomAnimator.startAnimation(targetView)
+                                        onComplete?.invoke()
+                                    }
+                                    .start()
+                            }
+
+                            else -> {
+                                // none / fade
+                                targetView.post {
+                                    PanZoomAnimator.startAnimation(targetView)
                                     onComplete?.invoke()
                                 }
-                                .start()
-                            return false
+                            }
                         }
-                    })
-                    .into(targetView)
-            }
-        }
+                    }
+                    return false
+                }
+            })
+            .into(targetView)
     }
 
     private fun setupGestureDetector() {
@@ -1056,12 +1059,13 @@ class MainActivity : AppCompatActivity() {
         if (!isSystemScrollActive && currentGameFilename != null && currentSystemName != null) {
             val gameName = currentGameFilename!!.substringBeforeLast('.')
             handleVideoForGame(currentSystemName, gameName, currentGameFilename)
+            //TODO: things are going wrong here with the filename and subfolder, I think
         }
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         // Check if black overlay feature is enabled
-        val blackOverlayEnabled = prefs.getBoolean("black_overlay_enabled", false)
+        val doubleTapBehaviour = prefs.getString("double_tap_behavior", "off")
 
         // Check drawer state first
         val drawerState = bottomSheetBehavior.state
@@ -1069,31 +1073,10 @@ class MainActivity : AppCompatActivity() {
                 drawerState == BottomSheetBehavior.STATE_SETTLING
 
         // Handle black overlay double-tap detection ONLY when drawer is closed and feature is enabled
-        if (!isDrawerOpen && blackOverlayEnabled) {
-            if (ev.action == MotionEvent.ACTION_DOWN) {
-                val currentTime = System.currentTimeMillis()
-
-                // Reset tap count if too much time has passed
-                if (currentTime - lastTapTime > DOUBLE_TAP_TIMEOUT) {
-                    tapCount = 0
-                }
-
-                tapCount++
-                lastTapTime = currentTime
-
-                // Check for triple-tap
-                if (tapCount >= 2) {
-                    tapCount = 0 // Reset counter
-
-                    // Toggle black overlay
-                    if (isBlackOverlayShown) {
-                        hideBlackOverlay()
-                    } else {
-                        showBlackOverlay()
-                    }
-                    return true
-                }
-            }
+        if (!isDrawerOpen && doubleTapBehaviour.equals("black_overlay")) {
+            if(handleBlackOverlayTouchEvent(ev)) return true
+        } else if(!isDrawerOpen && doubleTapBehaviour.equals("video")) {
+            if(handleVideoTouchEvent(ev)) return true
         }
 
         // If overlay is shown, consume all touches
@@ -1177,6 +1160,56 @@ class MainActivity : AppCompatActivity() {
         }
 
         return super.dispatchTouchEvent(ev)
+    }
+
+    private fun handleBlackOverlayTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            if(checkForDoubleTap()) {
+                // Toggle black overlay
+                if (isBlackOverlayShown) {
+                    hideBlackOverlay()
+                } else {
+                    showBlackOverlay()
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun handleVideoTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            if(checkForDoubleTap()) {
+                if (isVideoPlaying()) {
+                    releasePlayer()
+                    showWidgets()
+                    loadGameMusic()
+                } else if(!isVideoPlaying() && !isSystemScrollActive && currentGameFilename?.isNotEmpty() == true){
+                    val gameName = sanitizeGameFilename(currentGameFilename!!).substringBeforeLast('.')
+                    handleVideoForGame(currentSystemName, gameName, currentGameFilename, true)
+                }
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun checkForDoubleTap(): Boolean{
+        val currentTime = System.currentTimeMillis()
+
+        // Reset tap count if too much time has passed
+        if (currentTime - lastTapTime > DOUBLE_TAP_TIMEOUT) {
+            tapCount = 0
+        }
+
+        tapCount++
+        lastTapTime = currentTime
+        // Check for triple-tap
+        if (tapCount >= 2) {
+            tapCount = 0 // Reset counter
+            return true
+        }
+        return false
     }
 
     private fun setupAppDrawer() {
@@ -1783,22 +1816,10 @@ class MainActivity : AppCompatActivity() {
 
         // Cancel any pending image load
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
-        musicLoadRunnable?.let { musicLoadHandler.removeCallbacks(it) }
 
         // Schedule new image load with appropriate delay (0 for games = instant)
         imageLoadRunnable = Runnable {
             loadGameInfo()
-        }
-
-        musicLoadRunnable = Runnable {
-            loadGameMusic()
-        }
-
-        musicPlayer.stopPlaying()
-        if(isFastScrolling) {
-            musicLoadHandler.postDelayed(musicLoadRunnable!!, delay)
-        } else {
-            musicLoadRunnable!!.run()
         }
 
         if (delay > 0) {
@@ -2268,6 +2289,10 @@ class MainActivity : AppCompatActivity() {
         isSystemScrollActive = false
 
         try {
+
+            android.util.Log.d("MainActivity", "Releasing music player ")
+            releaseMusicPlayer()
+
             val logsDir = File(getLogsPath())
             val gameFile = File(logsDir, "esde_game_filename.txt")
             if (!gameFile.exists()) return
@@ -2293,6 +2318,12 @@ class MainActivity : AppCompatActivity() {
 
             // Store current system name
             currentSystemName = systemName
+
+            musicLoadRunnable = Runnable {
+                loadGameMusic()
+            }
+            musicLoadHandler.postDelayed(musicLoadRunnable!!, 500)
+
 
             // Check if we have widgets - if so, hide old marquee system
             val hasWidgets = widgetManager.loadWidgets().isNotEmpty()
@@ -2354,13 +2385,11 @@ class MainActivity : AppCompatActivity() {
             val systemName = systemFile.readText().trim()
 
             //ADDED FOR MUSIC
-            lifecycleScope.launch {
+            musicSearchJob?.cancel()
+            musicSearchJob = lifecycleScope.launch {
                 android.util.Log.d("MainActivity", "about to go to music player ")
-
-                currentGameName?.let {
-                    if (currentGameName != gameDisplayName) {
-                        musicPlayer.onGameFocused(gameDisplayName, gameName, systemName)
-                    }
+                if(gameName.isNotEmpty()) {
+                    musicPlayer.onGameFocused(gameDisplayName, gameName, systemName)
                 }
             }
         } catch (e: Exception) {
@@ -3336,71 +3365,56 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("MainActivity", "Video audio disabled by user - volume: 0")
             return
         }
+        player?.volume = getSystemVolume()
+    }
 
+    private fun getSystemVolume(): Float {
         try {
-            // Get the audio manager
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-
-            // Determine which display we're on
             val currentDisplayId = getCurrentDisplayId()
+            return getNormalizedAudioLevelForCurrentScreen()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error updating video volume", e)
+            // Fallback to full volume if there's an error
+            return 1f
+        }
+    }
 
-            var normalizedVolume: Float
-
-            if (currentDisplayId == 0) {
-                // Primary display (top screen) - use standard STREAM_MUSIC volume
-                val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-                val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-
-                normalizedVolume = if (maxVolume > 0) {
-                    currentVolume.toFloat() / maxVolume.toFloat()
-                } else {
-                    1f
-                }
-
-                android.util.Log.d("MainActivity", "Top screen - Using STREAM_MUSIC: $currentVolume/$maxVolume = $normalizedVolume")
-
-            } else {
-                // Secondary display (bottom screen) - use secondary_screen_volume_level
-                try {
-                    val secondaryVolume = Settings.System.getInt(
-                        contentResolver,
-                        "secondary_screen_volume_level"
-                    )
-                    val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-
-                    normalizedVolume = if (maxVolume > 0) {
-                        secondaryVolume.toFloat() / maxVolume.toFloat()
-                    } else {
-                        1f
-                    }
-
-                    android.util.Log.d("MainActivity", "Bottom screen - Using secondary_screen_volume_level: $secondaryVolume/$maxVolume = $normalizedVolume")
-
-                } catch (e: Settings.SettingNotFoundException) {
-                    // Setting not found - fallback to standard volume
-                    android.util.Log.w("MainActivity", "secondary_screen_volume_level not found, using STREAM_MUSIC")
-
-                    val currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-                    val maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
-
-                    normalizedVolume = if (maxVolume > 0) {
-                        currentVolume.toFloat() / maxVolume.toFloat()
-                    } else {
-                        1f
-                    }
-                }
-            }
-
-            // Apply the calculated volume to the video player
-            player?.volume = normalizedVolume
-
-            android.util.Log.d("MainActivity", "Video volume updated: $normalizedVolume (display: $currentDisplayId)")
-
+    private fun updateMusicPlayerVolume() {
+        try {
+            //musicPlayer.setVolume(getNormalizedAudioLevelForCurrentScreen())
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error updating video volume", e)
             // Fallback to full volume if there's an error
             player?.volume = 1f
         }
+    }
+
+
+    private fun getNormalizedAudioLevelForCurrentScreen(): Float {
+        // Get the audio manager
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        // Determine which display we're on
+        val currentDisplayId = getCurrentDisplayId()
+        var currentVolume = 0
+        var maxVolume = 0
+
+        if (currentDisplayId == 0) {
+            // Primary display (top screen) - use standard STREAM_MUSIC volume
+            currentVolume = audioManager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+        } else {
+            currentVolume = Settings.System.getInt(
+                contentResolver,
+                "secondary_screen_volume_level"
+            )
+            maxVolume = audioManager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+        }
+        val normalizedVolume: Float = if (maxVolume > 0) {
+            currentVolume.toFloat() / maxVolume.toFloat()
+        } else {
+            1f
+        }
+        return normalizedVolume
     }
 
     /**
@@ -3415,11 +3429,13 @@ class MainActivity : AppCompatActivity() {
                         // Standard volume changed (top screen)
                         android.util.Log.d("MainActivity", "Volume change detected - updating video volume")
                         updateVideoVolume()
+                        updateMusicPlayerVolume()
                     }
                     Settings.ACTION_SOUND_SETTINGS -> {
                         // Sound settings changed (might include secondary screen volume)
                         android.util.Log.d("MainActivity", "Sound settings changed - updating video volume")
                         updateVideoVolume()
+                        updateMusicPlayerVolume()
                     }
                 }
             }
@@ -3461,6 +3477,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onChange(selfChange: Boolean) {
                     android.util.Log.d("MainActivity", "Secondary screen volume changed - updating video volume")
                     updateVideoVolume()
+                    updateMusicPlayerVolume()
                 }
             }
 
@@ -3616,6 +3633,12 @@ class MainActivity : AppCompatActivity() {
             // Hide widgets when video plays  // ADDED
             hideWidgets()  // ADDED
 
+            player?.volume?.let {
+                if(it > 0f) {
+                    releaseMusicPlayer()
+                }
+            }
+
             // Get animation settings (same as images)
             val animationStyle = prefs.getString("animation_style", "scale_fade") ?: "scale_fade"
             val duration = if (animationStyle == "custom") {
@@ -3707,6 +3730,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 .start()
+
+            loadGameMusic()
         } else {
             // No player, just hide the video view and show image view
             videoView.visibility = View.GONE
@@ -3724,6 +3749,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun releaseMusicPlayer() {
+        musicSearchJob?.cancel()
         musicLoadRunnable?.let { musicLoadHandler.removeCallbacks(it) }
         musicPlayer.stopPlaying()
     }
@@ -3731,7 +3757,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Handle video loading with delay
      */
-    private fun handleVideoForGame(systemName: String?, strippedName: String?, rawName: String?) {
+    private fun handleVideoForGame(systemName: String?, strippedName: String?, rawName: String?, override: Boolean = false) {
         // Cancel any pending video load
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
 
@@ -3763,7 +3789,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (!isVideoEnabled()) {
+        if (!isVideoEnabled() && !override) {
             releasePlayer()
             return
         }
@@ -3779,6 +3805,10 @@ class MainActivity : AppCompatActivity() {
             if (delay == 0L) {
                 // Instant - load video immediately
                 loadVideo(videoPath)
+                if(override){
+                    releaseMusicPlayer()
+                    player?.volume = getSystemVolume()
+                }
             } else {
                 // Delayed - show image first, then video
                 releasePlayer() // Stop any current video
@@ -3793,6 +3823,10 @@ class MainActivity : AppCompatActivity() {
 
                     if (hasWindowFocus && !isStillInBackground && !isScreensaverActive) {
                         loadVideo(videoPath)
+                        if(override){
+                            releaseMusicPlayer()
+                            player?.volume = getSystemVolume()
+                        }
                     } else {
                         android.util.Log.d("MainActivity", "Video delayed load cancelled - conditions changed")
                     }
@@ -3854,119 +3888,96 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun removeWidget(widgetView: WidgetView) {
+        widgetView.onDestroy()
         widgetContainer.removeView(widgetView)
         activeWidgets.remove(widgetView)
         widgetManager.deleteWidget(widgetView.widget.id)
     }
 
     private fun showCreateWidgetMenu() {
-        // If dialog already exists and is showing, don't create another
-        if (widgetMenuDialog?.isShowing == true) {
-            android.util.Log.d("MainActivity", "Widget menu already showing, ignoring")
-            return
-        }
-
-        // Deselect all widgets first
+        if (widgetMenuDialog?.isShowing == true) return
         activeWidgets.forEach { it.deselect() }
 
-        fun getMenuOptions(): Array<String> {
-            val lockText = if (widgetsLocked) "🔒 Unlock Widgets" else "🔓 Lock Widgets"
-            val snapText = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
-            val gridText = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
-
-            // Different options based on current view
-            return if (isSystemScrollActive) {
-                // System view - only system logo option
-                arrayOf(
-                    lockText,
-                    snapText,
-                    gridText,
-                    "─────────────",
-                    "System Logo"
-                )
-            } else {
-                // Game view - all game image types
-                arrayOf(
-                    lockText,
-                    snapText,
-                    gridText,
-                    "─────────────",
-                    "Marquee",
-                    "2D Box",
-                    "3D Box",
-                    "Mix Image",
-                    "Back Cover",
-                    "Physical Media",
-                    "Screenshot",
-                    "Fanart",
-                    "Title Screen",
-                    "Game Description"
-                )
-            }
+        val rootLayout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
         }
 
+        // Add tabs for the two menu options
+        val tabLayout = com.google.android.material.tabs.TabLayout(this).apply {
+            addTab(newTab().setText("Widgets"))
+            addTab(newTab().setText("Music"))
+            setSelectedTabIndicatorColor(android.graphics.Color.WHITE)
+        }
+        rootLayout.addView(tabLayout)
+
+        // Flipper allows us to switch views
+        val flipper = android.widget.ViewFlipper(this)
+
+        //Widget menu
+        val widgetListView = android.widget.ListView(this)
+        val adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_list_item_1, getMenuOptions())
+        widgetListView.adapter = adapter
+        flipper.addView(widgetListView)
+
+        val musicContainer = android.widget.FrameLayout(this)
+        flipper.addView(musicContainer)
+
+        rootLayout.addView(flipper)
+
         val dialog = android.app.AlertDialog.Builder(this)
-            .setTitle("Widget Menu")
-            .setItems(getMenuOptions(), null) // Set listener to null initially
-            .setNegativeButton("Cancel", null)
+            .setView(rootLayout) // Set our custom tabbed view
+            .setNegativeButton("Cancel") { _, _ -> }
             .setOnDismissListener {
                 widgetMenuShowing = false
                 widgetMenuDialog = null
-                android.util.Log.d("MainActivity", "Widget menu dismissed, flags reset")
             }
             .create()
 
-        // Set custom click listener after creating dialog to control dismissal
-        dialog.listView.setOnItemClickListener { _, _, which, _ ->
+        musicContainer.addView(createMusicMenuView(dialog))
+
+        //tab switch logic
+        tabLayout.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
+                flipper.displayedChild = tab?.position ?: 0
+                if(flipper.displayedChild == 1) {
+                    val input = musicContainer.findViewWithTag<EditText>("MUSIC_SEARCH_INPUT")
+                    performMusicSearch(input?.text.toString(), dialog)
+                }
+            }
+            override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
+            override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
+        })
+
+        //Widget selection
+        widgetListView.setOnItemClickListener { _, _, which, _ ->
             when {
                 which == 0 -> {
-                    // Toggle lock - dismiss and reopen instantly
                     toggleWidgetLock()
                     dialog.dismiss()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        showCreateWidgetMenu()
-                    }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { showCreateWidgetMenu() }
                 }
                 which == 1 -> {
-                    // Toggle snap to grid - dismiss and reopen instantly
                     toggleSnapToGrid()
                     dialog.dismiss()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        showCreateWidgetMenu()
-                    }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { showCreateWidgetMenu() }
                 }
                 which == 2 -> {
-                    // Toggle show grid - dismiss and reopen instantly
                     toggleShowGrid()
                     dialog.dismiss()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        showCreateWidgetMenu()
-                    }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { showCreateWidgetMenu() }
                 }
-                which == 3 -> {} // Separator - do nothing
-                isSystemScrollActive && which == 4 -> {  // CHANGED from 3 to 4
-                    // System Logo - check if locked before creating
+                which == 3 -> {} // Separator
+                isSystemScrollActive && which == 4 -> {
                     if (widgetsLocked) {
-                        android.widget.Toast.makeText(
-                            this,
-                            "Cannot create widgets while locked. Unlock widgets first.",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                        // Don't dismiss - dialog stays open
+                        android.widget.Toast.makeText(this, "Unlock widgets first.", android.widget.Toast.LENGTH_SHORT).show()
                     } else {
                         createWidget(OverlayWidget.ImageType.SYSTEM_LOGO)
                         dialog.dismiss()
                     }
                 }
                 !isSystemScrollActive -> {
-                    // Game view widget creation - check if locked before creating
                     if (widgetsLocked) {
-                        android.widget.Toast.makeText(
-                            this,
-                            "Cannot create widgets while locked. Unlock widgets first.",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
-                        // Don't dismiss - dialog stays open
+                        android.widget.Toast.makeText(this, "Unlock widgets first.", android.widget.Toast.LENGTH_SHORT).show()
                         return@setOnItemClickListener
                     }
 
@@ -3991,7 +4002,87 @@ class MainActivity : AppCompatActivity() {
 
         widgetMenuDialog = dialog
         dialog.show()
-        android.util.Log.d("MainActivity", "Widget menu dialog created and shown")
+    }
+
+    private fun getMenuOptions(): Array<String> {
+        val lockText = if (widgetsLocked) "🔒 Unlock Widgets" else "🔓 Lock Widgets"
+        val snapText = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
+        val gridText = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
+
+        return if (isSystemScrollActive) {
+            arrayOf(lockText, snapText, gridText, "─────────────", "System Logo")
+        } else {
+            arrayOf(
+                lockText, snapText, gridText, "─────────────",
+                "Marquee", "2D Box", "3D Box", "Mix Image", "Back Cover",
+                "Physical Media", "Screenshot", "Fanart", "Title Screen", "Game Description"
+            )
+        }
+    }
+
+    private fun createMusicMenuView(dialog: android.app.AlertDialog): android.view.View {
+
+        val musicLayout = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(40, 40, 40, 40)
+        }
+        val searchRow = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+        }
+        val searchInput = EditText(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(0, -2, 1f)
+            setText("\"$currentGameName ${MusicDownloader.searchString}\"")
+            hint = "Search YouTube..."
+            isSingleLine = true
+            tag = "MUSIC_SEARCH_INPUT"
+        }
+        val searchButton = android.widget.Button(this).apply { text = "🔍" }
+
+        searchRow.addView(searchInput)
+        searchRow.addView(searchButton)
+
+        musicProgressBar = android.widget.ProgressBar(this, null, android.R.attr.progressBarStyleSmall).apply {
+            visibility = android.view.View.GONE
+        }
+        musicResultsListView = android.widget.ListView(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(-1, 0, 1.0f)
+        }
+
+        musicLayout.addView(searchRow)
+        musicLayout.addView(musicProgressBar)
+        musicLayout.addView(musicResultsListView)
+
+        searchButton.setOnClickListener { performMusicSearch(searchInput.text.toString(), dialog) }
+        return musicLayout
+    }
+
+    private fun performMusicSearch(query: String, dialog: android.app.AlertDialog) {
+        val gameName = currentGameName?: ""
+        val systemName = currentSystemName?: ""
+        val gameFilenameSanitized = sanitizeGameFilename(currentGameFilename!!).substringBeforeLast('.')
+
+        musicSearchJob?.cancel()
+        musicSearchJob = lifecycleScope.launch {
+            musicProgressBar.visibility = android.view.View.VISIBLE
+            musicResultsListView.visibility = android.view.View.GONE
+
+            val results = withContext(Dispatchers.IO) {musicRepository.getAllPotentialResults(query, gameName, systemName)}
+            if (!dialog.isShowing) return@launch
+            android.util.Log.d("CoroutineDebug", "Music query results: $results")
+
+            musicResultsListView.adapter = VideoResultAdapter(this@MainActivity, results)
+            musicResultsListView.setOnItemClickListener { _, _, index, _ ->
+                val selected = results[index]
+                lifecycleScope.launch {
+                    android.util.Log.d("CoroutineDebug", "Trying to download and play selected search result: $selected")
+                    musicRepository.manualSelection(gameFilenameSanitized, systemName, selected.url)
+                    musicPlayer.onGameFocused(gameName, gameFilenameSanitized, systemName)
+                }
+            }
+
+            musicProgressBar.visibility = android.view.View.GONE
+            musicResultsListView.visibility = android.view.View.VISIBLE
+        }
     }
 
     private fun toggleSnapToGrid() {
@@ -4707,5 +4798,33 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val COLUMN_COUNT_KEY = "column_count"
+    }
+
+    inner class VideoResultAdapter(
+        private val context: android.content.Context,
+        val results: List<org.schabi.newpipe.extractor.stream.StreamInfoItem>
+    ) : android.widget.BaseAdapter() {
+        override fun getCount(): Int = results.size
+        override fun getItem(position: Int) = results[position]
+        override fun getItemId(position: Int) = position.toLong()
+
+        override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup?): android.view.View {
+            val view = convertView ?: android.view.LayoutInflater.from(context).inflate(android.R.layout.activity_list_item, parent, false)
+            val item = results[position]
+            val text = view.findViewById<android.widget.TextView>(android.R.id.text1)
+            val icon = view.findViewById<android.widget.ImageView>(android.R.id.icon)
+
+            val minutes = item.duration / 60
+            val seconds = item.duration % 60
+            val timeFormatted = String.format("%d:%02d", minutes, seconds)
+            text.text = "${item.name}\n$timeFormatted • ${item.uploaderName}"
+
+            com.bumptech.glide.Glide.with(context)
+                .load(item.thumbnails.firstOrNull()?.url)
+                .placeholder(android.R.drawable.ic_menu_report_image)
+                .into(icon)
+
+            return view
+        }
     }
 }
