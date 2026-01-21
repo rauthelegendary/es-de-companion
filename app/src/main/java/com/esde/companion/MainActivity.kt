@@ -1612,13 +1612,15 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
             }
             MotionEvent.ACTION_MOVE -> {
-                // Cancel long press if finger moves
+                // Cancel long press if finger moves beyond touch slop threshold
                 val deltaX = kotlin.math.abs(ev.x - touchDownX)
                 val deltaY = kotlin.math.abs(ev.y - touchDownY)
-                if (deltaX > 10 || deltaY > 10) {
+                val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+
+                if (deltaX > touchSlop || deltaY > touchSlop) {
                     longPressRunnable?.let {
                         longPressHandler?.removeCallbacks(it)
-                        longPressTriggered = false  // ADDED: Reset flag when movement cancels
+                        longPressTriggered = false
                     }
                 }
             }
