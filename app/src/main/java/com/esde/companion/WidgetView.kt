@@ -277,6 +277,10 @@ class WidgetView(
                 initialWidth = widget.width
                 initialHeight = widget.height
 
+                // Cancel any long press timer immediately when touching a widget
+                val mainActivity = context as? MainActivity
+                mainActivity?.cancelLongPress()
+
                 // Check if touching any resize handle
                 val touchX = event.x
                 val touchY = event.y

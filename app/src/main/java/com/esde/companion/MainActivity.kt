@@ -1439,18 +1439,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 return true
             }
 
-            override fun onLongPress(e: MotionEvent) {
-                // Only show widget menu if drawer is closed, NOT in system view, AND not touching a widget
-                if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_HIDDEN &&
-                    !isSystemScrollActive) {  // Added check for system view
-                    // Check if long press is on a widget
-                    val isTouchingWidget = isTouchOnWidget(e.x, e.y)
-                    if (!isTouchingWidget) {
-                        showCreateWidgetMenu()
-                    }
-                }
-            }
-
             override fun onFling(
                 e1: MotionEvent?,
                 e2: MotionEvent,
@@ -1491,6 +1479,16 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             }
         }
         return false
+    }
+
+    /**
+     * Cancel any pending long press - called by WidgetView when interaction starts
+     */
+    fun cancelLongPress() {
+        longPressRunnable?.let {
+            longPressHandler?.removeCallbacks(it)
+            longPressTriggered = false
+        }
     }
 
     /**
