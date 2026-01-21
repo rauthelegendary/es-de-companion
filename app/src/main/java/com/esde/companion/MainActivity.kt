@@ -17,6 +17,7 @@ import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -93,7 +94,9 @@ class MainActivity : AppCompatActivity() {
     private var longPressTriggered = false
     private var touchDownX = 0f
     private var touchDownY = 0f
-    private val LONG_PRESS_TIMEOUT = 500L
+    private val LONG_PRESS_TIMEOUT by lazy {
+        ViewConfiguration.getLongPressTimeout().toLong()
+    }
     private var widgetMenuShowing = false
     private var widgetMenuDialog: android.app.AlertDialog? = null
 
