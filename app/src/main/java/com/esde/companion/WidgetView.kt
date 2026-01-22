@@ -554,30 +554,28 @@ class WidgetView(
                     .asDrawable()
                     .load(file)
                     .override(widget.width.toInt(), widget.height.toInt())
-                    .fitCenter()
-                    .into(object : com.bumptech.glide.request.target.CustomTarget<Drawable>() {
-                        override fun onResourceReady(resource: Drawable, transition: com.bumptech.glide.request.transition.Transition<in Drawable>?) {
-                            if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-                                // Wrap the fresh resource in our GlintDrawable
-                                val shiny = GlintDrawable(resource)
-                                imageView.setImageDrawable(shiny)
-                                shiny.start() // Start the animation
-                            } else {
-                                imageView.setImageDrawable(resource)
-                            }
-                        }
-
-                        override fun onLoadCleared(placeholder: Drawable?) {
-                            // Stop animation and clear to avoid memory leaks
-                            (imageView.drawable as? GlintDrawable)?.stop()
-                            imageView.setImageDrawable(null)
-                        }
-                    })
 
                 when (effectiveScaleType) {
                     OverlayWidget.ScaleType.FIT -> glideRequest.fitCenter()
                     OverlayWidget.ScaleType.CROP -> glideRequest.centerCrop()
-                }.into(imageView)
+                }.into(object : com.bumptech.glide.request.target.CustomTarget<Drawable>() {
+                    override fun onResourceReady(resource: Drawable, transition: com.bumptech.glide.request.transition.Transition<in Drawable>?) {
+                        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                            // Wrap the fresh resource in our GlintDrawable
+                            val shiny = GlintDrawable(resource)
+                            imageView.setImageDrawable(shiny)
+                            shiny.start() // Start the animation
+                        } else {
+                            imageView.setImageDrawable(resource)
+                        }
+                    }
+
+                    override fun onLoadCleared(placeholder: Drawable?) {
+                        // Stop animation and clear to avoid memory leaks
+                        (imageView.drawable as? GlintDrawable)?.stop()
+                        imageView.setImageDrawable(null)
+                    }
+                })
                 android.util.Log.d("WidgetView", "Loaded custom logo file with full scaling: ${widget.imagePath}")
             } else {
                 // Only show text fallback for MARQUEE type

@@ -354,12 +354,12 @@ class MainActivity : AppCompatActivity() {
             loudnessDao.clearAllLoudnessData()
         }**/
 
-        val retrofit = Retrofit.Builder()
+        /*val retrofit = Retrofit.Builder()
             .baseUrl("https://www.steamgriddb.com/api/v2/")
             .addConverterFactory(GsonConverterFactory.create()) // This is the magic JSON bit
             .build()
 
-        val service = retrofit.create(SteamGridDBService::class.java)
+        val service = retrofit.create(SteamGridDBService::class.java)*/
 
         musicRepository = MusicRepository(MusicDownloader(), LoudnessService(loudnessDao))
         val audioAttributes = AudioAttributes.Builder()
@@ -1394,7 +1394,7 @@ Access this help anytime from the widget menu!
                         if (!longPressTriggered && !widgetMenuShowing) {
                             longPressTriggered = true
                             widgetMenuShowing = true
-                            showCreateWidgetMenu()
+                            showCreateContextMenu()
                         }
                     }
                     longPressHandler?.postDelayed(longPressRunnable!!, LONG_PRESS_TIMEOUT)
@@ -1492,6 +1492,7 @@ Access this help anytime from the widget menu!
                     android.util.Log.d("MainActivity", "Tap IGNORED - too fast (${timeSinceLastTap}ms < ${MIN_TAP_INTERVAL}ms)")
                 }
             }
+        return false
     }
 
     private fun handleVideoTouchEvent(ev: MotionEvent): Boolean {
@@ -2821,8 +2822,8 @@ Access this help anytime from the widget menu!
             val videoWillPlay = handleVideoForGame(systemName, gameName, gameNameRaw)
 
             // Show widgets only if screensaver is not active AND video won't play
-            if (!isScreensaverActive && !videoWillPlay) {
-                showWidgets()
+            if (!isScreensaverActive){// && videoWillPlay != false) {
+                //showWidgets()
                 android.util.Log.d("MainActivity", "Showing widgets - no screensaver and no video")
             } else {
                 android.util.Log.d("MainActivity", "Not showing widgets - screensaver: $isScreensaverActive, video will play: $videoWillPlay")
@@ -2870,35 +2871,8 @@ Access this help anytime from the widget menu!
         }
     }
 
-    private fun findGameImage(systemName: String, gameName: String, fullGamePath: String): File? {
-        val extensions = listOf("jpg", "png", "webp")
-        val mediaBase = File(getMediaBasePath(), systemName)
-        val imagePref = prefs.getString("image_preference", "fanart") ?: "fanart"
-        val dirs = if (imagePref == "screenshot") {
-            listOf("screenshots", "fanart")
-        } else {
-            listOf("fanart", "screenshots")
-        }
-
-        // Sanitize the full path to get just the filename
-        val sanitizedFilename = sanitizeGameFilename(fullGamePath)
-        val sanitizedName = sanitizedFilename.substringBeforeLast('.')
-
-        for (dirName in dirs) {
-            val file = findImageInDir(
-                File(mediaBase, dirName),
-                sanitizedName,
-                sanitizedFilename,
-                fullGamePath,
-                extensions
-            )
-            if (file != null) return file
-        }
-        return null
-    }
-
-    private fun findImageInDir(
-        dir: File,
+    private fun findGameImage(
+        systemName: String,
         strippedName: String,
         fullGamePath: String
     ): File? {
@@ -4212,7 +4186,7 @@ Access this help anytime from the widget menu!
         if (!isActivityVisible) {
             android.util.Log.d("MainActivity", "Video blocked - activity not visible (onStop called)")
             releasePlayer()
-            return false
+            return
         }
 
         // Additional check: If ES-DE reports a game is playing, block videos
@@ -4220,25 +4194,25 @@ Access this help anytime from the widget menu!
         if (isGamePlaying) {
             android.util.Log.d("MainActivity", "Video blocked - game is playing (ES-DE event)")
             releasePlayer()
-            return false
+            return
         }
 
         if (isScreensaverActive) {
             android.util.Log.d("MainActivity", "Video blocked - screensaver active")
             releasePlayer()
-            return false
+            return
         }
 
         if (!isVideoEnabled() && !override) {
             releasePlayer()
-            return false
+            return
         }
 
         // Block videos during widget edit mode
         if (!widgetsLocked) {
             android.util.Log.d("MainActivity", "Video blocked - widget edit mode active")
             releasePlayer()
-            return false
+            return
         }
 
         // Pass the raw name (full path) to findVideoForGame
@@ -4256,7 +4230,6 @@ Access this help anytime from the widget menu!
                     releaseMusicPlayer()
                     player?.volume = getSystemVolume()
                 }
-                return true  // Video will play
             } else {
                 // Delayed - show image first, then video
                 releasePlayer() // Stop any current video
@@ -4291,13 +4264,11 @@ Access this help anytime from the widget menu!
                 }
 
                 videoDelayHandler?.postDelayed(videoDelayRunnable!!, delay)
-                return true  // Video will play (after delay)
             }
         } else {
             // No video found, release player
             android.util.Log.d("MainActivity", "No video found for system: $systemName, game: $strippedName")
             releasePlayer()
-            return false
         }
     }
 
@@ -4354,45 +4325,48 @@ Access this help anytime from the widget menu!
         widgetManager.deleteWidget(widgetView.widget.id)
     }
 
-    private fun showCreateWidgetMenu() {
+    private fun showCreateContextMenu() {
         if (widgetMenuDialog?.isShowing == true) return
         activeWidgets.forEach { it.deselect() }
 
-
-        val rootLayout = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
+        val rootWrapper = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.parseColor("#2B2B2B")) // Match your theme
         }
 
-        // Add tabs for the two menu options
+        // 1. Setup Tabs
         val tabLayout = com.google.android.material.tabs.TabLayout(this).apply {
             addTab(newTab().setText("Widgets"))
             addTab(newTab().setText("Music"))
             setSelectedTabIndicatorColor(android.graphics.Color.WHITE)
+            setTabTextColors(android.graphics.Color.GRAY, android.graphics.Color.WHITE)
+            setBackgroundColor(android.graphics.Color.parseColor("#333333"))
         }
-        rootLayout.addView(tabLayout)
+        rootWrapper.addView(tabLayout)
 
-        // Flipper allows us to switch views
+        // 2. Setup Flipper
         val flipper = android.widget.ViewFlipper(this)
-
-        //Widget menu
-        val widgetListView = android.widget.ListView(this)
-        val adapter = android.widget.ArrayAdapter(this, android.R.layout.simple_list_item_1, getMenuOptions())
-        widgetListView.adapter = adapter
-        flipper.addView(widgetListView)
-
         val musicContainer = android.widget.FrameLayout(this)
-        flipper.addView(musicContainer)
 
-        rootLayout.addView(flipper)
+        // 3. Create the Dialog first so we can pass it to children
+        val dialog = android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar)
+            .setView(rootWrapper)
+            .setCancelable(true)
+            .create()
 
+        // 4. Populate the two views
+        flipper.addView(createWidgetMenuView(dialog)) // Tab 0
+        flipper.addView(musicContainer)               // Tab 1
         musicContainer.addView(createMusicMenuView(dialog))
 
-        //tab switch logic
+        rootWrapper.addView(flipper)
+
+        // 5. Tab switch logic
         tabLayout.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab?) {
                 flipper.displayedChild = tab?.position ?: 0
-                if(flipper.displayedChild == 1) {
-                    val input = musicContainer.findViewWithTag<EditText>("MUSIC_SEARCH_INPUT")
+                if (flipper.displayedChild == 1) {
+                    val input = musicContainer.findViewWithTag<android.widget.EditText>("MUSIC_SEARCH_INPUT")
                     performMusicSearch(input?.text.toString(), dialog)
                 }
             }
@@ -4400,7 +4374,20 @@ Access this help anytime from the widget menu!
             override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab?) {}
         })
 
-        // Get references to chips
+        dialog.setOnDismissListener {
+            widgetMenuShowing = false
+            widgetMenuDialog = null
+            if (isSystemScrollActive) updateWidgetsForCurrentSystem()
+            else updateWidgetsForCurrentGame()
+        }
+
+        widgetMenuDialog = dialog
+        dialog.show()
+    }
+
+    private fun createWidgetMenuView(dialog: android.app.AlertDialog): View {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_widget_menu, null)
+
         val chipLockWidgets = dialogView.findViewById<com.google.android.material.chip.Chip>(R.id.chipLockWidgets)
         val chipSnapToGrid = dialogView.findViewById<com.google.android.material.chip.Chip>(R.id.chipSnapToGrid)
         val chipShowGrid = dialogView.findViewById<com.google.android.material.chip.Chip>(R.id.chipShowGrid)
@@ -4408,7 +4395,6 @@ Access this help anytime from the widget menu!
         val btnCancel = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnCancelWidgetMenu)
         val btnHelp = dialogView.findViewById<android.widget.Button>(R.id.btnWidgetHelp)
 
-        // Set chip states and text
         chipLockWidgets.isChecked = !widgetsLocked  // Inverted: checked = edit mode ON
         chipLockWidgets.text = if (widgetsLocked) "Widget Edit Mode: OFF" else "Widget Edit Mode: ON"
 
@@ -4417,32 +4403,6 @@ Access this help anytime from the widget menu!
 
         chipShowGrid.isChecked = showGrid
         chipShowGrid.text = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
-
-
-        // Inflate the custom dialog view
-        val dialogView = layoutInflater.inflate(R.layout.dialog_widget_menu, null)
-
-        // Create the dialog
-        val dialog = android.app.AlertDialog.Builder(this)
-            .setView(dialogView)
-            .setCancelable(true)
-            .setOnDismissListener {
-                widgetMenuShowing = false
-                widgetMenuDialog = null
-                android.util.Log.d("MainActivity", "Widget menu dismissed, flags reset")
-
-                // Refresh widgets based on current view state
-                if (isSystemScrollActive) {
-                    // In system view - refresh system widgets
-                    android.util.Log.d("MainActivity", "Refreshing system widgets after dialog dismiss")
-                    updateWidgetsForCurrentSystem()
-                } else if (currentGameFilename != null && currentSystemName != null) {
-                    // In game view - refresh game widgets
-                    android.util.Log.d("MainActivity", "Refreshing game widgets after dialog dismiss")
-                    updateWidgetsForCurrentGame()
-                }
-            }
-            .create()
 
         // Chip click listeners
         chipLockWidgets.setOnClickListener {
@@ -4513,24 +4473,7 @@ Access this help anytime from the widget menu!
             dialog.dismiss()
         }
 
-        widgetMenuDialog = dialog
-        dialog.show()
-    }
-
-    private fun getMenuOptions(): Array<String> {
-        val lockText = if (widgetsLocked) "🔒 Unlock Widgets" else "🔓 Lock Widgets"
-        val snapText = if (snapToGrid) "⊞ Snap to Grid: ON" else "⊞ Snap to Grid: OFF"
-        val gridText = if (showGrid) "⊞ Show Grid: ON" else "⊞ Show Grid: OFF"
-
-        return if (isSystemScrollActive) {
-            arrayOf(lockText, snapText, gridText, "─────────────", "System Logo")
-        } else {
-            arrayOf(
-                lockText, snapText, gridText, "─────────────",
-                "Marquee", "2D Box", "3D Box", "Mix Image", "Back Cover",
-                "Physical Media", "Screenshot", "Fanart", "Title Screen", "Game Description"
-            )
-        }
+        return dialogView
     }
 
     private fun createMusicMenuView(dialog: android.app.AlertDialog): android.view.View {
