@@ -1530,9 +1530,10 @@ Access this help anytime from the widget menu!
                     releasePlayer()
                     showWidgets()
                     loadGameMusic()
-                } else if(!isVideoPlaying() && !isSystemScrollActive && currentGameFilename?.isNotEmpty() == true){
-                    val gameName = sanitizeGameFilename(currentGameFilename!!).substringBeforeLast('.')
-                    handleVideoForGame(currentSystemName, gameName, currentGameFilename, true)
+                } else if(!isVideoPlaying() && state is AppState.GameBrowsing){
+                    val s = state as AppState.GameBrowsing
+                    val gameName = sanitizeGameFilename(s.gameFilename).substringBeforeLast('.')
+                    handleVideoForGame(s.systemName, gameName, s.gameFilename, true)
                 }
                 return true
             }
@@ -4641,6 +4642,7 @@ Access this help anytime from the widget menu!
     }
 
     private fun createMusicMenuView(dialog: android.app.AlertDialog): android.view.View {
+        val s = state as AppState.GameBrowsing
 
         val musicLayout = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
@@ -4651,7 +4653,7 @@ Access this help anytime from the widget menu!
         }
         val searchInput = EditText(this).apply {
             layoutParams = android.widget.LinearLayout.LayoutParams(0, -2, 1f)
-            setText("\"$currentGameName ${MusicDownloader.searchString}\"")
+            setText("\"${s.gameName} ${MusicDownloader.searchString}\"")
             hint = "Search YouTube..."
             isSingleLine = true
             tag = "MUSIC_SEARCH_INPUT"
@@ -4677,9 +4679,10 @@ Access this help anytime from the widget menu!
     }
 
     private fun performMusicSearch(query: String, dialog: android.app.AlertDialog) {
-        val gameName = currentGameName?: ""
-        val systemName = currentSystemName?: ""
-        val gameFilenameSanitized = sanitizeGameFilename(currentGameFilename!!).substringBeforeLast('.')
+        val s = state as AppState.GameBrowsing
+        val gameName = s.gameName?: ""
+        val systemName = s.systemName
+        val gameFilenameSanitized = sanitizeGameFilename(s.gameFilename).substringBeforeLast('.')
 
         musicSearchJob?.cancel()
         musicSearchJob = lifecycleScope.launch {
@@ -5213,12 +5216,14 @@ Access this help anytime from the widget menu!
             widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
                 val description = getGameDescription(systemName, gameFilename)
                 android.util.Log.d("MainActivity", "  Updating description widget: ${description?.take(50)}")
-                widget.copy(imagePath = description ?: "")
+                widget.copy(imagePath = description ?: "",
+                    scaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT)
             }
             // Handle image widgets
             imageFile != null && imageFile.exists() -> {
                 android.util.Log.d("MainActivity", "  Creating widget with new image")
-                widget.copy(imagePath = imageFile.absolutePath)
+                widget.copy(imagePath = imageFile.absolutePath,
+                    scaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT)
             }
             // No image found
             else -> {
@@ -5227,10 +5232,12 @@ Access this help anytime from the widget menu!
                 if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
                     widget.copy(
                         imagePath = "",
-                        id = "widget_${gameName}"
+                        id = "widget_${gameName}",
+                        scaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT
                     )
                 } else {
-                    widget.copy(imagePath = "")
+                    widget.copy(imagePath = "",
+                        scaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT)
                 }
             }
         }

@@ -1,14 +1,13 @@
 package com.esde.companion
 
 import android.content.Context
-import com.esde.companion.SettingsActivity.Companion.SCRIPTS_PATH_KEY
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
 
 class ScriptManager (private val context: Context) {
 
-    // Map: Destination Path on Disk -> Source Path in Assets
+    //destination Path on Disk -> source Path in Assets
     private val scriptMap = mapOf(
         "game-select/esdecompanion-game-select.sh" to "scripts/esdecompanion-game-select.sh",
         "system-select/esdecompanion-system-select.sh" to "scripts/esdecompanion-system-select.sh",
