@@ -549,10 +549,12 @@ class WidgetView(
                     OverlayWidget.ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
                 }
 
-                // Load image with appropriate scaling
+                // Load image with cache invalidation signature
                 val glideRequest = Glide.with(context)
                     .asDrawable()
                     .load(file)
+                    .signature(com.bumptech.glide.signature.ObjectKey("${file.lastModified()}_${file.length()}"))
+                    .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.ALL)
                     .override(widget.width.toInt(), widget.height.toInt())
 
                 when (effectiveScaleType) {
