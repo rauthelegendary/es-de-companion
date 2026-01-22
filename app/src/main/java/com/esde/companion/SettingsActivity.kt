@@ -459,6 +459,58 @@ class SettingsActivity : AppCompatActivity() {
         setupSwipeGesture()
         setupWizardButton.setOnClickListener { startSetupWizard() }
         hideAppsButton.setOnClickListener { showHideAppsDialog() }
+
+        selectMediaPathButton.setOnClickListener {
+            pathSelectionType = PathSelection.MEDIA
+            directoryPicker.launch(null)
+        }
+
+        selectSystemPathButton.setOnClickListener {
+            pathSelectionType = PathSelection.SYSTEM
+            directoryPicker.launch(null)
+        }
+
+        selectSystemLogosPathButton.setOnClickListener {
+            pathSelectionType = PathSelection.SYSTEM_LOGOS
+            directoryPicker.launch(null)
+        }
+
+        selectScriptsPathButton.setOnClickListener {
+            pathSelectionType = PathSelection.SCRIPTS
+            directoryPicker.launch(null)
+        }
+
+        createScriptsButton.setOnClickListener {
+            createScriptFiles()
+        }
+
+        selectCustomBackgroundButton.setOnClickListener {
+            pathSelectionType = PathSelection.CUSTOM_BACKGROUND
+            // Create intent for direct file picker (like directory picker UI)
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "image/*"
+                // Optional: Allow multiple MIME types
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/jpeg", "image/png", "image/webp"))
+            }
+            customBackgroundPicker.launch(intent)
+        }
+
+        clearCustomBackgroundButton.setOnClickListener {
+            // Clear the custom background using the correct key
+            prefs.edit().remove(CUSTOM_BACKGROUND_KEY).apply()
+
+            // Update display immediately
+            updateCustomBackgroundDisplay()
+
+            // Mark that background changed so MainActivity reloads on return
+            customBackgroundChanged = true
+
+            Toast.makeText(this, "Custom background cleared", Toast.LENGTH_SHORT).show()
+
+            android.util.Log.d("SettingsActivity", "Custom background cleared - key: $CUSTOM_BACKGROUND_KEY")
+        }
+
         setupColumnCountSlider()
         setupDimmingSlider()
         setupBlurSlider()

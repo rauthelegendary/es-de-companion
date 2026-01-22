@@ -2968,25 +2968,32 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
             }
 
-            // Update game widgets after loading game image
+            // Check if instant video will play (delay = 0)
+            val videoPath = findVideoForGame(systemName, gameName, gameNameRaw)
+            val videoDelay = getVideoDelay()
+            val instantVideoWillPlay = videoPath != null && isVideoEnabled() && widgetsLocked && videoDelay == 0L
+
+            android.util.Log.d("MainActivity", "loadGameInfo - Video check:")
+            android.util.Log.d("MainActivity", "  videoPath: $videoPath")
+            android.util.Log.d("MainActivity", "  videoDelay: ${videoDelay}ms")
+            android.util.Log.d("MainActivity", "  instantVideoWillPlay: $instantVideoWillPlay")
+
+// Update game widgets after determining video status
+// Note: updateWidgetsForCurrentGame() calls showWidgets() internally via loadGameWidgets()
             updateWidgetsForCurrentGame()
 
 // Handle video playback for the current game
-// Pass both stripped name and raw filename (like images do)
-            android.util.Log.d("MainActivity", "loadGameInfo - Calling handleVideoForGame:")
-            android.util.Log.d("MainActivity", "  systemName: $systemName")
-            android.util.Log.d("MainActivity", "  gameName (stripped): $gameName")
-            android.util.Log.d("MainActivity", "  gameNameRaw (full path): $gameNameRaw")
             val videoWillPlay = handleVideoForGame(systemName, gameName, gameNameRaw)
 
-// Show widgets based on current state and video status
+// Hide widgets ONLY if instant video is playing (delay = 0)
+// For delayed videos, widgets stay visible until loadVideo() hides them
             when (state) {
                 is AppState.GameBrowsing -> {
-                    if (!videoWillPlay) {
-                        showWidgets()
-                        android.util.Log.d("MainActivity", "Showing widgets - GameBrowsing, no video")
+                    if (instantVideoWillPlay) {
+                        hideWidgets()
+                        android.util.Log.d("MainActivity", "Hiding widgets - instant video playing")
                     } else {
-                        android.util.Log.d("MainActivity", "Not showing widgets - GameBrowsing, video playing")
+                        android.util.Log.d("MainActivity", "Keeping widgets shown - no instant video (delay=${videoDelay}ms)")
                     }
                 }
                 is AppState.Screensaver -> {
@@ -3480,9 +3487,13 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 gameImageView.visibility = View.VISIBLE
                 videoView.visibility = View.GONE
 
-                // Load and show widgets
-                updateWidgetsForCurrentGame()
-                showWidgets()
+                // Load and show widgets directly (can't use updateWidgetsForCurrentGame because state is GamePlaying)
+                if (gameInfo != null) {
+                    val (systemName, gameFilename) = gameInfo
+                    android.util.Log.d("MainActivity", "Loading widgets for default_image behavior")
+                    loadGameWidgets(systemName, gameFilename)
+                    showWidgets()
+                }
             }
             "game_image" -> {
                 android.util.Log.d("MainActivity", "Game image behavior - keeping current game display")
@@ -3500,18 +3511,20 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                         android.util.Log.d("MainActivity", "No game image found, using fallback")
                         loadFallbackBackground()
                     }
+
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
+                    // Load and show widgets directly (can't use updateWidgetsForCurrentGame because state is GamePlaying)
+                    android.util.Log.d("MainActivity", "Loading widgets for game_image behavior")
+                    loadGameWidgets(systemName, gameFilename)
+                    showWidgets()
                 } else {
                     android.util.Log.d("MainActivity", "No game info available, using fallback")
                     loadFallbackBackground()
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
                 }
-
-                gameImageView.visibility = View.VISIBLE
-                videoView.visibility = View.GONE
-
-                // Always update and show widgets for game_image behavior
-                android.util.Log.d("MainActivity", "Updating widgets for game_image behavior")
-                updateWidgetsForCurrentGame()
-                showWidgets()
             }
         }
     }
@@ -3550,10 +3563,28 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             is AppState.GameBrowsing -> {
                 // We're in game browsing mode after game end
                 if (gameLaunchBehavior == "game_image") {
-                    // Display is already correct - don't reload to prevent flashing
-                    android.util.Log.d("MainActivity", "Keeping current display (game_image behavior)")
+                    // Images/widgets are already correct, but need to reload videos
+                    android.util.Log.d("MainActivity", "Game image behavior - reloading to restart videos")
                     android.util.Log.d("MainActivity", "Game: ${s.gameFilename}")
-                    // Don't touch ANYTHING - everything is already correct
+
+                    // Check if instant video will play
+                    val videoPath = findVideoForGame(s.systemName, s.gameName, s.gameFilename)
+                    val videoDelay = getVideoDelay()
+                    val instantVideoWillPlay = videoPath != null && isVideoEnabled() && widgetsLocked && videoDelay == 0L
+
+                    // Only reload if video needs to start (instant or delayed)
+                    if (videoPath != null && isVideoEnabled() && widgetsLocked) {
+                        android.util.Log.d("MainActivity", "Video enabled - calling handleVideoForGame to restart")
+
+                        // If instant video, hide widgets first to prevent flash
+                        if (instantVideoWillPlay) {
+                            hideWidgets()
+                        }
+
+                        handleVideoForGame(s.systemName, s.gameName, s.gameFilename)
+                    } else {
+                        android.util.Log.d("MainActivity", "No video to restart - keeping current display")
+                    }
                 } else {
                     // Different behavior - need to reload
                     android.util.Log.d("MainActivity", "Reloading display (behavior: $gameLaunchBehavior)")
