@@ -1558,54 +1558,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Check if black overlay feature is enabled
-        val blackOverlayEnabled = prefs.getBoolean("black_overlay_enabled", false)
-
         // Check drawer state first
         val drawerState = bottomSheetBehavior.state
-        val isDrawerOpen = drawerState == BottomSheetBehavior.STATE_EXPANDED ||
-                drawerState == BottomSheetBehavior.STATE_SETTLING
 
-        // Handle black overlay double-tap detection ONLY when drawer is closed and feature is enabled
-        if (!isDrawerOpen && blackOverlayEnabled) {
-            if (ev.action == MotionEvent.ACTION_DOWN) {
-                val currentTime = System.currentTimeMillis()
-                val timeSinceLastTap = currentTime - lastTapTime
-
-                android.util.Log.d("MainActivity", "Double-tap detection: timeSinceLastTap=${timeSinceLastTap}ms, tapCount=$tapCount")
-
-                // Reset tap count if too much time has passed
-                if (timeSinceLastTap > DOUBLE_TAP_TIMEOUT) {
-                    android.util.Log.d("MainActivity", "Tap timeout exceeded (${timeSinceLastTap}ms > ${DOUBLE_TAP_TIMEOUT}ms) - resetting tap count")
-                    tapCount = 0
-                }
-
-                // Only count tap if enough time has passed since last tap OR it's the first tap
-                // (prevents accidental fast touches like brushing the screen)
-                if (lastTapTime == 0L || timeSinceLastTap >= MIN_TAP_INTERVAL) {
-                    tapCount++
-                    lastTapTime = currentTime
-
-                    android.util.Log.d("MainActivity", "Tap registered - new tapCount=$tapCount")
-
-                    // Check for double-tap
-                    if (tapCount >= 2) {
-                        android.util.Log.d("MainActivity", "Double-tap threshold reached! Toggling black overlay")
-                        tapCount = 0 // Reset counter
-
-                        // Toggle black overlay
-                        if (isBlackOverlayShown) {
-                            hideBlackOverlay()
-                        } else {
-                            showBlackOverlay()
-                        }
-                        return true
-                    }
-                } else {
-                    // Tap was too fast after previous tap - ignore it
-                    android.util.Log.d("MainActivity", "Tap IGNORED - too fast (${timeSinceLastTap}ms < ${MIN_TAP_INTERVAL}ms)")
-                }
-            }
+        // Handle black overlay double-tap detection
+        if (handleBlackOverlayDoubleTap(ev, drawerState)) {
+            return true
         }
 
         // If overlay is shown, consume all touches
@@ -1613,7 +1571,88 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             return true
         }
 
-        // Handle long press for widget menu (works anywhere, even on widgets)
+        // Handle long press for widget menu
+        if (handleWidgetMenuLongPress(ev, drawerState)) {
+            return true
+        }
+
+        // Handle tapping outside widgets to deselect
+        handleWidgetDeselection(ev)
+
+        // Track widget interaction state
+        trackWidgetInteractionState(ev)
+
+        // Only use gesture detector if NOT actively interacting with a SELECTED widget AND drawer is hidden
+        if (drawerState == BottomSheetBehavior.STATE_HIDDEN && !isInteractingWithWidget) {
+            gestureDetector.onTouchEvent(ev)
+        }
+
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /**
+     * Handle black overlay double-tap detection
+     * @param ev The motion event
+     * @param drawerState Current state of the bottom sheet drawer
+     * @return true if event was consumed, false otherwise
+     */
+    private fun handleBlackOverlayDoubleTap(ev: MotionEvent, drawerState: Int): Boolean {
+        val blackOverlayEnabled = prefs.getBoolean("black_overlay_enabled", false)
+
+        val isDrawerOpen = drawerState == BottomSheetBehavior.STATE_EXPANDED ||
+                drawerState == BottomSheetBehavior.STATE_SETTLING
+
+        if (isDrawerOpen || !blackOverlayEnabled) {
+            return false
+        }
+
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            val currentTime = System.currentTimeMillis()
+            val timeSinceLastTap = currentTime - lastTapTime
+
+            android.util.Log.d("MainActivity", "Double-tap detection: timeSinceLastTap=${timeSinceLastTap}ms, tapCount=$tapCount")
+
+            // Reset tap count if too much time has passed
+            if (timeSinceLastTap > DOUBLE_TAP_TIMEOUT) {
+                android.util.Log.d("MainActivity", "Tap timeout exceeded (${timeSinceLastTap}ms > ${DOUBLE_TAP_TIMEOUT}ms) - resetting tap count")
+                tapCount = 0
+            }
+
+            // Only count tap if enough time has passed since last tap OR it's the first tap
+            if (lastTapTime == 0L || timeSinceLastTap >= MIN_TAP_INTERVAL) {
+                tapCount++
+                lastTapTime = currentTime
+
+                android.util.Log.d("MainActivity", "Tap registered - new tapCount=$tapCount")
+
+                // Check for double-tap
+                if (tapCount >= 2) {
+                    android.util.Log.d("MainActivity", "Double-tap threshold reached! Toggling black overlay")
+                    tapCount = 0 // Reset counter
+
+                    // Toggle black overlay
+                    if (isBlackOverlayShown) {
+                        hideBlackOverlay()
+                    } else {
+                        showBlackOverlay()
+                    }
+                    return true
+                }
+            } else {
+                android.util.Log.d("MainActivity", "Tap IGNORED - too fast (${timeSinceLastTap}ms < ${MIN_TAP_INTERVAL}ms)")
+            }
+        }
+
+        return false
+    }
+
+    /**
+     * Handle long press gesture for widget menu
+     * @param ev The motion event
+     * @param drawerState Current state of the bottom sheet drawer
+     * @return true if event was consumed, false otherwise
+     */
+    private fun handleWidgetMenuLongPress(ev: MotionEvent, drawerState: Int): Boolean {
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = ev.x
@@ -1625,7 +1664,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                     longPressHandler?.removeCallbacks(it)
                 }
 
-                // Allow long press in system view too
                 if (!widgetMenuShowing && drawerState == BottomSheetBehavior.STATE_HIDDEN) {
                     if (longPressHandler == null) {
                         longPressHandler = Handler(android.os.Looper.getMainLooper())
@@ -1654,28 +1692,40 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // CHANGED: Always cancel the callback on finger lift
+                // Always cancel the callback on finger lift
                 longPressRunnable?.let {
                     longPressHandler?.removeCallbacks(it)
                 }
 
                 if (longPressTriggered) {
                     // Long press was triggered, consume this event
-                    longPressTriggered = false  // ADDED: Reset immediately
+                    longPressTriggered = false
                     return true
                 }
             }
         }
 
-        // Handle tapping outside widgets to deselect them
+        return false
+    }
+
+    /**
+     * Handle tapping outside widgets to deselect
+     * @param ev The motion event
+     */
+    private fun handleWidgetDeselection(ev: MotionEvent) {
         if (ev.action == MotionEvent.ACTION_UP && !longPressTriggered) {
             if (!isTouchOnWidget(ev.x, ev.y)) {
                 // Tapped outside any widget - deselect all
                 activeWidgets.forEach { it.deselect() }
             }
         }
+    }
 
-        // Track widget interaction state for gesture detector
+    /**
+     * Track widget interaction state for gesture detector
+     * @param ev The motion event
+     */
+    private fun trackWidgetInteractionState(ev: MotionEvent) {
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
                 isInteractingWithWidget = isTouchOnWidget(ev.x, ev.y) && isWidgetSelected(ev.x, ev.y)
@@ -1684,13 +1734,6 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
                 isInteractingWithWidget = false
             }
         }
-
-        // Only use gesture detector if NOT actively interacting with a SELECTED widget AND drawer is hidden
-        if (drawerState == BottomSheetBehavior.STATE_HIDDEN && !isInteractingWithWidget) {
-            gestureDetector.onTouchEvent(ev)
-        }
-
-        return super.dispatchTouchEvent(ev)
     }
 
     private fun setupAppDrawer() {
@@ -5079,146 +5122,176 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
 
     private fun updateWidgetsForCurrentGame() {
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame START ═══")
-        android.util.Log.d("MainActivity", "Current state: $state")
+        android.util.Log.d("MainActivity", "isSystemScrollActive: $isSystemScrollActive")
+        android.util.Log.d("MainActivity", "isGamePlaying: $isGamePlaying")
+        android.util.Log.d("MainActivity", "currentSystemName: $currentSystemName")
+        android.util.Log.d("MainActivity", "currentGameFilename: $currentGameFilename")
 
-        // Show widgets in game browsing or screensaver modes
-        when (state) {
-            is AppState.GameBrowsing, is AppState.Screensaver -> {
-                // Continue with widget loading
-            }
-            else -> {
-                android.util.Log.d("MainActivity", "Not in game view - hiding widgets")
-                widgetContainer.visibility = View.GONE
-                gridOverlayView?.visibility = View.GONE
-                return
-            }
-        }
+        when {
+            // Show widgets in game view OR during screensaver
+            !isSystemScrollActive -> {
+                val systemName = currentSystemName
+                val gameFilename = currentGameFilename
 
-        // Get current game context from state
-        val systemName = state.getCurrentSystemName()
-        val gameFilename = state.getCurrentGameFilename()
-
-        if (systemName != null && gameFilename != null) {
-            val systemName = state.getCurrentSystemName()
-            val gameFilename = state.getCurrentGameFilename()
-
-            if (systemName != null && gameFilename != null) {
-                // Load saved widgets
-                val allWidgets = widgetManager.loadWidgets()
-
-                // Filter for GAME context widgets only - ADDED THIS
-                val gameWidgets = allWidgets.filter { it.widgetContext == OverlayWidget.WidgetContext.GAME }
-                android.util.Log.d("MainActivity", "Loaded ${gameWidgets.size} game widgets from storage")
-
-                // Clear existing widget views but preserve grid overlay
-                val childCount = widgetContainer.childCount
-                for (i in childCount - 1 downTo 0) {
-                    val child = widgetContainer.getChildAt(i)
-                    if (child !is GridOverlayView) {
-                        widgetContainer.removeView(child)
-                    }
+                if (systemName != null && gameFilename != null) {
+                    loadGameWidgets(systemName, gameFilename)
+                } else {
+                    android.util.Log.d("MainActivity", "System or game filename is null - not updating widgets")
                 }
-                activeWidgets.clear()
-                android.util.Log.d("MainActivity", "Cleared widget container (preserved grid)")
-
-                // Sort widgets by z-index - CHANGED to use gameWidgets
-                val sortedWidgets = gameWidgets.sortedBy { it.zIndex }
-                android.util.Log.d("MainActivity", "Sorted ${sortedWidgets.size} game widgets by z-index")
-
-                // Reload all widgets with current game images
-                sortedWidgets.forEachIndexed { index, widget ->
-                    android.util.Log.d("MainActivity", "Processing widget $index: type=${widget.imageType}, zIndex=${widget.zIndex}")
-
-                    val gameName = sanitizeGameFilename(gameFilename).substringBeforeLast('.')
-                    android.util.Log.d("MainActivity", "  Looking for images for: $gameName")
-
-                    val imageFile = when (widget.imageType) {
-                        OverlayWidget.ImageType.MARQUEE ->
-                            findImageInFolder(systemName, gameName, gameFilename, "marquees")
-                        OverlayWidget.ImageType.BOX_2D ->
-                            findImageInFolder(systemName, gameName, gameFilename, "covers")
-                        OverlayWidget.ImageType.BOX_3D ->
-                            findImageInFolder(systemName, gameName, gameFilename, "3dboxes")
-                        OverlayWidget.ImageType.MIX_IMAGE ->
-                            findImageInFolder(systemName, gameName, gameFilename, "miximages")
-                        OverlayWidget.ImageType.BACK_COVER ->
-                            findImageInFolder(systemName, gameName, gameFilename, "backcovers")
-                        OverlayWidget.ImageType.PHYSICAL_MEDIA ->
-                            findImageInFolder(systemName, gameName, gameFilename, "physicalmedia")
-                        OverlayWidget.ImageType.SCREENSHOT ->
-                            findImageInFolder(systemName, gameName, gameFilename, "screenshots")
-                        OverlayWidget.ImageType.FANART ->
-                            findImageInFolder(systemName, gameName, gameFilename, "fanart")
-                        OverlayWidget.ImageType.TITLE_SCREEN ->
-                            findImageInFolder(systemName, gameName, gameFilename, "titlescreens")
-                        OverlayWidget.ImageType.GAME_DESCRIPTION -> null  // NEW: Text widget, handled separately
-                        OverlayWidget.ImageType.SYSTEM_LOGO -> null
-                    }
-
-                    android.util.Log.d("MainActivity", "  Image file: ${imageFile?.absolutePath ?: "NULL"}")
-                    android.util.Log.d("MainActivity", "  Image exists: ${imageFile?.exists()}")
-
-                    // ALWAYS create the widget, even if image doesn't exist
-                    val widgetToAdd = when {
-                        // NEW: Handle description text widget
-                        widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
-                            val description = getGameDescription(systemName, gameFilename)
-                            android.util.Log.d("MainActivity", "  Updating description widget: ${description?.take(50)}")
-                            widget.copy(imagePath = description ?: "")
-                        }
-                        // Handle image widgets
-                        imageFile != null && imageFile.exists() -> {
-                            android.util.Log.d("MainActivity", "  Creating widget with new image")
-                            widget.copy(imagePath = imageFile.absolutePath)
-                        }
-                        // No image found
-                        else -> {
-                            android.util.Log.d("MainActivity", "  No valid image found, using empty path")
-                            // Store game name in widget ID for marquee text fallback
-                            if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-                                widget.copy(
-                                    imagePath = "",
-                                    id = "widget_${gameName}"
-                                )
-                            } else {
-                                widget.copy(imagePath = "")
-                            }
-                        }
-                    }
-
-                    addWidgetToScreenWithoutSaving(widgetToAdd)
-                    android.util.Log.d("MainActivity", "  Widget added to screen")
-                }
-
-                android.util.Log.d("MainActivity", "Total widgets added: ${activeWidgets.size}")
-                android.util.Log.d("MainActivity", "Widget container children: ${widgetContainer.childCount}")
-
-                // Make sure container is visible
-                widgetContainer.visibility = View.VISIBLE
-                updateGridOverlay()
-                android.util.Log.d("MainActivity", "Widget container visibility: ${widgetContainer.visibility}")
-            } else {
-                android.util.Log.d("MainActivity", "System or game filename is null - not updating widgets")
             }
-        } else if (state is AppState.SystemBrowsing) {
             // System view - show grid but no game widgets
-            android.util.Log.d("MainActivity", "System view - showing grid only")
-
-            // Clear game widgets
-            widgetContainer.removeAllViews()
-            activeWidgets.clear()
-
-            // Keep container visible and show grid if enabled
-            widgetContainer.visibility = View.VISIBLE
-            updateGridOverlay()
-
-            android.util.Log.d("MainActivity", "System view setup complete")
-        } else {
-            android.util.Log.d("MainActivity", "System or game filename is null - not updating widgets")
+            isSystemScrollActive -> {
+                showSystemViewState()
+            }
+            // Hide widgets during gameplay or other states
+            else -> {
+                hideWidgetsForGameplay()
+            }
         }
 
         android.util.Log.d("MainActivity", "═══ updateWidgetsForCurrentGame END ═══")
     }
+
+    // ========== START: Widget Update Extraction ==========
+
+    /**
+     * Clear widget container while preserving grid overlay
+     */
+    private fun clearWidgetContainer() {
+        val childCount = widgetContainer.childCount
+        for (i in childCount - 1 downTo 0) {
+            val child = widgetContainer.getChildAt(i)
+            if (child !is GridOverlayView) {
+                widgetContainer.removeView(child)
+            }
+        }
+        activeWidgets.clear()
+        android.util.Log.d("MainActivity", "Cleared widget container (preserved grid)")
+    }
+
+    /**
+     * Find appropriate image file for widget based on type
+     */
+    private fun findWidgetImageFile(
+        widget: OverlayWidget,
+        systemName: String,
+        gameName: String,
+        gameFilename: String
+    ): File? {
+        return when (widget.imageType) {
+            OverlayWidget.ImageType.MARQUEE ->
+                mediaFileLocator.findMarqueeImage(systemName, gameName, gameFilename)
+            OverlayWidget.ImageType.GAME_DESCRIPTION ->
+                null // Text-based widget
+            else ->
+                mediaFileLocator.findMediaImage(systemName, gameName, gameFilename, widget.imageType)
+        }
+    }
+
+    /**
+     * Create widget instance with appropriate image path
+     */
+    private fun createWidgetForGame(
+        widget: OverlayWidget,
+        systemName: String,
+        gameName: String,
+        gameFilename: String
+    ): OverlayWidget {
+        val imageFile = findWidgetImageFile(widget, systemName, gameName, gameFilename)
+
+        return when {
+            // Handle text widgets (game description)
+            widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION -> {
+                val description = extractGameDescription(systemName, gameFilename)
+                android.util.Log.d("MainActivity", "  Creating description widget")
+                widget.copy(imagePath = description ?: "")
+            }
+            // Handle image widgets
+            imageFile != null && imageFile.exists() -> {
+                android.util.Log.d("MainActivity", "  Creating widget with new image")
+                widget.copy(imagePath = imageFile.absolutePath)
+            }
+            // No image found
+            else -> {
+                android.util.Log.d("MainActivity", "  No valid image found, using empty path")
+                // Store game name in widget ID for marquee text fallback
+                if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                    widget.copy(
+                        imagePath = "",
+                        id = "widget_${gameName}"
+                    )
+                } else {
+                    widget.copy(imagePath = "")
+                }
+            }
+        }
+    }
+
+    /**
+     * Load and display all game widgets for current game
+     */
+    private fun loadGameWidgets(systemName: String, gameFilename: String) {
+        // Load saved widgets
+        val allWidgets = widgetManager.loadWidgets()
+
+        // Filter for GAME context widgets only
+        val gameWidgets = allWidgets.filter { it.widgetContext == OverlayWidget.WidgetContext.GAME }
+        android.util.Log.d("MainActivity", "Loaded ${gameWidgets.size} game widgets from storage")
+
+        // Clear existing widget views
+        clearWidgetContainer()
+
+        // Sort widgets by z-index
+        val sortedWidgets = gameWidgets.sortedBy { it.zIndex }
+        android.util.Log.d("MainActivity", "Sorted ${sortedWidgets.size} game widgets by z-index")
+
+        // Reload all widgets with current game images
+        val gameName = sanitizeGameFilename(gameFilename).substringBeforeLast('.')
+
+        sortedWidgets.forEachIndexed { index, widget ->
+            android.util.Log.d("MainActivity", "Processing widget $index: type=${widget.imageType}, zIndex=${widget.zIndex}")
+
+            val widgetToAdd = createWidgetForGame(widget, systemName, gameName, gameFilename)
+            addWidgetToScreenWithoutSaving(widgetToAdd)
+            android.util.Log.d("MainActivity", "  Widget added to screen")
+        }
+
+        android.util.Log.d("MainActivity", "Total widgets added: ${activeWidgets.size}")
+        android.util.Log.d("MainActivity", "Widget container children: ${widgetContainer.childCount}")
+
+        // Make sure container is visible
+        widgetContainer.visibility = View.VISIBLE
+        updateGridOverlay()
+        android.util.Log.d("MainActivity", "Widget container visibility: ${widgetContainer.visibility}")
+    }
+
+    /**
+     * Handle system view state (show grid but no game widgets)
+     */
+    private fun showSystemViewState() {
+        android.util.Log.d("MainActivity", "System view - showing grid only")
+
+        // Clear game widgets
+        widgetContainer.removeAllViews()
+        activeWidgets.clear()
+
+        // Keep container visible and show grid if enabled
+        widgetContainer.visibility = View.VISIBLE
+        updateGridOverlay()
+
+        android.util.Log.d("MainActivity", "System view setup complete")
+    }
+
+    /**
+     * Hide widgets during gameplay or other states
+     */
+    private fun hideWidgetsForGameplay() {
+        android.util.Log.d("MainActivity", "Hiding widgets - wrong view state (gameplay)")
+        widgetContainer.visibility = View.GONE
+        gridOverlayView?.visibility = View.GONE
+    }
+
+// ========== END: Widget Update Extraction ==========
 
     private fun addWidgetToScreenWithoutSaving(widget: OverlayWidget) {
         // Create a variable to hold the widget view reference
