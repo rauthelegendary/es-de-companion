@@ -5,7 +5,8 @@ import java.util.UUID
 data class OverlayWidget(
     val id: String = UUID.randomUUID().toString(),
     val contentType: ContentType,
-    val imagePath: String,
+    var imagePath: String,
+    var description: String,
     var x: Float,
     var y: Float,
     var width: Float,

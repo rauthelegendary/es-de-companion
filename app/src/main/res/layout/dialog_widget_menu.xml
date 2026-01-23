@@ -133,7 +133,56 @@
             android:background="#333333"
             android:layout_marginBottom="20dp" />
 
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Widget Pages"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="24dp"
+            android:background="#1A1A1A">
+
+        <Button
+            android:id="@+id/btnPageAdd"
+            android:layout_width="150dp"
+            android:layout_height="wrap_content"
+            android:text="Add page"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:padding="14dp"
+            android:backgroundTint="#2196F3"
+            android:layout_marginBottom="16dp"
+            android:layout_marginRight="16dp"
+            android:gravity="center" />
+
         <!-- Create Widget Section -->
+
+        <Button
+            android:id="@+id/btnPageRemove"
+            android:layout_width="150dp"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:backgroundTint="#ffff0000"
+            android:gravity="center"
+            android:padding="14dp"
+            android:text="Delete page"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp" />
+        </LinearLayout>
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#333333"
+            android:layout_marginBottom="20dp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

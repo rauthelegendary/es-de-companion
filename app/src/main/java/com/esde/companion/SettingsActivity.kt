@@ -570,7 +570,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // ========== MUSIC INTEGRATION START ==========
         if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
-            setupMusicSettings()
+            //setupMusicSettings()
         }
         // ========== MUSIC INTEGRATION END ==========
     }

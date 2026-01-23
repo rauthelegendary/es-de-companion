@@ -41,11 +41,12 @@ class WidgetView(
     context: Context,
     var widget: OverlayWidget,
     private val onDelete: (WidgetView) -> Unit,
-    private val onUpdate: (OverlayWidget) -> Unit
+    private val onUpdate: (OverlayWidget) -> Unit,
+    private val onSelect: (WidgetView) -> Unit,
+    private val onReorder: (WidgetView, Boolean) -> Unit
 ) : RelativeLayout(context) {
 
     private val imageView: ImageView
-    private var shimmerContainer: ShimmerFrameLayout? = null
     private val textView: android.widget.TextView
 
     private var player: ExoPlayer? = null
@@ -71,8 +72,8 @@ class WidgetView(
     private val handleSize = 60f
     private val handleHitZone = 200f  // ADDED: Much larger invisible hit area
 
-    private var isDragging = false
-    private var isResizing = false
+    var isDragging = false
+    var isResizing = false
     private var resizeCorner = ResizeCorner.NONE
     private var dragStartX = 0f
     private var dragStartY = 0f
@@ -220,10 +221,16 @@ class WidgetView(
     }
 
     //added to replace content instead of recreating views:
-    fun updateContent(newWidget: OverlayWidget) {
+    fun updateContent(newWidget: OverlayWidget, pageSwap: Boolean) {
+        val oldPath = widget.imagePath
+        val oldType = widget.contentType
         this.widget = newWidget
         updateLayout()
-        loadWidgetContent()
+
+        //don't reload resource heavy content like image/video if there's no change, unless we're doing a page swap
+        if(pageSwap || widget.contentType != oldType || widget.imagePath != oldPath || widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
+            loadWidgetContent()
+        }
 
         if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
             scrollView.scrollTo(0, 0)
@@ -373,9 +380,7 @@ class WidgetView(
                         invalidate()
                     } else {
                         // Not selected - deselect all others first, then select this one
-                        val mainActivity = context as? MainActivity
-                        mainActivity?.deselectAllWidgets()
-
+                        onSelect(this)
                         isWidgetSelected = true
                         updateDeleteButtonVisibility()
                         invalidate()
@@ -394,11 +399,6 @@ class WidgetView(
                 isDragging = false
                 isResizing = false
                 resizeCorner = ResizeCorner.NONE
-
-                // Convert current absolute positions to percentages
-                val displayMetrics = context.resources.displayMetrics
-                widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
-
                 // Save widget state
                 onUpdate(widget)
 
@@ -437,7 +437,7 @@ class WidgetView(
         if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
             imageView.visibility = View.GONE
 
-            val description = widget.imagePath
+            val description = widget.description
             if (description.isNotEmpty()) {
                 // Show scrollView with background when there's text
                 scrollView.visibility = View.VISIBLE
@@ -794,14 +794,7 @@ class WidgetView(
 
         android.util.Log.d("WidgetView", "About to save all widgets")
 
-        // ========== START: Update percentages before saving ==========
-        val displayMetrics = context.resources.displayMetrics
-        widget.toPercentages(displayMetrics.widthPixels, displayMetrics.heightPixels)
-        // ========== END: Update percentages before saving ==========
-
-        // Save all widgets
-        val mainActivity = context as? MainActivity
-        mainActivity?.saveAllWidgets()
+        onUpdate(this.widget)
     }
 
     private fun snapToGridValue(value: Float): Float {
@@ -818,7 +811,6 @@ class WidgetView(
             widget.width = snapToGridValue(widget.width)
             widget.height = snapToGridValue(widget.height)
             updateLayout()
-            onUpdate(widget)
         }
     }
 
@@ -988,18 +980,11 @@ class WidgetView(
     }
 
     private fun moveWidgetForward() {  // CHANGED name
-        val mainActivity = context as? MainActivity
-        mainActivity?.moveWidgetForward(this)
+        onReorder(this, true)
     }
 
     private fun moveWidgetBackward() {  // CHANGED name
-        val mainActivity = context as? MainActivity
-        mainActivity?.moveWidgetBackward(this)
-    }
-
-    fun clearImage() {
-        Glide.with(context).clear(imageView)
-        imageView.setImageDrawable(null)
+        onReorder(this, false)
     }
 
     private fun startAutoScroll() {
@@ -1045,11 +1030,15 @@ class WidgetView(
         player = null
     }
 
-    fun onDestroy() {
+    fun onPageHide() {
+        player?.pause()
+        player?.release()
+        player = null
         val currentDrawable = imageView.drawable
         if (currentDrawable is GlintDrawable) {
             currentDrawable.stop()
         }
+        Glide.with(this).clear(imageView)
         imageView.setImageDrawable(null)
     }
 }

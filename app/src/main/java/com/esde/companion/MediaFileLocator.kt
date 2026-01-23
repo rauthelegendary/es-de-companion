@@ -72,12 +72,17 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
             OverlayWidget.ContentType.SCREENSHOT -> "screenshots"
             OverlayWidget.ContentType.FANART -> "fanart"
             OverlayWidget.ContentType.TITLE_SCREEN -> "titlescreens"
+            OverlayWidget.ContentType.VIDEO -> ""
             OverlayWidget.ContentType.GAME_DESCRIPTION -> return null // Text-based, no file
             OverlayWidget.ContentType.SYSTEM_LOGO -> return null // Handled separately
         }
         
         val gameName = sanitizeFilename(gameFilename).substringBeforeLast('.')
-        return findImageInFolder(systemName, gameName, gameFilename, folderName)
+        if(type == OverlayWidget.ContentType.VIDEO) {
+            return findVideoFile(systemName, gameFilename)
+        } else {
+            return findImageInFolder(systemName, gameName, gameFilename, folderName)
+        }
     }
     
     /**
@@ -126,18 +131,22 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
      * @param gameFilename The full game filename/path from ES-DE
      * @return The video file path if found, null otherwise
      */
-    fun findVideoFile(systemName: String, gameFilename: String): String? {
+    fun findVideoFilePath(systemName: String, gameFilename: String): String? {
+        return findVideoFile(systemName, gameFilename)?.absolutePath
+    }
+
+    fun findVideoFile(systemName: String, gameFilename: String): File? {
         val mediaPath = prefs.getString("media_path", "/storage/emulated/0/ES-DE/downloaded_media")
             ?: return null
-        
+
         val videoDir = File(mediaPath, "$systemName/videos")
         if (!videoDir.exists()) {
             android.util.Log.d("MediaFileLocator", "Video directory does not exist: ${videoDir.absolutePath}")
             return null
         }
-        
+
         val videoFile = findFileInDirectory(videoDir, gameFilename, VIDEO_EXTENSIONS)
-        return videoFile?.absolutePath
+        return videoFile
     }
     
     /**
