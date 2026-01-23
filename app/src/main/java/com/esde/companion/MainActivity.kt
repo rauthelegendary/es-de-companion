@@ -53,6 +53,11 @@ import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
 import android.os.Handler
 import android.os.Looper
+// ========== MUSIC INTEGRATION START ==========
+import com.esde.companion.FeatureFlags
+import com.esde.companion.music.MusicController
+import com.esde.companion.music.MusicManager
+// ========== MUSIC INTEGRATION END ==========
 
 class MainActivity : AppCompatActivity() {
 
@@ -69,6 +74,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var appLaunchPrefs: AppLaunchPreferences
     private lateinit var mediaFileLocator: MediaFileLocator
+
+    // ========== MUSIC INTEGRATION START ==========
+    // DELETE THIS PROPERTY when removing music feature
+    private lateinit var songTitleOverlay: TextView
+    private var songTitleHandler: Handler? = null
+    private var songTitleRunnable: Runnable? = null
+    private val musicController: MusicController? = if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
+        null // Will be initialized in onCreate after prefs are ready
+    } else {
+        null
+    }
+    private var musicManager: MusicManager? = null
+    // ========== MUSIC INTEGRATION END ==========
 
     private lateinit var blackOverlay: View
     private var isBlackOverlayShown = false
@@ -97,7 +115,6 @@ class MainActivity : AppCompatActivity() {
     private var widgetMenuShowing = false
     private var widgetMenuDialog: android.app.AlertDialog? = null
 
-    // ========== NEW: GameState System ==========
     // This tracks state alongside existing booleans during migration
     private var state: AppState = AppState.SystemBrowsing("")
         set(value) {
@@ -109,8 +126,11 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("MainActivity", "FROM: $oldState")
             android.util.Log.d("MainActivity", "TO:   $value")
             android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━")
+
+            // ========== MUSIC ==========
+            musicManager?.onStateChanged(value)
+            // ===========================
         }
-    // ========== END: GameState System ==========
 
     private var fileObserver: FileObserver? = null
     private var allApps = listOf<ResolveInfo>()  // Store all apps for search filtering
@@ -204,6 +224,9 @@ class MainActivity : AppCompatActivity() {
             val needsRecreate = result.data?.getBooleanExtra("NEEDS_RECREATE", false) ?: false
             val appsHiddenChanged =
                 result.data?.getBooleanExtra("APPS_HIDDEN_CHANGED", false) ?: false
+            // ========== MUSIC ==========
+            val musicSettingsChanged = result.data?.getBooleanExtra("MUSIC_SETTINGS_CHANGED", false) ?: false
+            // ===========================
             val closeDrawer = result.data?.getBooleanExtra("CLOSE_DRAWER", false) ?: false
             val videoSettingsChanged =
                 result.data?.getBooleanExtra("VIDEO_SETTINGS_CHANGED", false) ?: false
@@ -284,6 +307,13 @@ class MainActivity : AppCompatActivity() {
                     // Game is playing - skip reload
                     skipNextReload = true
                 }
+                // ========== MUSIC ==========
+            } else if (musicSettingsChanged) {
+                // Music settings changed - trigger state change to restart/stop music
+                android.util.Log.d("MainActivity", "Music settings changed - updating music state")
+                musicManager?.onStateChanged(state)
+                skipNextReload = true
+                // ===========================
             } else {
                 // No settings changed that require reload - skip the reload in onResume
                 skipNextReload = true
@@ -324,6 +354,19 @@ class MainActivity : AppCompatActivity() {
         appLaunchPrefs = AppLaunchPreferences(this)
         mediaFileLocator = MediaFileLocator(prefs)
 
+        // ========== MUSIC INTEGRATION START ==========
+        // Initialize music manager if feature is enabled
+        if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
+            musicManager = MusicManager(this, prefs)
+            android.util.Log.d("MainActivity", "MusicManager initialized")
+
+            // Set up song title callback
+            musicManager?.setOnSongChangedListener { songName ->
+                showSongTitle(songName)
+            }
+        }
+        // ========== MUSIC INTEGRATION END ==========
+
         // Check if we should show widget tutorial for updating users
         checkAndShowWidgetTutorialForUpdate()
 
@@ -339,6 +382,10 @@ class MainActivity : AppCompatActivity() {
         androidSettingsButton = findViewById(R.id.androidSettingsButton)
         videoView = findViewById(R.id.videoView)
         blackOverlay = findViewById(R.id.blackOverlay)
+        // ========== MUSIC INTEGRATION START ==========
+        songTitleOverlay = findViewById(R.id.songTitleOverlay)
+        songTitleHandler = Handler(Looper.getMainLooper())
+        // ========== MUSIC INTEGRATION END ==========
 
         // Initialize widget system
         widgetContainer = findViewById(R.id.widgetContainer)
@@ -2291,7 +2338,63 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
         // Release video player
         releasePlayer()
         videoDelayHandler = null
+
+        // ========== MUSIC ==========
+        musicManager?.release()
+        songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+        // ===========================
     }
+
+    // ========== MUSIC INTEGRATION START ==========
+    /**
+     * Show song title overlay with fade in/out animation
+     */
+    private fun showSongTitle(songName: String) {
+        // Check if feature is enabled
+        val songTitleEnabled = prefs.getBoolean("music.song_title_enabled", false)
+        if (!songTitleEnabled) {
+            return
+        }
+
+        // Cancel any pending hide
+        songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+
+        // Set text
+        songTitleOverlay.text = "♫ $songName"
+
+        // Fade in
+        songTitleOverlay.visibility = View.VISIBLE
+        songTitleOverlay.animate()
+            .alpha(1.0f)
+            .setDuration(300)
+            .start()
+
+        // Get display duration
+        val durationSetting = prefs.getInt("music.song_title_duration", 0) // 0-15
+
+        // If infinite (15), don't schedule fade out
+        if (durationSetting == 15) {
+            android.util.Log.d("MainActivity", "Song title set to infinite display")
+            return
+        }
+
+        // Calculate duration: 0->2s, 1->4s, 2->6s, ... 14->30s
+        val displayDuration = ((durationSetting + 1) * 2) * 1000L // Convert to milliseconds
+
+        // Schedule fade out
+        songTitleRunnable = Runnable {
+            songTitleOverlay.animate()
+                .alpha(0.0f)
+                .setDuration(300)
+                .withEndAction {
+                    songTitleOverlay.visibility = View.GONE
+                }
+                .start()
+        }
+
+        songTitleHandler?.postDelayed(songTitleRunnable!!, displayDuration)
+    }
+    // ========== MUSIC INTEGRATION END ==========
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -4353,8 +4456,12 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
             // Hide the game image view and marquee so video is visible
             gameImageView.visibility = View.GONE
 
-            // Hide widgets when video plays  // ADDED
-            hideWidgets()  // ADDED
+            // Hide widgets when video plays
+            hideWidgets()
+
+            // ========== MUSIC ==========
+            musicManager?.onVideoStarted()
+            // ===========================
 
             // Get animation settings (same as images)
             val animationStyle = prefs.getString("animation_style", "scale_fade") ?: "scale_fade"
@@ -4418,6 +4525,10 @@ echo -n "${'$'}3" > "${'$'}LOG_DIR/esde_screensavergameselect_system.txt"
      * Release video player
      */
     private fun releasePlayer() {
+        // ========== MUSIC ==========
+        musicManager?.onVideoEnded()
+        // ===========================
+
         // Cancel any pending video load
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
 

@@ -80,6 +80,21 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var screensaverBehaviorChipGroup: ChipGroup
     private lateinit var blackOverlayChipGroup: ChipGroup
 
+    // ========== MUSIC INTEGRATION START ==========
+    // DELETE THESE PROPERTIES when removing music feature
+    private lateinit var musicMasterChipGroup: ChipGroup
+    private lateinit var musicSettings: LinearLayout
+    private lateinit var musicSystemChipGroup: ChipGroup
+    private lateinit var musicGameChipGroup: ChipGroup
+    private lateinit var musicScreensaverChipGroup: ChipGroup
+    private lateinit var musicVideoChipGroup: ChipGroup
+    private lateinit var musicSystemSpecificChipGroup: ChipGroup
+    private lateinit var musicSongTitleChipGroup: ChipGroup
+    private lateinit var musicSongTitleDurationSection: LinearLayout
+    private lateinit var musicSongTitleDurationSeekBar: SeekBar
+    private lateinit var musicSongTitleDurationText: TextView
+    // ========== MUSIC INTEGRATION END ==========
+
     private var initialDimming: Int = 0
     private var initialBlur: Int = 0
     private var initialDrawerTransparency: Int = 0
@@ -91,6 +106,9 @@ class SettingsActivity : AppCompatActivity() {
     private var gameLaunchBehaviorChanged: Boolean = false
     private var screensaverBehaviorChanged: Boolean = false
     private var customBackgroundChanged: Boolean = false
+    // ========== MUSIC INTEGRATION START ==========
+    private var musicSettingsChanged: Boolean = false
+    // ========== MUSIC INTEGRATION END ==========
 
     private var pathSelectionType = PathSelection.MEDIA
 
@@ -448,6 +466,21 @@ class SettingsActivity : AppCompatActivity() {
         screensaverBehaviorChipGroup = findViewById(R.id.screensaverBehaviorChipGroup)
         blackOverlayChipGroup = findViewById(R.id.blackOverlayChipGroup)
         versionText = findViewById(R.id.versionText)
+        // ========== MUSIC INTEGRATION START ==========
+        if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
+            musicMasterChipGroup = findViewById(R.id.musicMasterChipGroup)
+            musicSettings = findViewById(R.id.musicSettings)
+            musicSystemChipGroup = findViewById(R.id.musicSystemChipGroup)
+            musicGameChipGroup = findViewById(R.id.musicGameChipGroup)
+            musicScreensaverChipGroup = findViewById(R.id.musicScreensaverChipGroup)
+            musicVideoChipGroup = findViewById(R.id.musicVideoChipGroup)
+            musicSystemSpecificChipGroup = findViewById(R.id.musicSystemSpecificChipGroup)
+            musicSongTitleChipGroup = findViewById(R.id.musicSongTitleChipGroup)
+            musicSongTitleDurationSection = findViewById(R.id.musicSongTitleDurationSection)
+            musicSongTitleDurationSeekBar = findViewById(R.id.musicSongTitleDurationSeekBar)
+            musicSongTitleDurationText = findViewById(R.id.musicSongTitleDurationText)
+        }
+        // ========== MUSIC INTEGRATION END ==========
     }
 
     /**
@@ -524,6 +557,12 @@ class SettingsActivity : AppCompatActivity() {
         setupBlackOverlay()
 
         android.util.Log.d("SettingsActivity", "All UI components setup complete")
+
+        // ========== MUSIC INTEGRATION START ==========
+        if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
+            setupMusicSettings()
+        }
+        // ========== MUSIC INTEGRATION END ==========
     }
 
     /**
@@ -578,6 +617,9 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 if (currentHiddenApps != initialHiddenApps) {
                     intent.putExtra("APPS_HIDDEN_CHANGED", true)
+                }
+                if (musicSettingsChanged) {
+                    intent.putExtra("MUSIC_SETTINGS_CHANGED", true)
                 }
                 if (videoSettingsChanged) {
                     intent.putExtra("VIDEO_SETTINGS_CHANGED", true)
@@ -1282,6 +1324,174 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
     }
+
+    // ========== MUSIC INTEGRATION START ==========
+    // DELETE THIS ENTIRE FUNCTION when removing music feature
+
+    /**
+     * Setup background music settings
+     */
+    private fun setupMusicSettings() {
+        android.util.Log.d("SettingsActivity", "Setting up music settings")
+
+        // Master toggle
+        val musicEnabled = prefs.getBoolean("music.enabled", false)
+        val masterChipToCheck = if (musicEnabled) R.id.musicMasterOn else R.id.musicMasterOff
+        musicMasterChipGroup.check(masterChipToCheck)
+
+        // Show/hide detailed settings based on master toggle
+        musicSettings.visibility = if (musicEnabled) View.VISIBLE else View.GONE
+
+        // Master toggle listener
+        musicMasterChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.musicMasterOn
+                prefs.edit().putBoolean("music.enabled", enabled).apply()
+
+                // Show/hide detailed settings
+                musicSettings.visibility = if (enabled) View.VISIBLE else View.GONE
+
+                // Mark as changed
+                musicSettingsChanged = true
+
+                android.util.Log.d("SettingsActivity", "Music master toggle: $enabled")
+            }
+        }
+
+        // System view music
+        val systemMusicEnabled = prefs.getBoolean("music.system_enabled", true)
+        val systemChipToCheck = if (systemMusicEnabled) R.id.musicSystemOn else R.id.musicSystemOff
+        musicSystemChipGroup.check(systemChipToCheck)
+
+        musicSystemChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.musicSystemOn
+                prefs.edit().putBoolean("music.system_enabled", enabled).apply()
+                musicSettingsChanged = true
+                android.util.Log.d("SettingsActivity", "System music: $enabled")
+            }
+        }
+
+        // Game view music
+        val gameMusicEnabled = prefs.getBoolean("music.game_enabled", true)
+        val gameChipToCheck = if (gameMusicEnabled) R.id.musicGameOn else R.id.musicGameOff
+        musicGameChipGroup.check(gameChipToCheck)
+
+        musicGameChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.musicGameOn
+                prefs.edit().putBoolean("music.game_enabled", enabled).apply()
+                musicSettingsChanged = true
+                android.util.Log.d("SettingsActivity", "Game music: $enabled")
+            }
+        }
+
+        // Screensaver music
+        val screensaverMusicEnabled = prefs.getBoolean("music.screensaver_enabled", false)
+        val screensaverChipToCheck = if (screensaverMusicEnabled) R.id.musicScreensaverOn else R.id.musicScreensaverOff
+        musicScreensaverChipGroup.check(screensaverChipToCheck)
+
+        musicScreensaverChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.musicScreensaverOn
+                prefs.edit().putBoolean("music.screensaver_enabled", enabled).apply()
+                musicSettingsChanged = true
+                android.util.Log.d("SettingsActivity", "Screensaver music: $enabled")
+            }
+        }
+
+        // Music during videos
+        val videoBehavior = prefs.getString("music.video_behavior", "duck") ?: "duck"
+        val videoChipToCheck = when (videoBehavior) {
+            "continue" -> R.id.musicVideoContinue
+            "pause" -> R.id.musicVideoPause
+            else -> R.id.musicVideoDuck
+        }
+        musicVideoChipGroup.check(videoChipToCheck)
+
+        musicVideoChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val behavior = when (checkedIds[0]) {
+                    R.id.musicVideoContinue -> "continue"
+                    R.id.musicVideoPause -> "pause"
+                    else -> "duck"
+                }
+                prefs.edit().putString("music.video_behavior", behavior).apply()
+                android.util.Log.d("SettingsActivity", "Video music behavior: $behavior")
+            }
+        }
+
+        // System-specific music
+        val systemSpecificEnabled = prefs.getBoolean("music.system_specific_enabled", false)
+        val systemSpecificChipToCheck = if (systemSpecificEnabled) R.id.musicSystemSpecificOn else R.id.musicSystemSpecificOff
+        musicSystemSpecificChipGroup.check(systemSpecificChipToCheck)
+
+        musicSystemSpecificChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.musicSystemSpecificOn
+                prefs.edit().putBoolean("music.system_specific_enabled", enabled).apply()
+                musicSettingsChanged = true
+                android.util.Log.d("SettingsActivity", "System-specific music: $enabled")
+            }
+        }
+
+        android.util.Log.d("SettingsActivity", "Music settings setup complete")
+
+        // Song title display
+        val songTitleEnabled = prefs.getBoolean("music.song_title_enabled", false)
+        val songTitleChipToCheck = if (songTitleEnabled) R.id.musicSongTitleOn else R.id.musicSongTitleOff
+        musicSongTitleChipGroup.check(songTitleChipToCheck)
+
+        // Show/hide duration section
+        musicSongTitleDurationSection.visibility = if (songTitleEnabled) View.VISIBLE else View.GONE
+
+        musicSongTitleChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == R.id.musicSongTitleOn
+                prefs.edit().putBoolean("music.song_title_enabled", enabled).apply()
+
+                // Show/hide duration section
+                musicSongTitleDurationSection.visibility = if (enabled) View.VISIBLE else View.GONE
+
+                android.util.Log.d("SettingsActivity", "Song title display: $enabled")
+            }
+        }
+
+        // Song title duration
+        val songTitleDuration = prefs.getInt("music.song_title_duration", 0) // 0-15 (0=2s, 15=infinite)
+        musicSongTitleDurationSeekBar.progress = songTitleDuration
+        updateSongTitleDurationText(songTitleDuration)
+
+        musicSongTitleDurationSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                updateSongTitleDurationText(progress)
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                seekBar?.let {
+                    prefs.edit().putInt("music.song_title_duration", it.progress).apply()
+                }
+            }
+        })
+
+        android.util.Log.d("SettingsActivity", "Music settings setup complete")
+    }
+
+    private fun updateSongTitleDurationText(progress: Int) {
+        // 0-14 = 2s, 4s, 6s, ... 30s
+        // 15 = Infinite
+        val text = if (progress == 15) {
+            "∞ (Infinite)"
+        } else {
+            val duration = (progress + 1) * 2 // 0->2s, 1->4s, 2->6s, ... 14->30s
+            "${duration}s"
+        }
+        musicSongTitleDurationText.text = text
+    }
+
+    // ========== MUSIC INTEGRATION END ==========
 
     private fun setupBlackOverlay() {
         // Load saved black overlay enabled state (default: false/off)
