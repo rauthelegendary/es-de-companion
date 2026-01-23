@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -46,9 +47,33 @@
         android:clickable="false"
         android:focusable="false" />
 
+    <!-- ========== MUSIC INTEGRATION START ========== -->
+    <!-- Song Title Overlay (positioned before app drawer for correct z-index) -->
+    <TextView
+        android:id="@+id/songTitleOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginBottom="32dp"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
+        android:background="#CC000000"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        android:elevation="5dp"
+        android:alpha="0.0"
+        tools:text="♫ Now Playing: Song Title" />
+    <!-- ========== MUSIC INTEGRATION END ========== -->
+
     <androidx.coordinatorlayout.widget.CoordinatorLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:elevation="20dp">
 
         <LinearLayout
             android:id="@+id/appDrawer"

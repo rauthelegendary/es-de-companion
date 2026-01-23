@@ -73,6 +73,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlin.toString
 
+
 class MainActivity : AppCompatActivity() {
 
     private lateinit var rootLayout: RelativeLayout
@@ -88,6 +89,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
     private lateinit var appLaunchPrefs: AppLaunchPreferences
     private lateinit var mediaFileLocator: MediaFileLocator
+
+    // ========== MUSIC INTEGRATION START ==========
+    // DELETE THIS PROPERTY when removing music feature
+    private lateinit var songTitleOverlay: TextView
+    private var songTitleHandler: Handler? = null
+    private var songTitleRunnable: Runnable? = null
+    private val musicController: MusicController? = if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
+        null // Will be initialized in onCreate after prefs are ready
+    } else {
+        null
+    }
+    private var musicManager: MusicManager? = null
+    // ========== MUSIC INTEGRATION END ==========
 
     private lateinit var blackOverlay: View
     private var isBlackOverlayShown = false
@@ -116,7 +130,6 @@ class MainActivity : AppCompatActivity() {
     private var widgetMenuShowing = false
     private var widgetMenuDialog: android.app.AlertDialog? = null
 
-    // ========== NEW: GameState System ==========
     // This tracks state alongside existing booleans during migration
     private var state: AppState = AppState.SystemBrowsing("")
         set(value) {
@@ -128,8 +141,11 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("MainActivity", "FROM: $oldState")
             android.util.Log.d("MainActivity", "TO:   $value")
             android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━")
+
+            // ========== MUSIC ==========
+            musicManager?.onStateChanged(value)
+            // ===========================
         }
-    // ========== END: GameState System ==========
 
     private var fileObserver: FileObserver? = null
     private var allApps = listOf<ResolveInfo>()  // Store all apps for search filtering
@@ -149,9 +165,6 @@ class MainActivity : AppCompatActivity() {
 
     // Flag to skip reload in onResume (used when returning from settings with no changes)
     private var skipNextReload = false
-
-    // Flag to track if marquee is showing text drawable (needs WRAP_CONTENT)
-    private var marqueeShowingText = false
 
     // Double-tap detection variables
     private var tapCount = 0
@@ -238,6 +251,10 @@ class MainActivity : AppCompatActivity() {
             val needsRecreate = result.data?.getBooleanExtra("NEEDS_RECREATE", false) ?: false
             val appsHiddenChanged =
                 result.data?.getBooleanExtra("APPS_HIDDEN_CHANGED", false) ?: false
+            // ========== MUSIC ==========
+            val musicSettingsChanged = result.data?.getBooleanExtra("MUSIC_SETTINGS_CHANGED", false) ?: false
+            val musicMasterToggleChanged = result.data?.getBooleanExtra("MUSIC_MASTER_TOGGLE_CHANGED", false) ?: false
+            // ===========================
             val closeDrawer = result.data?.getBooleanExtra("CLOSE_DRAWER", false) ?: false
             val videoSettingsChanged =
                 result.data?.getBooleanExtra("VIDEO_SETTINGS_CHANGED", false) ?: false
@@ -275,7 +292,7 @@ class MainActivity : AppCompatActivity() {
                 skipNextReload = true
             } else if (screensaverBehaviorChanged && state is AppState.Screensaver) {
                 // Screensaver behavior changed while screensaver is active - update display
-                handleScreensaverStart()
+                applyScreensaverBehaviorChange()
                 // Skip reload in onResume to prevent override
                 skipNextReload = true
             } else if (imagePreferenceChanged) {
@@ -318,6 +335,34 @@ class MainActivity : AppCompatActivity() {
                     // Game is playing - skip reload
                     skipNextReload = true
                 }
+                // ========== MUSIC ==========
+            } else if (musicMasterToggleChanged) {
+                // Music MASTER TOGGLE changed - only handle if actually turning OFF
+                val musicEnabled = prefs.getBoolean("music.enabled", false)
+
+                if (!musicEnabled) {
+                    // Music was turned OFF - stop it
+                    android.util.Log.d("MainActivity", "Music master toggle changed to OFF - stopping music")
+                    hideSongTitle()
+                    musicManager?.onStateChanged(state)
+                } else {
+                    // Music was turned ON - onActivityVisible already resumed it if needed
+                    android.util.Log.d("MainActivity", "Music master toggle changed to ON - already handled by resume")
+                }
+
+                skipNextReload = true
+            } else if (musicSettingsChanged) {
+                // Other music settings changed (not master toggle) - just update song title if needed
+                android.util.Log.d("MainActivity", "Music settings changed (not master) - music continues playing")
+
+                // Check if song title display was toggled off
+                val songTitleEnabled = prefs.getBoolean("music.song_title_enabled", false)
+                if (!songTitleEnabled) {
+                    hideSongTitle()
+                }
+
+                skipNextReload = true
+                // ===========================
             } else {
                 // No settings changed that require reload - skip the reload in onResume
                 skipNextReload = true
@@ -382,6 +427,24 @@ class MainActivity : AppCompatActivity() {
         appLaunchPrefs = AppLaunchPreferences(this)
         mediaFileLocator = MediaFileLocator(prefs)
 
+        // ========== MUSIC INTEGRATION START ==========
+        // Initialize music manager if feature is enabled
+        if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
+            musicManager = MusicManager(this, prefs)
+            android.util.Log.d("MainActivity", "MusicManager initialized")
+
+            // Set up song title callback
+            musicManager?.setOnSongChangedListener { songName ->
+                showSongTitle(songName)
+            }
+
+            // Set up music stopped callback
+            musicManager?.setOnMusicStoppedListener {
+                hideSongTitle()
+            }
+        }
+        // ========== MUSIC INTEGRATION END ==========
+
         // Check if we should show widget tutorial for updating users
         checkAndShowWidgetTutorialForUpdate()
 
@@ -397,6 +460,10 @@ class MainActivity : AppCompatActivity() {
         androidSettingsButton = findViewById(R.id.androidSettingsButton)
         videoView = findViewById(R.id.videoView)
         blackOverlay = findViewById(R.id.blackOverlay)
+        // ========== MUSIC INTEGRATION START ==========
+        songTitleOverlay = findViewById(R.id.songTitleOverlay)
+        songTitleHandler = Handler(Looper.getMainLooper())
+        // ========== MUSIC INTEGRATION END ==========
 
         // Initialize widget system
         widgetContainer = findViewById(R.id.widgetContainer)
@@ -1037,6 +1104,10 @@ Access this help anytime from the widget menu!
         super.onStart()
         isActivityVisible = true
         android.util.Log.d("MainActivity", "Activity VISIBLE (onStart) - videos allowed if other conditions met")
+
+        // ========== MUSIC ==========
+        musicManager?.onActivityVisible()
+        // ===========================
     }
 
     override fun onStop() {
@@ -1044,6 +1115,11 @@ Access this help anytime from the widget menu!
         isActivityVisible = false
         android.util.Log.d("MainActivity", "Activity NOT VISIBLE (onStop) - blocking videos")
         releasePlayer()
+
+        // ========== MUSIC ==========
+        musicManager?.onActivityInvisible()
+        hideSongTitle()
+        // ===========================
     }
 
     private fun updateBlurEffect() {
@@ -2159,7 +2235,90 @@ Access this help anytime from the widget menu!
         releasePlayer()
         releaseMusicPlayer()
         videoDelayHandler = null
+
+        // ========== MUSIC ==========
+        musicManager?.release()
+        songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+        // ===========================
     }
+
+    // ========== MUSIC INTEGRATION START ==========
+     /**
+     * Show song title overlay with fade in/out animation
+     */
+     private fun showSongTitle(songName: String) {
+         // Check if feature is enabled
+         val songTitleEnabled = prefs.getBoolean("music.song_title_enabled", false)
+         if (!songTitleEnabled) {
+             return
+         }
+
+         // Cancel any pending hide
+         songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+
+         // Set text
+         songTitleOverlay.text = "♫ $songName"
+
+         // Apply background opacity setting
+         val opacity = prefs.getInt("music.song_title_opacity", 80) // 0-100, default 80%
+         val alpha = (opacity * 255 / 100).coerceIn(0, 255)
+         val hexAlpha = String.format("%02x", alpha)
+         val backgroundColor = android.graphics.Color.parseColor("#${hexAlpha}000000")
+         songTitleOverlay.setBackgroundColor(backgroundColor)
+
+        // Fade in
+        songTitleOverlay.visibility = View.VISIBLE
+        songTitleOverlay.animate()
+            .alpha(1.0f)
+            .setDuration(300)
+            .start()
+
+        // Get display duration
+        val durationSetting = prefs.getInt("music.song_title_duration", 0) // 0-15
+
+        // If infinite (15), don't schedule fade out
+        if (durationSetting == 15) {
+            android.util.Log.d("MainActivity", "Song title set to infinite display")
+            return
+        }
+
+        // Calculate duration: 0->2s, 1->4s, 2->6s, ... 14->30s
+        val displayDuration = ((durationSetting + 1) * 2) * 1000L // Convert to milliseconds
+
+        // Schedule fade out
+        songTitleRunnable = Runnable {
+            songTitleOverlay.animate()
+                .alpha(0.0f)
+                .setDuration(300)
+                .withEndAction {
+                    songTitleOverlay.visibility = View.GONE
+                }
+                .start()
+        }
+
+        songTitleHandler?.postDelayed(songTitleRunnable!!, displayDuration)
+    }
+
+    /**
+     * Hide song title overlay immediately (used when music is disabled)
+     */
+    private fun hideSongTitle() {
+        // Cancel any pending hide
+        songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+
+        // Hide immediately with fade out animation
+        if (songTitleOverlay.visibility == View.VISIBLE) {
+            songTitleOverlay.animate()
+                .alpha(0.0f)
+                .setDuration(300)
+                .withEndAction {
+                    songTitleOverlay.visibility = View.GONE
+                }
+                .start()
+        }
+    }
+
+    // ========== MUSIC INTEGRATION END ==========
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -2814,7 +2973,7 @@ Access this help anytime from the widget menu!
                 gameFilename = gameNameRaw,
                 gameName = gameDisplayName
             ))
-
+            
             musicLoadRunnable = Runnable {
                 loadGameMusic()
             }
@@ -2832,7 +2991,7 @@ Access this help anytime from the widget menu!
                 gameImageView.setImageDrawable(drawable)
             } else {
                 // Try to find game-specific artwork
-                val gameImage = findGameImage(systemName, gameName, gameNameRaw)
+                val gameImage = findGameImage(systemName, gameNameRaw)
 
                 if (gameImage != null && gameImage.exists()) {
                     // Game has its own artwork - use it
@@ -2853,16 +3012,16 @@ Access this help anytime from the widget menu!
             android.util.Log.d("MainActivity", "  videoDelay: ${videoDelay}ms")
             android.util.Log.d("MainActivity", "  instantVideoWillPlay: $instantVideoWillPlay")
 
-// Update game widgets after determining video status
-// Note: updateWidgetsForCurrentGame() calls showWidgets() internally via loadGameWidgets()
+            // Update game widgets after determining video status
+            // Note: updateWidgetsForCurrentGame() calls showWidgets() internally via loadGameWidgets()
             updateWidgetsForCurrentGame()
 
-// Handle video playback for the current game
-            val videoWillPlay = handleVideoForGame(systemName, gameName, gameNameRaw)
-
+            // Handle video playback for the current game
+            handleVideoForGame(systemName, gameName, gameNameRaw)
 
 // Hide widgets ONLY if instant video is playing (delay = 0)
 // For delayed videos, widgets stay visible until loadVideo() hides them
+
             when (state) {
                 is AppState.GameBrowsing -> {
                     if (instantVideoWillPlay) {
@@ -2926,7 +3085,6 @@ Access this help anytime from the widget menu!
 
     private fun findGameImage(
         systemName: String,
-        strippedName: String,
         fullGamePath: String
     ): File? {
         // Get image preference
@@ -3415,9 +3573,7 @@ Access this help anytime from the widget menu!
 
                 if (gameInfo != null) {
                     val (systemName, gameFilename) = gameInfo
-                    val gameName = sanitizeGameFilename(gameFilename).substringBeforeLast('.')
-                    val filename = sanitizeGameFilename(gameFilename)
-                    val gameImage = findGameImage(systemName, gameName, filename)
+                    val gameImage = findGameImage(systemName, gameFilename)
 
                     if (gameImage != null && gameImage.exists()) {
                         android.util.Log.d("MainActivity", "Loading game image: ${gameImage.name}")
@@ -3616,6 +3772,85 @@ Access this help anytime from the widget menu!
     }
 
     /**
+     * Apply screensaver behavior change while screensaver is already active.
+     * Unlike handleScreensaverStart(), this preserves the current screensaver game.
+     */
+    private fun applyScreensaverBehaviorChange() {
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        android.util.Log.d("MainActivity", "SCREENSAVER BEHAVIOR CHANGE")
+        android.util.Log.d("MainActivity", "Current state: $state")
+
+        val screensaverBehavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+        android.util.Log.d("MainActivity", "New screensaver behavior: $screensaverBehavior")
+
+        // Get current screensaver game (if any)
+        val screensaverGame = if (state is AppState.Screensaver) {
+            (state as AppState.Screensaver).currentGame
+        } else {
+            null
+        }
+
+        when (screensaverBehavior) {
+            "black_screen" -> {
+                android.util.Log.d("MainActivity", "Switching to black screen")
+                Glide.with(this).clear(gameImageView)
+                gameImageView.setImageDrawable(null)
+                gameImageView.visibility = View.GONE
+                videoView.visibility = View.GONE
+                hideWidgets()
+                releasePlayer()
+                gridOverlayView?.visibility = View.GONE
+            }
+            "default_image" -> {
+                android.util.Log.d("MainActivity", "Switching to default image")
+                loadFallbackBackground(forceCustomImageOnly = true)
+                gameImageView.visibility = View.VISIBLE
+                videoView.visibility = View.GONE
+
+                // Show current game widgets if we have a game
+                if (screensaverGame != null) {
+                    loadGameWidgets(screensaverGame.systemName, screensaverGame.gameFilename)
+                    showWidgets()
+                } else {
+                    hideWidgets()
+                }
+
+                releasePlayer()
+            }
+            "game_image" -> {
+                android.util.Log.d("MainActivity", "Switching to game image")
+
+                // If we have a current screensaver game, load it
+                if (screensaverGame != null) {
+                    val gameImage = findGameImage(screensaverGame.systemName, screensaverGame.gameFilename)
+
+                    if (gameImage != null && gameImage.exists()) {
+                        android.util.Log.d("MainActivity", "Loading current screensaver game image: ${gameImage.name}")
+                        loadImageWithAnimation(gameImage, gameImageView)
+                    } else {
+                        android.util.Log.d("MainActivity", "No game image found, using fallback")
+                        loadFallbackBackground()
+                    }
+
+                    gameImageView.visibility = View.VISIBLE
+                    videoView.visibility = View.GONE
+
+                    // Load and show widgets
+                    loadGameWidgets(screensaverGame.systemName, screensaverGame.gameFilename)
+                    showWidgets()
+                } else {
+                    // No game selected yet - just wait
+                    android.util.Log.d("MainActivity", "No screensaver game yet - display will update on next game-select")
+                }
+
+                releasePlayer()
+            }
+        }
+
+        android.util.Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    }
+
+    /**
      * Handle screensaver end event - return to normal browsing display
      * @param reason The reason for screensaver ending: "cancel", "game-jump", or "game-start"
      */
@@ -3650,9 +3885,12 @@ Access this help anytime from the widget menu!
         if (reason != null) {
             when (reason) {
                 "game-start" -> {
+                    // CRITICAL: Set flag IMMEDIATELY to block FileObserver reloads during transition
+                    isLaunchingFromScreensaver = true
+
                     // User is launching a game from screensaver
                     android.util.Log.d("MainActivity", "Screensaver end - game starting, waiting for game-start event")
-                    isLaunchingFromScreensaver = true
+                    android.util.Log.d("MainActivity", "isLaunchingFromScreensaver flag set - blocking intermediate reloads")
 
                     // Update state - transition to GameBrowsing (waiting for GamePlaying)
                     if (screensaverGame != null) {
@@ -3667,6 +3905,7 @@ Access this help anytime from the widget menu!
                     }
 
                     // The game-start event will handle the display
+                    // Flag will be cleared in handleGameStart()
                 }
                 "game-jump" -> {
                     // User jumped to a different game while in screensaver
@@ -3795,7 +4034,6 @@ Access this help anytime from the widget menu!
                     // Load the screensaver game's artwork
                     val gameImage = findGameImage(
                         screensaverGame.systemName,
-                        gameName,
                         screensaverGame.gameFilename
                     )
 
@@ -4190,8 +4428,12 @@ Access this help anytime from the widget menu!
             // Hide the game image view and marquee so video is visible
             gameImageView.visibility = View.GONE
 
-            // Hide widgets when video plays  // ADDED
-            hideWidgets()  // ADDED
+            // Hide widgets when video plays
+            hideWidgets()
+
+            // ========== MUSIC ==========
+            musicManager?.onVideoStarted()
+            // ===========================
 
             player?.volume?.let {
                 if(it > 0f) {
@@ -4261,6 +4503,10 @@ Access this help anytime from the widget menu!
      * Release video player
      */
     private fun releasePlayer() {
+        // ========== MUSIC ==========
+        musicManager?.onVideoEnded()
+        // ===========================
+
         // Cancel any pending video load
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
 
@@ -5363,20 +5609,6 @@ Access this help anytime from the widget menu!
         android.util.Log.d("MainActivity", "Showing widgets/grid")
     }
 
-    /**
-     * Determine if widgets should be visible based on current state.
-     */
-    private fun shouldShowWidgetsForCurrentState(): Boolean {
-        return when (state) {
-            is AppState.GameBrowsing -> !isVideoPlaying()
-            is AppState.Screensaver -> {
-                val behavior = prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
-                behavior == "game_image"
-            }
-            else -> false
-        }
-    }
-
     fun saveAllWidgets() {
         android.util.Log.d("MainActivity", "saveAllWidgets called, active widgets count: ${activeWidgets.size}")
         activeWidgets.forEachIndexed { index, widgetView ->
@@ -5451,32 +5683,6 @@ Access this help anytime from the widget menu!
         return false
     }
 
-    fun bringWidgetToFront(widgetView: WidgetView) {
-        // Get max z-index
-        val maxZ = activeWidgets.maxOfOrNull { it.widget.zIndex } ?: 0
-
-        // Set this widget to max + 1
-        widgetView.widget.zIndex = maxZ + 1
-
-        // Reorder widgets
-        reorderWidgetsByZIndex()
-
-        android.util.Log.d("MainActivity", "Widget brought to front with z-index ${widgetView.widget.zIndex}")
-    }
-
-    fun sendWidgetToBack(widgetView: WidgetView) {
-        // Get min z-index
-        val minZ = activeWidgets.minOfOrNull { it.widget.zIndex } ?: 0
-
-        // Set this widget to min - 1
-        widgetView.widget.zIndex = minZ - 1
-
-        // Reorder widgets
-        reorderWidgetsByZIndex()
-
-        android.util.Log.d("MainActivity", "Widget sent to back with z-index ${widgetView.widget.zIndex}")
-    }
-
     fun moveWidgetForward(widgetView: WidgetView) {
         // Find the widget with the next higher z-index
         val currentZ = widgetView.widget.zIndex
@@ -5521,10 +5727,17 @@ Access this help anytime from the widget menu!
         // Sort widgets by z-index
         val sortedWidgets = activeWidgets.sortedBy { it.widget.zIndex }
 
-        // Remove all from container
-        widgetContainer.removeAllViews()
+        // Remove only widget views (preserve grid overlay)
+        val childCount = widgetContainer.childCount
+        for (i in childCount - 1 downTo 0) {
+            val child = widgetContainer.getChildAt(i)
+            if (child !is GridOverlayView) {
+                widgetContainer.removeView(child)
+            }
+        }
 
-        // Re-add in sorted order (lower z-index = added first = appears behind)
+        // Re-add widgets in sorted order (lower z-index = added first = appears behind)
+        // Grid overlay was added at index 0, so widgets will be added after it
         sortedWidgets.forEach { widgetView ->
             widgetContainer.addView(widgetView)
         }

@@ -1,5 +1,15 @@
 # 🔄 Changelog
 
+## [0.4.6] - TBC
+- Implement Android Standard gesture controls for Long Press Timeout, Double Tap Timeout and Touch Slop on Long Press
+- Add a method to cancel the long press timer when a widget starts being interacted with
+- Add excludeFromRecents flag to AndroidManifest.xml to hide app from recents menu
+- Fix cache invalidation to apply to widgets
+- Code refactoring:
+  - Implement State Management
+  - Extract MediaFileLocator to eliminate duplicate code
+  - Extract Long Functions Code Cleanup
+
 ## [0.4.5] - 2026-01-19
 - Fixed incorrect default for screensaver image type
 - Removed focus from widgets when using built-in controls
