@@ -10,6 +10,9 @@ class WidgetManager(private val context: Context) {
         context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
 
+    private var pages: List<WidgetPage> = emptyList()
+    private var currentPage: Int = 0
+
     fun saveWidgets(widgets: List<OverlayWidget>) {
         // ========== START: Convert to percentages before saving ==========
         val displayMetrics = context.resources.displayMetrics
@@ -28,8 +31,8 @@ class WidgetManager(private val context: Context) {
 
     fun loadWidgets(): List<OverlayWidget> {
         val json = prefs.getString("widgets", null) ?: return emptyList()
-        val type = object : TypeToken<List<OverlayWidget>>() {}.type
-        val widgets: List<OverlayWidget> = gson.fromJson(json, type)
+        val type = object : TypeToken<WidgetPage>() {}.type
+        pages = gson.fromJson(json, type)
 
         // ========== START: Convert from percentages after loading ==========
         val displayMetrics = context.resources.displayMetrics
@@ -37,12 +40,13 @@ class WidgetManager(private val context: Context) {
         val screenHeight = displayMetrics.heightPixels
 
         // Convert all widgets from percentages to current screen dimensions
-        widgets.forEach { widget ->
-            widget.fromPercentages(screenWidth, screenHeight)
+        pages.forEach { page ->
+            page.widgets.forEach { widget ->
+                widget.fromPercentages(screenWidth, screenHeight)
+            }
         }
         // ========== END: Convert from percentages after loading ==========
-
-        return widgets
+        return pages[currentPage].widgets
     }
 
     fun deleteWidget(widgetId: String) {

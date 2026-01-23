@@ -2,25 +2,22 @@ package com.esde.companion
 
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.drawable.Drawable
 import android.view.View
 import android.view.MotionEvent
-import com.bumptech.glide.request.target.CustomTarget
-import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
-import android.widget.SeekBar
 import android.widget.TextView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import com.bumptech.glide.Glide
-import com.bumptech.glide.request.transition.Transition
 import com.esde.companion.animators.GlintDrawable
-import com.facebook.shimmer.Shimmer
 import com.facebook.shimmer.ShimmerFrameLayout
-import com.google.android.material.button.MaterialButton
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -42,7 +39,7 @@ class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) 
 }
 class WidgetView(
     context: Context,
-    val widget: OverlayWidget,
+    var widget: OverlayWidget,
     private val onDelete: (WidgetView) -> Unit,
     private val onUpdate: (OverlayWidget) -> Unit
 ) : RelativeLayout(context) {
@@ -50,6 +47,14 @@ class WidgetView(
     private val imageView: ImageView
     private var shimmerContainer: ShimmerFrameLayout? = null
     private val textView: android.widget.TextView
+
+    private var player: ExoPlayer? = null
+
+    private val playerView: PlayerView = PlayerView(context).apply {
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        useController = false
+        visibility = View.GONE
+    }
     private val scrollView: AutoScrollOnlyView  // CHANGED
     private val deleteButton: ImageButton
     private val settingsButton: ImageButton
@@ -141,46 +146,8 @@ class WidgetView(
 
         // Add both views (only one will be visible at a time)
         addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
-
-        /*//Add shimmer container if this is a Marquee
-        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
-            val shimmerContainer = ShimmerFrameLayout(context).apply {
-                layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                setBackgroundColor(android.graphics.Color.TRANSPARENT)
-
-                // Configure the White Glint
-                val shimmer = Shimmer.ColorHighlightBuilder()
-                    .setBaseAlpha(1.0f)
-                    .setHighlightAlpha(1.0f)
-                    .setDuration(750)
-                    .setBaseColor(android.graphics.Color.argb(0, 255, 255, 255))
-                    .setHighlightColor(Color.WHITE)  // The glint color
-                    .setRepeatDelay(8000) // Adjust wait time between glints
-                    .setIntensity(0.3f)
-                    .setDropoff(0.9f)
-                    .setTilt(25f)
-                    .setAutoStart(true)
-                    .build()
-                setShimmer(shimmer)
-
-                // Put the ImageView INSIDE the shimmer
-                // Force the image to fill the shimmer container
-                addView(imageView, FrameLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT,
-                    LayoutParams.MATCH_PARENT
-                ))
-            }
-
-            shimmerContainer.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-            shimmerContainer.clipChildren = true
-            // Add the SHIMMER to the RelativeLayout instead of the raw ImageView
-            addView(shimmerContainer)
-        } else {
-
-         */
-            // Standard behavior: Add the ImageView directly
-            addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(playerView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
        // }
 
         // Make sure onDraw (which draws handles) happens after child views
@@ -235,13 +202,13 @@ class WidgetView(
         isFocusableInTouchMode = false
 
         // Load image based on widget data
-        loadWidgetImage()
+        loadWidgetContent()
 
         // Set initial position and size
         updateLayout()
 
         // Apply initial background opacity for Game Description
-        if (widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
             val alpha = (widget.backgroundOpacity * 255).toInt().coerceIn(0, 255)
             scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
             textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -249,6 +216,17 @@ class WidgetView(
             if (alpha == 0) {
                 this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
             }
+        }
+    }
+
+    //added to replace content instead of recreating views:
+    fun updateContent(newWidget: OverlayWidget) {
+        this.widget = newWidget
+        updateLayout()
+        loadWidgetContent()
+
+        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
+            scrollView.scrollTo(0, 0)
         }
     }
 
@@ -426,7 +404,7 @@ class WidgetView(
 
                 // ADDED: Reload image after resize to fit new dimensions
                 if (wasResized) {
-                    loadWidgetImage()
+                    loadWidgetContent()
                 }
 
                 return true
@@ -455,8 +433,8 @@ class WidgetView(
         return false
     }
 
-    private fun loadWidgetImage() {
-        if (widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+    private fun loadWidgetContent() {
+        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
             imageView.visibility = View.GONE
 
             val description = widget.imagePath
@@ -482,11 +460,17 @@ class WidgetView(
 
         // Existing code for image widgets - hide text view, show image view
         scrollView.visibility = View.GONE
+
+        if(widget.contentType == OverlayWidget.ContentType.VIDEO) {
+            loadVideo(widget.imagePath)
+            return
+        }
+
         imageView.visibility = View.VISIBLE
 
         if (widget.imagePath.isEmpty()) {
             // Only show text fallback for MARQUEE type
-            if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+            if (widget.contentType == OverlayWidget.ContentType.MARQUEE) {
                 android.util.Log.d("WidgetView", "Empty marquee image path, showing text fallback")
                 val mainActivity = context as? MainActivity
                 if (mainActivity != null) {
@@ -562,7 +546,7 @@ class WidgetView(
                     OverlayWidget.ScaleType.CROP -> glideRequest.centerCrop()
                 }.into(object : com.bumptech.glide.request.target.CustomTarget<Drawable>() {
                     override fun onResourceReady(resource: Drawable, transition: com.bumptech.glide.request.transition.Transition<in Drawable>?) {
-                        if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                        if (widget.contentType == OverlayWidget.ContentType.MARQUEE) {
                             // Wrap the fresh resource in our GlintDrawable
                             val shiny = GlintDrawable(resource)
                             imageView.setImageDrawable(shiny)
@@ -581,7 +565,7 @@ class WidgetView(
                 android.util.Log.d("WidgetView", "Loaded custom logo file with full scaling: ${widget.imagePath}")
             } else {
                 // Only show text fallback for MARQUEE type
-                if (widget.imageType == OverlayWidget.ImageType.MARQUEE) {
+                if (widget.contentType == OverlayWidget.ContentType.MARQUEE) {
                     android.util.Log.d("WidgetView", "Marquee file doesn't exist: ${widget.imagePath}, showing text fallback")
                     val mainActivity = context as? MainActivity
                     if (mainActivity != null) {
@@ -629,10 +613,27 @@ class WidgetView(
         }, 100)
     }
 
+    private fun loadVideo(videoPath: String) {
+        imageView.visibility = View.GONE
+        playerView.visibility = View.VISIBLE
+
+        if (player == null) {
+            player = ExoPlayer.Builder(context).build().apply {
+                repeatMode = Player.REPEAT_MODE_ALL // Loop the video
+                playWhenReady = true
+            }
+            playerView.player = player
+        }
+
+        val mediaItem = MediaItem.fromUri(videoPath)
+        player?.setMediaItem(mediaItem)
+        player?.prepare()
+    }
+
     private fun extractGameNameFromWidget(): String {
         // Try to extract game name from widget ID or fallback to "Marquee"
         return when {
-            widget.id.isNotEmpty() && widget.id != "widget_${widget.imageType}" -> {
+            widget.id.isNotEmpty() && widget.id != "widget_${widget.contentType}" -> {
                 // Widget ID might contain game name
                 widget.id.replace("widget_", "")
                     .replace("_", " ")
@@ -768,10 +769,10 @@ class WidgetView(
     }
 
     fun setBackgroundOpacity(opacity: Float) {
-        android.util.Log.d("WidgetView", "setBackgroundOpacity called for widget type: ${widget.imageType}, opacity: $opacity")
+        android.util.Log.d("WidgetView", "setBackgroundOpacity called for widget type: ${widget.contentType}, opacity: $opacity")
 
         // Only apply to THIS widget if it's a Game Description
-        if (widget.imageType != OverlayWidget.ImageType.GAME_DESCRIPTION) {
+        if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
             android.util.Log.d("WidgetView", "Not a Game Description widget, ignoring opacity change")
             return
         }
@@ -849,18 +850,19 @@ class WidgetView(
     }
 
     private fun showLayerMenu() {
-        val widgetName = when (widget.imageType) {
-            OverlayWidget.ImageType.MARQUEE -> "Marquee"
-            OverlayWidget.ImageType.BOX_2D -> "2D Box"
-            OverlayWidget.ImageType.BOX_3D -> "3D Box"
-            OverlayWidget.ImageType.MIX_IMAGE -> "Mix Image"
-            OverlayWidget.ImageType.BACK_COVER -> "Back Cover"
-            OverlayWidget.ImageType.PHYSICAL_MEDIA -> "Physical Media"
-            OverlayWidget.ImageType.SCREENSHOT -> "Screenshot"
-            OverlayWidget.ImageType.FANART -> "Fanart"
-            OverlayWidget.ImageType.TITLE_SCREEN -> "Title Screen"
-            OverlayWidget.ImageType.GAME_DESCRIPTION -> "Game Description"
-            OverlayWidget.ImageType.SYSTEM_LOGO -> "System Logo"
+        val widgetName = when (widget.contentType) {
+            OverlayWidget.ContentType.MARQUEE -> "Marquee"
+            OverlayWidget.ContentType.BOX_2D -> "2D Box"
+            OverlayWidget.ContentType.BOX_3D -> "3D Box"
+            OverlayWidget.ContentType.MIX_IMAGE -> "Mix Image"
+            OverlayWidget.ContentType.BACK_COVER -> "Back Cover"
+            OverlayWidget.ContentType.PHYSICAL_MEDIA -> "Physical Media"
+            OverlayWidget.ContentType.SCREENSHOT -> "Screenshot"
+            OverlayWidget.ContentType.FANART -> "Fanart"
+            OverlayWidget.ContentType.TITLE_SCREEN -> "Title Screen"
+            OverlayWidget.ContentType.GAME_DESCRIPTION -> "Game Description"
+            OverlayWidget.ContentType.SYSTEM_LOGO -> "System Logo"
+            OverlayWidget.ContentType.VIDEO -> "Video"
         }
 
         // Inflate the custom dialog view
@@ -893,7 +895,7 @@ class WidgetView(
         dialogWidgetZIndex.text = "Current zIndex: $currentZIndex"
 
         // Show scale type control for all image widgets (NOT for Game Description)
-        if (widget.imageType != OverlayWidget.ImageType.GAME_DESCRIPTION) {
+        if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
             scaleTypeControlSection.visibility = android.view.View.VISIBLE
             scaleTypeDivider.visibility = android.view.View.VISIBLE
 
@@ -915,14 +917,14 @@ class WidgetView(
             btnScaleFit.setOnClickListener {
                 widget.scaleType = OverlayWidget.ScaleType.FIT
                 updateScaleTypeButtons()
-                loadWidgetImage()  // Reload image with new scale type
+                loadWidgetContent()  // Reload image with new scale type
                 onUpdate(widget)   // Save the change
             }
 
             btnScaleCrop.setOnClickListener {
                 widget.scaleType = OverlayWidget.ScaleType.CROP
                 updateScaleTypeButtons()
-                loadWidgetImage()  // Reload image with new scale type
+                loadWidgetContent()  // Reload image with new scale type
                 onUpdate(widget)   // Save the change
             }
         } else {
@@ -931,7 +933,7 @@ class WidgetView(
         }
 
         // Show opacity control only for Game Description
-        if (widget.imageType == OverlayWidget.ImageType.GAME_DESCRIPTION) {
+        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
             opacityControlSection.visibility = android.view.View.VISIBLE
 
             // Set initial opacity value (convert from 0.0-1.0 to 0-20 steps)
@@ -1039,6 +1041,8 @@ class WidgetView(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         stopAutoScroll()
+        player?.release()
+        player = null
     }
 
     fun onDestroy() {

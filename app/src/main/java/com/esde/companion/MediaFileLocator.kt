@@ -58,22 +58,22 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
      * @return The image file if found, null otherwise
      */
     fun findMediaFile(
-        type: OverlayWidget.ImageType,
+        type: OverlayWidget.ContentType,
         systemName: String,
         gameFilename: String
     ): File? {
         val folderName = when (type) {
-            OverlayWidget.ImageType.MARQUEE -> "marquees"
-            OverlayWidget.ImageType.BOX_2D -> "covers"
-            OverlayWidget.ImageType.BOX_3D -> "3dboxes"
-            OverlayWidget.ImageType.MIX_IMAGE -> "miximages"
-            OverlayWidget.ImageType.BACK_COVER -> "backcovers"
-            OverlayWidget.ImageType.PHYSICAL_MEDIA -> "physicalmedia"
-            OverlayWidget.ImageType.SCREENSHOT -> "screenshots"
-            OverlayWidget.ImageType.FANART -> "fanart"
-            OverlayWidget.ImageType.TITLE_SCREEN -> "titlescreens"
-            OverlayWidget.ImageType.GAME_DESCRIPTION -> return null // Text-based, no file
-            OverlayWidget.ImageType.SYSTEM_LOGO -> return null // Handled separately
+            OverlayWidget.ContentType.MARQUEE -> "marquees"
+            OverlayWidget.ContentType.BOX_2D -> "covers"
+            OverlayWidget.ContentType.BOX_3D -> "3dboxes"
+            OverlayWidget.ContentType.MIX_IMAGE -> "miximages"
+            OverlayWidget.ContentType.BACK_COVER -> "backcovers"
+            OverlayWidget.ContentType.PHYSICAL_MEDIA -> "physicalmedia"
+            OverlayWidget.ContentType.SCREENSHOT -> "screenshots"
+            OverlayWidget.ContentType.FANART -> "fanart"
+            OverlayWidget.ContentType.TITLE_SCREEN -> "titlescreens"
+            OverlayWidget.ContentType.GAME_DESCRIPTION -> return null // Text-based, no file
+            OverlayWidget.ContentType.SYSTEM_LOGO -> return null // Handled separately
         }
         
         val gameName = sanitizeFilename(gameFilename).substringBeforeLast('.')

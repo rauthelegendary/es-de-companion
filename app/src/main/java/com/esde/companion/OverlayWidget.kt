@@ -1,11 +1,10 @@
 package com.esde.companion
 
-import android.graphics.Bitmap
 import java.util.UUID
 
 data class OverlayWidget(
     val id: String = UUID.randomUUID().toString(),
-    val imageType: ImageType,
+    val contentType: ContentType,
     val imagePath: String,
     var x: Float,
     var y: Float,
@@ -21,7 +20,7 @@ data class OverlayWidget(
     var widthPercent: Float? = null,
     var heightPercent: Float? = null
 ) {
-    enum class ImageType {
+    enum class ContentType {
         MARQUEE,
         BOX_2D,
         BOX_3D,
@@ -32,7 +31,8 @@ data class OverlayWidget(
         FANART,
         TITLE_SCREEN,
         SYSTEM_LOGO,
-        GAME_DESCRIPTION
+        GAME_DESCRIPTION,
+        VIDEO
     }
 
     enum class WidgetContext {
