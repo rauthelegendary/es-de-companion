@@ -1,9 +1,7 @@
 package com.esde.companion
 
-import android.content.Context
 import android.content.SharedPreferences
 import android.util.DisplayMetrics
-import android.util.Log
 import java.io.File
 
 class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private val prefs: SharedPreferences) {
@@ -31,11 +29,13 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
             if(rawWidget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION && gameFilename != null) {
                 resolvedWidget.description = getGameDescription(system, gameFilename)!!
             } else if (rawWidget.contentType == OverlayWidget.ContentType.SYSTEM_LOGO) {
-                resolvedWidget.imagePath = findSystemLogo(system) ?: ""
+                resolvedWidget.contentPath = findSystemLogo(system) ?: ""
             } else if(gameFilename != null){
-                val mediaFile = mediaLocator.findMediaFile(rawWidget.contentType, system, gameFilename)
-                if (mediaFile != null) {
-                    resolvedWidget.imagePath = mediaFile.absolutePath
+                val mediaFile = mediaLocator.findMediaFile(rawWidget.contentType, system, gameFilename, rawWidget.slot)
+                if(mediaFile != null) {
+                    resolvedWidget.contentPath = mediaFile.absolutePath
+                } else {
+                    resolvedWidget.contentPath = ""
                 }
             }
         }
@@ -50,7 +50,7 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
                 ?: return null
 
             // Get ES-DE root folder (parent of scripts folder)
-            val scriptsDir: File = File(scriptsPath)
+            val scriptsDir = File(scriptsPath)
             val esdeRoot = scriptsDir.parentFile ?: return null
 
             // Build path to gamelist.xml: ~/ES-DE/gamelists/<systemname>/gamelist.xml

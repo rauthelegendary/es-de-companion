@@ -5,7 +5,7 @@ import java.util.UUID
 data class OverlayWidget(
     val id: String = UUID.randomUUID().toString(),
     val contentType: ContentType,
-    var imagePath: String,
+    var contentPath: String,
     var description: String,
     var x: Float,
     var y: Float,
@@ -14,13 +14,16 @@ data class OverlayWidget(
     var zIndex: Int = 0,
     var backgroundOpacity: Float = 0.2f,
     var scaleType: ScaleType = ScaleType.FIT,
-    val widgetContext: WidgetContext = WidgetContext.GAME,  // ← ADD COMMA HERE
-    // Store positions and sizes as percentages for cross-resolution support
+    val widgetContext: WidgetContext = WidgetContext.GAME,
     var xPercent: Float? = null,
     var yPercent: Float? = null,
     var widthPercent: Float? = null,
-    var heightPercent: Float? = null
+    var heightPercent: Float? = null,
+    var slotIndex: Int = 0,
+    var playAudio: Boolean = true
 ) {
+    val slot: MediaSlot get() = MediaSlot.fromInt(slotIndex)
+
     enum class ContentType {
         MARQUEE,
         BOX_2D,
@@ -33,7 +36,14 @@ data class OverlayWidget(
         TITLE_SCREEN,
         SYSTEM_LOGO,
         GAME_DESCRIPTION,
-        VIDEO
+        VIDEO;
+
+        fun toDisplayName(): String = when(this) {
+            ContentType.BOX_2D -> "2D Boxart"
+            ContentType.BOX_3D -> "3D Boxart"
+            ContentType.SYSTEM_LOGO -> "Logo"
+            else -> this.name.replace("_", " ").lowercase().capitalize()
+        }
     }
 
     enum class WidgetContext {
@@ -66,6 +76,22 @@ data class OverlayWidget(
             y = (yPercent!! / 100f) * screenHeight
             width = (widthPercent!! / 100f) * screenWidth
             height = (heightPercent!! / 100f) * screenHeight
+        }
+    }
+
+    //this is just a wrapper for the slotIndex value. Assuming 0 is default everywhere in the code is ugly and prone to breaking if the logic ever changes, so we use this to define what default or alternative means
+    sealed class MediaSlot(val index: Int) {
+        object Default : MediaSlot(0)
+        data class Alternative(val id: Int) : MediaSlot(id)
+
+        val suffix: String get() = when(this) {
+            is Default -> ""
+            is Alternative -> "_alt$id"
+        }
+
+        companion object {
+            fun fromInt(index: Int): MediaSlot =
+                if (index <= 0) Default else Alternative(index)
         }
     }
 }

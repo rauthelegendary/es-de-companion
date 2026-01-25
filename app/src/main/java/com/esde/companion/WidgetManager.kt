@@ -1,7 +1,6 @@
 package com.esde.companion
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.util.DisplayMetrics
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -101,7 +100,7 @@ class WidgetManager(private val context: Context) {
         val centerY = displayMetrics.heightPixels / 2f
         val newWidget = OverlayWidget(
             contentType = type,
-            imagePath = "",
+            contentPath = "",
             description = "",
             x = centerX,
             y = centerY,
@@ -131,7 +130,7 @@ class WidgetManager(private val context: Context) {
         val systemLogoWidget = OverlayWidget(
             contentType = OverlayWidget.ContentType.SYSTEM_LOGO,
             description = "",
-            imagePath = "",  // Will be updated when system loads
+            contentPath = "",  // Will be updated when system loads
             x = centerX - (systemLogoWidth / 2),
             y = centerY - (systemLogoHeight / 2),
             width = systemLogoWidth,
@@ -144,7 +143,7 @@ class WidgetManager(private val context: Context) {
         val gameMarqueeWidget = OverlayWidget(
             contentType = OverlayWidget.ContentType.MARQUEE,
             description = "",
-            imagePath = "",  // Will be updated when game loads
+            contentPath = "",  // Will be updated when game loads
             x = centerX - (gameMarqueeWidth / 2),
             y = centerY - (gameMarqueeHeight / 2),
             width = gameMarqueeWidth,

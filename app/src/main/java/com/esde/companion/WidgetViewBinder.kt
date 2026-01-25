@@ -3,7 +3,6 @@ package com.esde.companion
 import android.graphics.Rect
 import android.view.View
 import androidx.core.view.children
-import kotlin.collections.forEach
 
 class WidgetViewBinder {
 
@@ -19,12 +18,11 @@ class WidgetViewBinder {
         gridSize: Float,
         pageSwap: Boolean,
         onUpdate: (OverlayWidget) -> Unit,
-        onDelete: (WidgetView) -> Unit,
         onSelect: (WidgetView) -> Unit = { selectedView: WidgetView ->
                 deselectAll(container)
                 selectedView.isWidgetSelected = true
         },
-        onReorder: (WidgetView, Boolean) -> Unit
+        onEditRequested: (OverlayWidget) -> Unit
     ) {
         val existingViews = container.children.filterIsInstance<WidgetView>().toList()
 
@@ -41,7 +39,7 @@ class WidgetViewBinder {
             var view = existingViews.find { it.widget.id == data.id }
 
             if (view == null) {
-                view = WidgetView(container.context, data, onDelete, onUpdate, onSelect, onReorder)
+                view = WidgetView(container.context, data, onUpdate, onSelect, onEditRequested)
                 container.addView(view)
             }
 
@@ -52,7 +50,7 @@ class WidgetViewBinder {
             // Only trigger updateContent if it's a page swap OR the data changed
             // Passing isFullPageSwap down tells the view whether to force-reload media
             if (pageSwap || view.widget != data) {
-                view.updateContent(data, pageSwap)
+                view.updateContent(data)
             }
 
             // Keep Z-order in sync with the list order

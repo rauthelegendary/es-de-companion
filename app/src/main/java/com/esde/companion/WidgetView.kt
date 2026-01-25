@@ -3,21 +3,20 @@ package com.esde.companion
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.drawable.Drawable
-import android.view.View
 import android.view.MotionEvent
+import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
-import android.widget.TextView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import com.bumptech.glide.Glide
+import coil.dispose
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.esde.companion.animators.GlintDrawable
-import com.facebook.shimmer.ShimmerFrameLayout
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -40,10 +39,9 @@ class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) 
 class WidgetView(
     context: Context,
     var widget: OverlayWidget,
-    private val onDelete: (WidgetView) -> Unit,
     private val onUpdate: (OverlayWidget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
-    private val onReorder: (WidgetView, Boolean) -> Unit
+    private val onEditRequested: (OverlayWidget) -> Unit
 ) : RelativeLayout(context) {
 
     private val imageView: ImageView
@@ -56,8 +54,7 @@ class WidgetView(
         useController = false
         visibility = View.GONE
     }
-    private val scrollView: AutoScrollOnlyView  // CHANGED
-    private val deleteButton: ImageButton
+    private val scrollView: AutoScrollOnlyView
     private val settingsButton: ImageButton
 
     private val borderPaint = Paint().apply {
@@ -154,18 +151,20 @@ class WidgetView(
         // Make sure onDraw (which draws handles) happens after child views
         setWillNotDraw(false)
 
-        val buttonSize = (handleSize * 1.2f).toInt()
-        val buttonSpacing = 10  // Space between buttons
+        val buttonSize = (handleSize * 2f).toInt()
 
         // Create a container for the buttons at the top center
         val buttonContainer = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER
+            isClickable = false
+            isFocusable = false
         }
         val containerParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
         containerParams.addRule(ALIGN_PARENT_TOP)
         containerParams.addRule(CENTER_HORIZONTAL)
         containerParams.topMargin = 0
+
 
         // Create settings button (cog icon)
         settingsButton = ImageButton(context).apply {
@@ -173,29 +172,14 @@ class WidgetView(
             setBackgroundColor(0xFF2196F3.toInt())  // Blue background
             visibility = GONE
             setOnClickListener {
-                showLayerMenu()
+                onEditRequested.invoke(this@WidgetView.widget)
             }
         }
         val settingsButtonParams = LinearLayout.LayoutParams(buttonSize, buttonSize)
-        settingsButtonParams.rightMargin = buttonSpacing / 2
         buttonContainer.addView(settingsButton, settingsButtonParams)
-
-        // Create delete button (trash icon)
-        deleteButton = ImageButton(context).apply {
-            setImageResource(android.R.drawable.ic_menu_delete)
-            setBackgroundColor(0xFFFF5252.toInt())  // Red background
-            visibility = GONE
-            setOnClickListener {
-                showDeleteDialog()
-            }
-        }
-        val deleteButtonParams = LinearLayout.LayoutParams(buttonSize, buttonSize)
-        deleteButtonParams.leftMargin = buttonSpacing / 2
-        buttonContainer.addView(deleteButton, deleteButtonParams)
+        settingsButton.bringToFront()
 
         addView(buttonContainer, containerParams)
-
-        android.util.Log.d("WidgetView", "Settings and delete buttons created in container")
 
         // Make this view clickable but not focusable (touch-only, no D-pad focus border)
         isClickable = true
@@ -221,16 +205,10 @@ class WidgetView(
     }
 
     //added to replace content instead of recreating views:
-    fun updateContent(newWidget: OverlayWidget, pageSwap: Boolean) {
-        val oldPath = widget.imagePath
-        val oldType = widget.contentType
+    fun updateContent(newWidget: OverlayWidget) {
         this.widget = newWidget
         updateLayout()
-
-        //don't reload resource heavy content like image/video if there's no change, unless we're doing a page swap
-        if(pageSwap || widget.contentType != oldType || widget.imagePath != oldPath || widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
-            loadWidgetContent()
-        }
+        loadWidgetContent()
 
         if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
             scrollView.scrollTo(0, 0)
@@ -376,13 +354,13 @@ class WidgetView(
                     if (isWidgetSelected) {
                         // Already selected - deselect this one
                         isWidgetSelected = false
-                        updateDeleteButtonVisibility()
+                        updateButtonVisibility()
                         invalidate()
                     } else {
                         // Not selected - deselect all others first, then select this one
                         onSelect(this)
                         isWidgetSelected = true
-                        updateDeleteButtonVisibility()
+                        updateButtonVisibility()
                         invalidate()
                     }
                 }
@@ -433,184 +411,111 @@ class WidgetView(
         return false
     }
 
-    private fun loadWidgetContent() {
+   private fun loadWidgetContent() {
+        val isMarquee = widget.contentType == OverlayWidget.ContentType.MARQUEE
+
+        // 1. Handle Game Description (Text)
         if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
-            imageView.visibility = View.GONE
-
-            val description = widget.description
-            if (description.isNotEmpty()) {
-                // Show scrollView with background when there's text
-                scrollView.visibility = View.VISIBLE
-                textView.text = description
-                textView.setBackgroundColor(android.graphics.Color.parseColor("#4D000000"))  // Show background
-                android.util.Log.d("WidgetView", "Game description loaded: ${description.take(100)}...")
-
-                // Start auto-scrolling after a short delay
-                postDelayed({
-                    startAutoScroll()
-                }, 2000)
-            } else {
-                // Hide scrollView completely when there's no text
-                scrollView.visibility = View.GONE
-                textView.text = ""
-                android.util.Log.d("WidgetView", "No description available - hiding widget")
-            }
+            handleDescriptionWidget()
             return
         }
 
-        // Existing code for image widgets - hide text view, show image view
+        // 2. Handle Video
+        if (widget.contentType == OverlayWidget.ContentType.VIDEO) {
+            imageView.visibility = View.GONE
+            scrollView.visibility = View.GONE
+            loadVideo(widget.contentPath)
+            return
+        }
+
+        // 3. Setup ImageView Basics
+        imageView.visibility = View.VISIBLE
         scrollView.visibility = View.GONE
 
-        if(widget.contentType == OverlayWidget.ContentType.VIDEO) {
-            loadVideo(widget.imagePath)
-            return
+        // Set scale type once for all image types
+        imageView.scaleType = when (widget.scaleType ?: OverlayWidget.ScaleType.FIT) {
+            OverlayWidget.ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
+            OverlayWidget.ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
         }
 
-        imageView.visibility = View.VISIBLE
+        // 4. Determine Data Source
+        val path = widget.contentPath
+        val mainActivity = context as? MainActivity
 
-        if (widget.imagePath.isEmpty()) {
-            // Only show text fallback for MARQUEE type
-            if (widget.contentType == OverlayWidget.ContentType.MARQUEE) {
-                android.util.Log.d("WidgetView", "Empty marquee image path, showing text fallback")
-                val mainActivity = context as? MainActivity
-                if (mainActivity != null) {
-                    val displayText = extractGameNameFromWidget()
-                    val fallbackDrawable = mainActivity.createMarqueeTextFallback(
-                        gameName = displayText,
-                        width = widget.width.toInt(),
-                        height = widget.height.toInt()
+        when {
+            //path is empty or file missing, handle fallback or clear
+            path.isEmpty() || (path.startsWith("/") && !File(path).exists()) -> {
+                if (isMarquee && mainActivity != null) {
+                    val fallback = mainActivity.createMarqueeTextFallback(
+                        extractGameNameFromWidget(), widget.width.toInt(), widget.height.toInt()
                     )
-                    imageView.scaleType = ImageView.ScaleType.FIT_CENTER
-                    imageView.setImageDrawable(fallbackDrawable)
-                    android.util.Log.d("WidgetView", "Marquee text fallback displayed: $displayText")
+                    imageView.setImageDrawable(fallback)
                 } else {
-                    Glide.with(context).clear(imageView)
+                    imageView.dispose()
                     imageView.setImageDrawable(null)
                 }
-            } else {
-                // For non-marquee types, just clear the image
-                android.util.Log.d("WidgetView", "Empty image path for non-marquee, clearing image")
-                Glide.with(context).clear(imageView)
-                imageView.setImageDrawable(null)
             }
-            return
-        }
-
-        if (widget.imagePath.startsWith("builtin://")) {
-            // Load built-in system logo from assets
-            val systemName = widget.imagePath.removePrefix("builtin://")
-            android.util.Log.d("WidgetView", "Loading built-in system logo for: $systemName")
-
-            val mainActivity = context as? MainActivity
-            if (mainActivity != null) {
-                // Pass widget dimensions to properly scale SVG
-                val drawable = mainActivity.loadSystemLogoFromAssets(
-                    systemName,
-                    widget.width.toInt(),
-                    widget.height.toInt()
+            //using built in source
+            path.startsWith("builtin://") -> {
+                val systemName = path.removePrefix("builtin://")
+                val drawable = mainActivity?.loadSystemLogoFromAssets(
+                    systemName, widget.width.toInt(), widget.height.toInt()
                 )
-                if (drawable != null) {
-                    // Set scale type based on widget preference (handle null for migration)
-                    imageView.scaleType = when (widget.scaleType ?: OverlayWidget.ScaleType.FIT) {
-                        OverlayWidget.ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
-                        OverlayWidget.ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
-                    }
-                    imageView.setImageDrawable(drawable)
-                    android.util.Log.d("WidgetView", "Built-in system logo loaded successfully")
-                } else {
-                    android.util.Log.e("WidgetView", "Failed to load built-in system logo")
-                    imageView.setImageDrawable(null)
-                }
+                imageView.setImageDrawable(drawable)
             }
-        } else {
-            // Load from file (custom logo path)
-            val file = File(widget.imagePath)
-            if (file.exists()) {
-                // Set scale type based on widget preference (handle null for migration)
-                val effectiveScaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT
-                imageView.scaleType = when (effectiveScaleType) {
-                    OverlayWidget.ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
-                    OverlayWidget.ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
-                }
-
-                // Load image with cache invalidation signature
-                val glideRequest = Glide.with(context)
-                    .asDrawable()
-                    .load(file)
-                    .signature(com.bumptech.glide.signature.ObjectKey("${file.lastModified()}_${file.length()}"))
-                    .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.ALL)
-                    .override(widget.width.toInt(), widget.height.toInt())
-
-                when (effectiveScaleType) {
-                    OverlayWidget.ScaleType.FIT -> glideRequest.fitCenter()
-                    OverlayWidget.ScaleType.CROP -> glideRequest.centerCrop()
-                }.into(object : com.bumptech.glide.request.target.CustomTarget<Drawable>() {
-                    override fun onResourceReady(resource: Drawable, transition: com.bumptech.glide.request.transition.Transition<in Drawable>?) {
-                        if (widget.contentType == OverlayWidget.ContentType.MARQUEE) {
-                            // Wrap the fresh resource in our GlintDrawable
-                            val shiny = GlintDrawable(resource)
-                            imageView.setImageDrawable(shiny)
-                            shiny.start() // Start the animation
-                        } else {
-                            imageView.setImageDrawable(resource)
-                        }
-                    }
-
-                    override fun onLoadCleared(placeholder: Drawable?) {
-                        // Stop animation and clear to avoid memory leaks
-                        (imageView.drawable as? GlintDrawable)?.stop()
-                        imageView.setImageDrawable(null)
-                    }
-                })
-                android.util.Log.d("WidgetView", "Loaded custom logo file with full scaling: ${widget.imagePath}")
-            } else {
-                // Only show text fallback for MARQUEE type
-                if (widget.contentType == OverlayWidget.ContentType.MARQUEE) {
-                    android.util.Log.d("WidgetView", "Marquee file doesn't exist: ${widget.imagePath}, showing text fallback")
-                    val mainActivity = context as? MainActivity
-                    if (mainActivity != null) {
-                        val displayText = extractGameNameFromWidget()
-                        val fallbackDrawable = mainActivity.createMarqueeTextFallback(
-                            gameName = displayText,
-                            width = widget.width.toInt(),
-                            height = widget.height.toInt()
-                        )
-                        // Set scale type based on widget preference (handle null for migration)
-                        imageView.scaleType = when (widget.scaleType ?: OverlayWidget.ScaleType.FIT) {
-                            OverlayWidget.ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
-                            OverlayWidget.ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
-                        }
-                        imageView.setImageDrawable(fallbackDrawable)
-                        android.util.Log.d("WidgetView", "Marquee text fallback displayed for missing file: $displayText")
-                    } else {
-                        Glide.with(context).clear(imageView)
-                        imageView.setImageDrawable(null)
-                    }
-                } else {
-                    // For non-marquee types, just clear the image
-                    android.util.Log.d("WidgetView", "Logo file doesn't exist: ${widget.imagePath}, clearing image")
-                    Glide.with(context).clear(imageView)
-                    imageView.setImageDrawable(null)
-                }
+            //normal case
+            else -> {
+                loadImage(File(path), isMarquee)
             }
         }
+    }
 
-        // At the very end of loadWidgetImage() method
-        postDelayed({
-            android.util.Log.d("WidgetView", "═══ DIAGNOSTIC INFO ═══")
-            android.util.Log.d("WidgetView", "Widget container: ${width}x${height}")
-            android.util.Log.d("WidgetView", "Widget data size: ${widget.width}x${widget.height}")
-            android.util.Log.d("WidgetView", "ImageView size: ${imageView.width}x${imageView.height}")
-            android.util.Log.d("WidgetView", "ImageView scaleType: ${imageView.scaleType}")
-            android.util.Log.d("WidgetView", "ImageView layoutParams: ${imageView.layoutParams.width}x${imageView.layoutParams.height}")
+    private fun loadImage(file: File, isMarquee: Boolean) {
+        val request = ImageRequest.Builder(context)
+            .data(file)
+            .memoryCacheKey("${file.absolutePath}_${file.lastModified()}")
+            .size(widget.width.toInt(), widget.height.toInt())
+            // Only disable hardware if we are applying the Glint animation
+            .allowHardware(!isMarquee)
+            .target(
+                onStart = { placeholder ->
+                    (imageView.drawable as? GlintDrawable)?.stop()
+                    imageView.setImageDrawable(placeholder)
+                },
+                onSuccess = { result ->
+                    if (isMarquee) {
+                        val shiny = GlintDrawable(result)
+                        imageView.setImageDrawable(shiny)
+                        shiny.start()
+                    } else {
+                        imageView.setImageDrawable(result)
+                    }
+                },
+                onError = { error ->
+                    imageView.setImageDrawable(error)
+                }
+            )
+            .build()
 
-            val drawable = imageView.drawable
-            if (drawable != null) {
-                android.util.Log.d("WidgetView", "Drawable intrinsic: ${drawable.intrinsicWidth}x${drawable.intrinsicHeight}")
-                android.util.Log.d("WidgetView", "Drawable bounds: ${drawable.bounds}")
-            }
-            android.util.Log.d("WidgetView", "═══ END DIAGNOSTIC ═══")
-        }, 100)
+        context.imageLoader.enqueue(request)
+    }
+
+    /**
+     * Handles the logic for the Description type widget
+     */
+    private fun handleDescriptionWidget() {
+        imageView.visibility = View.GONE
+        val description = widget.description
+
+        if (description.isNotEmpty()) {
+            scrollView.visibility = View.VISIBLE
+            textView.text = description
+            textView.setBackgroundColor(android.graphics.Color.parseColor("#4D000000"))
+            postDelayed({ startAutoScroll() }, 2000)
+        } else {
+            scrollView.visibility = View.GONE
+            textView.text = ""
+        }
     }
 
     private fun loadVideo(videoPath: String) {
@@ -759,44 +664,6 @@ class WidgetView(
         return snappedCenterY + snappedDistance
     }
 
-    fun setLocked(locked: Boolean) {
-        isLocked = locked
-        if (locked) {
-            isWidgetSelected = false
-            updateDeleteButtonVisibility()
-        }
-        invalidate()
-    }
-
-    fun setBackgroundOpacity(opacity: Float) {
-        android.util.Log.d("WidgetView", "setBackgroundOpacity called for widget type: ${widget.contentType}, opacity: $opacity")
-
-        // Only apply to THIS widget if it's a Game Description
-        if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
-            android.util.Log.d("WidgetView", "Not a Game Description widget, ignoring opacity change")
-            return
-        }
-
-        widget.backgroundOpacity = opacity
-
-        // Apply opacity to the text background
-        val alpha = (opacity * 255).toInt().coerceIn(0, 255)
-
-        // Set background on scrollView
-        scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
-        textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-
-        // Also set the parent container background if needed
-        if (alpha == 0) {
-            // At 0%, make the container transparent (but only for this specific widget view)
-            this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-        }
-
-        android.util.Log.d("WidgetView", "About to save all widgets")
-
-        onUpdate(this.widget)
-    }
-
     private fun snapToGridValue(value: Float): Float {
         return (value / gridSize).roundToInt() * gridSize
     }
@@ -814,178 +681,218 @@ class WidgetView(
         }
     }
 
-    fun deselect() {
-        isWidgetSelected = false
-        updateDeleteButtonVisibility()
+    fun setLocked(locked: Boolean) {
+        isLocked = locked
+        if (locked) {
+            isWidgetSelected = false
+        }
         invalidate()
     }
 
-    private fun updateDeleteButtonVisibility() {
+    fun deselect() {
+        isWidgetSelected = false
+        updateButtonVisibility()
+        invalidate()
+    }
+
+    private fun updateButtonVisibility() {
         val shouldShow = isWidgetSelected && !isLocked
         android.util.Log.d("WidgetView", "updateDeleteButtonVisibility: shouldShow=$shouldShow, isWidgetSelected=$isWidgetSelected, isLocked=$isLocked")
-
-        deleteButton.visibility = if (shouldShow) VISIBLE else GONE
         settingsButton.visibility = if (shouldShow) VISIBLE else GONE
-
-        android.util.Log.d("WidgetView", "Delete button visibility: ${deleteButton.visibility}, Settings button visibility: ${settingsButton.visibility}")
     }
 
-    private fun showDeleteDialog() {
-        android.app.AlertDialog.Builder(context)
-            .setTitle("Delete Widget")
-            .setMessage("Remove this overlay widget?")
-            .setPositiveButton("Delete") { _, _ ->
-                onDelete(this)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
+    /**
+     *
+     *  fun setBackgroundOpacity(opacity: Float) {
+     *         android.util.Log.d("WidgetView", "setBackgroundOpacity called for widget type: ${widget.contentType}, opacity: $opacity")
+     *
+     *         // Only apply to THIS widget if it's a Game Description
+     *         if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
+     *             android.util.Log.d("WidgetView", "Not a Game Description widget, ignoring opacity change")
+     *             return
+     *         }
+     *
+     *         widget.backgroundOpacity = opacity
+     *
+     *         // Apply opacity to the text background
+     *         val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+     *
+     *         // Set background on scrollView
+     *         scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
+     *         textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+     *
+     *         // Also set the parent container background if needed
+     *         if (alpha == 0) {
+     *             // At 0%, make the container transparent (but only for this specific widget view)
+     *             this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+     *         }
+     *
+     *         android.util.Log.d("WidgetView", "About to save all widgets")
+     *
+     *         onUpdate(this.widget)
+     *     }
+     *
 
-    private fun showLayerMenu() {
-        val widgetName = when (widget.contentType) {
-            OverlayWidget.ContentType.MARQUEE -> "Marquee"
-            OverlayWidget.ContentType.BOX_2D -> "2D Box"
-            OverlayWidget.ContentType.BOX_3D -> "3D Box"
-            OverlayWidget.ContentType.MIX_IMAGE -> "Mix Image"
-            OverlayWidget.ContentType.BACK_COVER -> "Back Cover"
-            OverlayWidget.ContentType.PHYSICAL_MEDIA -> "Physical Media"
-            OverlayWidget.ContentType.SCREENSHOT -> "Screenshot"
-            OverlayWidget.ContentType.FANART -> "Fanart"
-            OverlayWidget.ContentType.TITLE_SCREEN -> "Title Screen"
-            OverlayWidget.ContentType.GAME_DESCRIPTION -> "Game Description"
-            OverlayWidget.ContentType.SYSTEM_LOGO -> "System Logo"
-            OverlayWidget.ContentType.VIDEO -> "Video"
-        }
-
-        // Inflate the custom dialog view
-        val dialogView = android.view.LayoutInflater.from(context)
-            .inflate(R.layout.dialog_widget_settings, null)
-
-        // Get references to views
-        val dialogWidgetName = dialogView.findViewById<TextView>(R.id.dialogWidgetName)
-        val dialogWidgetZIndex = dialogView.findViewById<TextView>(R.id.dialogWidgetZIndex)
-        val btnMoveForward = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnMoveForward)
-        val btnMoveBackward = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnMoveBackward)
-        val btnDeleteWidget = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnDeleteWidget)
-
-        // Get opacity control references
-        val opacityControlSection = dialogView.findViewById<LinearLayout>(R.id.opacityControlSection)
-        val opacitySeekBar = dialogView.findViewById<android.widget.SeekBar>(R.id.opacitySeekBar)
-        val opacityText = dialogView.findViewById<TextView>(R.id.opacityText)
-
-        // Scale type control references
-        val scaleTypeControlSection = dialogView.findViewById<LinearLayout>(R.id.scaleTypeControlSection)
-        val scaleTypeDivider = dialogView.findViewById<android.view.View>(R.id.scaleTypeDivider)
-        val btnScaleFit = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnScaleFit)
-        val btnScaleCrop = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnScaleCrop)
-
-        // Set widget name (without zIndex)
-        dialogWidgetName.text = widgetName
-
-        // Set zIndex info below Layer Controls
-        val currentZIndex = widget.zIndex
-        dialogWidgetZIndex.text = "Current zIndex: $currentZIndex"
-
-        // Show scale type control for all image widgets (NOT for Game Description)
-        if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
-            scaleTypeControlSection.visibility = android.view.View.VISIBLE
-            scaleTypeDivider.visibility = android.view.View.VISIBLE
-
-            // Update button styles based on current scale type (handle null for migration)
-            fun updateScaleTypeButtons() {
-                val currentScaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT
-                if (currentScaleType == OverlayWidget.ScaleType.FIT) {
-                    btnScaleFit.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF03DAC6.toInt())
-                    btnScaleCrop.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF666666.toInt())
-                } else {
-                    btnScaleFit.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF666666.toInt())
-                    btnScaleCrop.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF03DAC6.toInt())
-                }
-            }
-
-            updateScaleTypeButtons()
-
-            // Scale type button listeners
-            btnScaleFit.setOnClickListener {
-                widget.scaleType = OverlayWidget.ScaleType.FIT
-                updateScaleTypeButtons()
-                loadWidgetContent()  // Reload image with new scale type
-                onUpdate(widget)   // Save the change
-            }
-
-            btnScaleCrop.setOnClickListener {
-                widget.scaleType = OverlayWidget.ScaleType.CROP
-                updateScaleTypeButtons()
-                loadWidgetContent()  // Reload image with new scale type
-                onUpdate(widget)   // Save the change
-            }
-        } else {
-            scaleTypeControlSection.visibility = android.view.View.GONE
-            scaleTypeDivider.visibility = android.view.View.GONE
-        }
-
-        // Show opacity control only for Game Description
-        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
-            opacityControlSection.visibility = android.view.View.VISIBLE
-
-            // Set initial opacity value (convert from 0.0-1.0 to 0-20 steps)
-            val currentStep = (widget.backgroundOpacity * 20).toInt()
-            opacitySeekBar.progress = currentStep
-            val currentOpacity = currentStep * 5
-            opacityText.text = "$currentOpacity%"
-
-            // Opacity slider listener (5% increments)
-            opacitySeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
-                    val opacityPercent = progress * 5  // Convert step to percentage
-                    opacityText.text = "$opacityPercent%"
-                    val opacity = progress / 20f  // Convert step to 0.0-1.0 range
-                    setBackgroundOpacity(opacity)
-                }
-
-                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
-                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
-            })
-        } else {
-            opacityControlSection.visibility = android.view.View.GONE
-        }
-
-        // Create the dialog
-        val dialog = android.app.AlertDialog.Builder(context)
-            .setView(dialogView)
-            .setCancelable(true)
-            .create()
-
-        // Button click listeners
-        btnMoveForward.setOnClickListener {
-            moveWidgetForward()
-            dialog.dismiss()
-            // Reopen the dialog after a short delay to show updated zIndex
-            postDelayed({ showLayerMenu() }, 100)
-        }
-
-        btnMoveBackward.setOnClickListener {
-            moveWidgetBackward()
-            dialog.dismiss()
-            // Reopen the dialog after a short delay to show updated zIndex
-            postDelayed({ showLayerMenu() }, 100)
-        }
-
-        btnDeleteWidget.setOnClickListener {
-            dialog.dismiss()
-            showDeleteDialog()
-        }
-
-        dialog.show()
-    }
-
-    private fun moveWidgetForward() {  // CHANGED name
-        onReorder(this, true)
-    }
-
-    private fun moveWidgetBackward() {  // CHANGED name
-        onReorder(this, false)
-    }
+     *
+     *     private fun showDeleteDialog() {
+     *         android.app.AlertDialog.Builder(context)
+     *             .setTitle("Delete Widget")
+     *             .setMessage("Remove this overlay widget?")
+     *             .setPositiveButton("Delete") { _, _ ->
+     *                 onDelete(this)
+     *             }
+     *             .setNegativeButton("Cancel", null)
+     *             .show()
+     *     }
+     *
+     *     private fun showLayerMenu() {
+     *         val widgetName = when (widget.contentType) {
+     *             OverlayWidget.ContentType.MARQUEE -> "Marquee"
+     *             OverlayWidget.ContentType.BOX_2D -> "2D Box"
+     *             OverlayWidget.ContentType.BOX_3D -> "3D Box"
+     *             OverlayWidget.ContentType.MIX_IMAGE -> "Mix Image"
+     *             OverlayWidget.ContentType.BACK_COVER -> "Back Cover"
+     *             OverlayWidget.ContentType.PHYSICAL_MEDIA -> "Physical Media"
+     *             OverlayWidget.ContentType.SCREENSHOT -> "Screenshot"
+     *             OverlayWidget.ContentType.FANART -> "Fanart"
+     *             OverlayWidget.ContentType.TITLE_SCREEN -> "Title Screen"
+     *             OverlayWidget.ContentType.GAME_DESCRIPTION -> "Game Description"
+     *             OverlayWidget.ContentType.SYSTEM_LOGO -> "System Logo"
+     *             OverlayWidget.ContentType.VIDEO -> "Video"
+     *         }
+     *
+     *         // Inflate the custom dialog view
+     *         val dialogView = android.view.LayoutInflater.from(context)
+     *             .inflate(R.layout.dialog_widget_settings, null)
+     *
+     *         // Get references to views
+     *         val dialogWidgetName = dialogView.findViewById<TextView>(R.id.dialogWidgetName)
+     *         val dialogWidgetZIndex = dialogView.findViewById<TextView>(R.id.dialogWidgetZIndex)
+     *         val btnMoveForward = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnMoveForward)
+     *         val btnMoveBackward = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnMoveBackward)
+     *         val btnDeleteWidget = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnDeleteWidget)
+     *
+     *         // Get opacity control references
+     *         val opacityControlSection = dialogView.findViewById<LinearLayout>(R.id.opacityControlSection)
+     *         val opacitySeekBar = dialogView.findViewById<android.widget.SeekBar>(R.id.opacitySeekBar)
+     *         val opacityText = dialogView.findViewById<TextView>(R.id.opacityText)
+     *
+     *         // Scale type control references
+     *         val scaleTypeControlSection = dialogView.findViewById<LinearLayout>(R.id.scaleTypeControlSection)
+     *         val scaleTypeDivider = dialogView.findViewById<android.view.View>(R.id.scaleTypeDivider)
+     *         val btnScaleFit = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnScaleFit)
+     *         val btnScaleCrop = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnScaleCrop)
+     *
+     *         // Set widget name (without zIndex)
+     *         dialogWidgetName.text = widgetName
+     *
+     *         // Set zIndex info below Layer Controls
+     *         val currentZIndex = widget.zIndex
+     *         dialogWidgetZIndex.text = "Current zIndex: $currentZIndex"
+     *
+     *         // Show scale type control for all image widgets (NOT for Game Description)
+     *         if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
+     *             scaleTypeControlSection.visibility = android.view.View.VISIBLE
+     *             scaleTypeDivider.visibility = android.view.View.VISIBLE
+     *
+     *             // Update button styles based on current scale type (handle null for migration)
+     *             fun updateScaleTypeButtons() {
+     *                 val currentScaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT
+     *                 if (currentScaleType == OverlayWidget.ScaleType.FIT) {
+     *                     btnScaleFit.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF03DAC6.toInt())
+     *                     btnScaleCrop.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF666666.toInt())
+     *                 } else {
+     *                     btnScaleFit.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF666666.toInt())
+     *                     btnScaleCrop.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF03DAC6.toInt())
+     *                 }
+     *             }
+     *
+     *             updateScaleTypeButtons()
+     *
+     *             // Scale type button listeners
+     *             btnScaleFit.setOnClickListener {
+     *                 widget.scaleType = OverlayWidget.ScaleType.FIT
+     *                 updateScaleTypeButtons()
+     *                 loadWidgetContent()  // Reload image with new scale type
+     *                 onUpdate(widget)   // Save the change
+     *             }
+     *
+     *             btnScaleCrop.setOnClickListener {
+     *                 widget.scaleType = OverlayWidget.ScaleType.CROP
+     *                 updateScaleTypeButtons()
+     *                 loadWidgetContent()  // Reload image with new scale type
+     *                 onUpdate(widget)   // Save the change
+     *             }
+     *         } else {
+     *             scaleTypeControlSection.visibility = android.view.View.GONE
+     *             scaleTypeDivider.visibility = android.view.View.GONE
+     *         }
+     *
+     *         // Show opacity control only for Game Description
+     *         if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
+     *             opacityControlSection.visibility = android.view.View.VISIBLE
+     *
+     *             // Set initial opacity value (convert from 0.0-1.0 to 0-20 steps)
+     *             val currentStep = (widget.backgroundOpacity * 20).toInt()
+     *             opacitySeekBar.progress = currentStep
+     *             val currentOpacity = currentStep * 5
+     *             opacityText.text = "$currentOpacity%"
+     *
+     *             // Opacity slider listener (5% increments)
+     *             opacitySeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+     *                 override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+     *                     val opacityPercent = progress * 5  // Convert step to percentage
+     *                     opacityText.text = "$opacityPercent%"
+     *                     val opacity = progress / 20f  // Convert step to 0.0-1.0 range
+     *                     setBackgroundOpacity(opacity)
+     *                 }
+     *
+     *                 override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+     *                 override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+     *             })
+     *         } else {
+     *             opacityControlSection.visibility = android.view.View.GONE
+     *         }
+     *
+     *         // Create the dialog
+     *         val dialog = android.app.AlertDialog.Builder(context)
+     *             .setView(dialogView)
+     *             .setCancelable(true)
+     *             .create()
+     *
+     *         // Button click listeners
+     *         btnMoveForward.setOnClickListener {
+     *             moveWidgetForward()
+     *             dialog.dismiss()
+     *             // Reopen the dialog after a short delay to show updated zIndex
+     *             postDelayed({ showLayerMenu() }, 100)
+     *         }
+     *
+     *         btnMoveBackward.setOnClickListener {
+     *             moveWidgetBackward()
+     *             dialog.dismiss()
+     *             // Reopen the dialog after a short delay to show updated zIndex
+     *             postDelayed({ showLayerMenu() }, 100)
+     *         }
+     *
+     *         btnDeleteWidget.setOnClickListener {
+     *             dialog.dismiss()
+     *             showDeleteDialog()
+     *         }
+     *
+     *         dialog.show()
+     *     }
+     *
+     *     private fun moveWidgetForward() {  // CHANGED name
+     *         onReorder(this, true)
+     *     }
+     *
+     *     private fun moveWidgetBackward() {  // CHANGED name
+     *         onReorder(this, false)
+     *     }
+     *
+     *
+     */
 
     private fun startAutoScroll() {
         stopAutoScroll()  // Stop any existing scroll
@@ -1038,7 +945,7 @@ class WidgetView(
         if (currentDrawable is GlintDrawable) {
             currentDrawable.stop()
         }
-        Glide.with(this).clear(imageView)
+        imageView.dispose()
         imageView.setImageDrawable(null)
     }
 }

@@ -172,6 +172,11 @@
 
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/menu_compose_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <!-- Black overlay that can be pulled down during game mode -->
     <View
         android:id="@+id/blackOverlay"
