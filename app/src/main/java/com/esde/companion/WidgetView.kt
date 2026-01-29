@@ -3,12 +3,18 @@ package com.esde.companion
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.flowWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -17,6 +23,11 @@ import coil.dispose
 import coil.imageLoader
 import coil.request.ImageRequest
 import com.esde.companion.animators.GlintDrawable
+import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.ScaleType
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -37,7 +48,8 @@ class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) 
     }
 }
 class WidgetView(
-    context: Context,
+    private val context: Context,
+    private val lifecycleOwner: LifecycleOwner,
     var widget: OverlayWidget,
     private val onUpdate: (OverlayWidget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
@@ -88,6 +100,12 @@ class WidgetView(
     private var scrollJob: Runnable? = null
     private val scrollSpeed = 1  // pixels per frame
     private val scrollDelay = 30L  // milliseconds between scroll updates
+    private var currentVideoPath = ""
+    private var allowedVolume: Float = 1f
+
+    private var volumeFader = VolumeFader(player)
+
+    private var audioRefereeListener: Job? = null
 
     enum class ResizeCorner {
         NONE,
@@ -98,6 +116,22 @@ class WidgetView(
     }
 
     init {
+        addAudioRefereeListener()
+        Log.d("WIDGET_LIFECYCLE", "View Created: ${widget.id}")
+
+        lifecycleOwner.lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onPause(owner: LifecycleOwner) {
+                // This stops the widget audio the MOMENT you hit the Home button
+                player?.pause()
+            }
+
+            override fun onResume(owner: LifecycleOwner) {
+                if (AudioReferee.currentPriority.value == AudioReferee.AudioSource.WIDGET) {
+                    player?.play()
+                }
+            }
+        })
+
         // Create scroll view for text (will be hidden for image widgets)
         scrollView = AutoScrollOnlyView(context).apply {
             layoutParams = LayoutParams(
@@ -193,7 +227,7 @@ class WidgetView(
         updateLayout()
 
         // Apply initial background opacity for Game Description
-        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
+        if (widget.contentType == ContentType.GAME_DESCRIPTION) {
             val alpha = (widget.backgroundOpacity * 255).toInt().coerceIn(0, 255)
             scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
             textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -206,11 +240,16 @@ class WidgetView(
 
     //added to replace content instead of recreating views:
     fun updateContent(newWidget: OverlayWidget) {
+        val isDifferentWidget = this.widget.id != newWidget.id
+        if (isDifferentWidget) {
+            prepareForReuse()
+        }
         this.widget = newWidget
+
         updateLayout()
         loadWidgetContent()
 
-        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
+        if (widget.contentType == ContentType.GAME_DESCRIPTION) {
             scrollView.scrollTo(0, 0)
         }
     }
@@ -412,30 +451,28 @@ class WidgetView(
     }
 
    private fun loadWidgetContent() {
-        val isMarquee = widget.contentType == OverlayWidget.ContentType.MARQUEE
+       imageView.visibility = View.GONE
+       playerView.visibility = View.GONE
+       scrollView.visibility = View.GONE
+        val isMarquee = widget.contentType == ContentType.MARQUEE
 
         // 1. Handle Game Description (Text)
-        if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
+        if (widget.contentType == ContentType.GAME_DESCRIPTION) {
             handleDescriptionWidget()
+            AudioReferee.updateWidgetState(widget.id,false)
             return
         }
 
         // 2. Handle Video
-        if (widget.contentType == OverlayWidget.ContentType.VIDEO) {
-            imageView.visibility = View.GONE
-            scrollView.visibility = View.GONE
+        if (widget.contentType == ContentType.VIDEO) {
             loadVideo(widget.contentPath)
             return
         }
 
-        // 3. Setup ImageView Basics
-        imageView.visibility = View.VISIBLE
-        scrollView.visibility = View.GONE
-
         // Set scale type once for all image types
-        imageView.scaleType = when (widget.scaleType ?: OverlayWidget.ScaleType.FIT) {
-            OverlayWidget.ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
-            OverlayWidget.ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
+        imageView.scaleType = when (widget.scaleType ?: ScaleType.FIT) {
+            ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
+            ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
         }
 
         // 4. Determine Data Source
@@ -450,6 +487,7 @@ class WidgetView(
                         extractGameNameFromWidget(), widget.width.toInt(), widget.height.toInt()
                     )
                     imageView.setImageDrawable(fallback)
+                    imageView.invalidate()
                 } else {
                     imageView.dispose()
                     imageView.setImageDrawable(null)
@@ -462,16 +500,19 @@ class WidgetView(
                     systemName, widget.width.toInt(), widget.height.toInt()
                 )
                 imageView.setImageDrawable(drawable)
+                imageView.invalidate()
             }
             //normal case
             else -> {
                 loadImage(File(path), isMarquee)
             }
         }
+       imageView.visibility = View.VISIBLE
+       AudioReferee.updateWidgetState(widget.id,false)
     }
 
     private fun loadImage(file: File, isMarquee: Boolean) {
-        val request = ImageRequest.Builder(context)
+        /**val request = ImageRequest.Builder(context)
             .data(file)
             .memoryCacheKey("${file.absolutePath}_${file.lastModified()}")
             .size(widget.width.toInt(), widget.height.toInt())
@@ -497,7 +538,29 @@ class WidgetView(
             )
             .build()
 
-        context.imageLoader.enqueue(request)
+        context.imageLoader.enqueue(request)*/
+
+        context.imageLoader.enqueue(
+            ImageRequest.Builder(context)
+                .data(file)
+                .size(widget.width.toInt(), widget.height.toInt())
+                .allowHardware(!isMarquee)
+                .target(imageView)
+                .listener(
+                    onSuccess = { _, _ ->
+                        if (isMarquee) {
+                            val shiny = GlintDrawable(imageView.drawable!!)
+                            imageView.setImageDrawable(shiny)
+                            shiny.start()
+                        }
+                    },
+                    onError = {request, result ->
+                        Log.e("WIDGET_IMAGE_ERROR", "Failed to load: ${widget.contentPath}, Error: ${result.throwable}")
+                    }
+
+                )
+                .build()
+        )
     }
 
     /**
@@ -519,20 +582,32 @@ class WidgetView(
     }
 
     private fun loadVideo(videoPath: String) {
-        imageView.visibility = View.GONE
         playerView.visibility = View.VISIBLE
 
         if (player == null) {
             player = ExoPlayer.Builder(context).build().apply {
-                repeatMode = Player.REPEAT_MODE_ALL // Loop the video
+                repeatMode = Player.REPEAT_MODE_ALL
                 playWhenReady = true
             }
             playerView.player = player
+            volumeFader.setPlayer(player)
+        }
+        if(currentVideoPath != videoPath) {
+            val mediaItem = MediaItem.fromUri(videoPath)
+            player?.setMediaItem(mediaItem)
+            player?.prepare()
+            currentVideoPath = videoPath
+            player?.volume = 0f
         }
 
-        val mediaItem = MediaItem.fromUri(videoPath)
-        player?.setMediaItem(mediaItem)
-        player?.prepare()
+        if(widget.playAudio) {
+            AudioReferee.updateWidgetState(widget.id, true)
+            if(AudioReferee.currentPriority.value == AudioReferee.AudioSource.WIDGET && player?.volume == 0f) {
+                volumeFader.fadeTo(1f, 500)
+            }
+        } else {
+            AudioReferee.updateWidgetState(widget.id,false)
+        }
     }
 
     private fun extractGameNameFromWidget(): String {
@@ -933,12 +1008,32 @@ class WidgetView(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         stopAutoScroll()
-        player?.release()
-        player = null
+        prepareForReuse()
     }
 
-    fun onPageHide() {
-        player?.pause()
+    fun prepareForReuse() {
+        playerView.player = null
+        player?.let {
+            it.stop()
+            it.release()
+        }
+        player = null
+        currentVideoPath = ""
+
+        (imageView.drawable as? GlintDrawable)?.stop()
+        imageView.setImageDrawable(null)
+        imageView.dispose()
+        volumeFader.setPlayer(null)
+        //volumeFader.cancel()
+
+        stopAutoScroll()
+        isWidgetSelected = false
+        updateButtonVisibility()
+
+        AudioReferee.updateWidgetState(widget.id, false)
+
+
+        /**player?.pause()
         player?.release()
         player = null
         val currentDrawable = imageView.drawable
@@ -947,5 +1042,26 @@ class WidgetView(
         }
         imageView.dispose()
         imageView.setImageDrawable(null)
+        AudioReferee.updateWidgetState(widget.id, false)
+        audioRefereeListener?.cancel()
+        */
     }
+
+    private fun addAudioRefereeListener() {
+        if (audioRefereeListener?.isActive == true) return
+
+        audioRefereeListener = lifecycleOwner.lifecycleScope.launch {
+            AudioReferee.currentPriority
+                .flowWithLifecycle(lifecycleOwner.lifecycle, Lifecycle.State.STARTED)
+                .distinctUntilChanged()
+                .collect { priority ->
+                    if (widget.contentType == ContentType.VIDEO) {
+                        allowedVolume = if (priority == AudioReferee.AudioSource.WIDGET && widget.playAudio) 1f else 0f
+                        volumeFader.fadeTo(allowedVolume)
+                    }
+                }
+        }
+    }
+
+
 }

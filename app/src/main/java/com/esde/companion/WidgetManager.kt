@@ -2,52 +2,59 @@ package com.esde.companion
 
 import android.content.Context
 import android.util.DisplayMetrics
+import android.util.Log
+import androidx.core.content.edit
+import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.WidgetContext
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.util.UUID
 
-data class WidgetPage(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    var widgets: MutableList<OverlayWidget> = mutableListOf()
-)
-
-class WidgetManager(private val context: Context) {
+class WidgetManager(
+    private val context: Context,
+    private val widgetContext: WidgetContext
+) {
+    private val systemJsonString = "system_widgets_json"
+    private val gameJsonString = "game_widgets_json"
+    private var preferenceKey = when (widgetContext) {
+        WidgetContext.GAME -> gameJsonString
+        WidgetContext.SYSTEM -> systemJsonString
+    }
     private val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
-
     private var pages: MutableList<WidgetPage> = mutableListOf()
     var currentPageIndex: Int = 0
 
-    // Load all pages from Prefs
-    fun load() {
-        val json = prefs.getString("widgets_json", null)
-        if (json != null) {
-            val type = object : TypeToken<List<WidgetPage>>() {}.type
-            pages = gson.fromJson(json, type)
-        }
 
-        // Safety: ensure at least one page exists
-        if (pages.isEmpty()) pages.add(WidgetPage())
+    fun load() {
+        val json = prefs.getString(preferenceKey, null)
+        try {
+            if (json != null) {
+                val type = object : TypeToken<MutableList<WidgetPage>>() {}.type
+                pages = gson.fromJson(json, type)
+            }
+
+            if (pages.isEmpty()) {
+                pages.add(WidgetPage())
+            }
+        } catch (e: Exception) {
+            Log.e("WidgetManager", "Failed to load pages, resetting to default", e)
+            pages = mutableListOf(WidgetPage())
+        }
     }
 
     fun save() {
         val json = gson.toJson(pages)
-        prefs.edit().putString("widgets_json", json).apply()
+        prefs.edit { putString(preferenceKey, json) }
     }
 
-    // Returns widgets for the current page, filtered by context (GAME vs SYSTEM)
-    fun getWidgetsForCurrentPage(viewContext: OverlayWidget.WidgetContext): List<OverlayWidget> {
-        return pages.getOrNull(currentPageIndex)?.widgets?.filter { it.widgetContext == viewContext } ?: emptyList()
+    fun getCurrentPage(): WidgetPage {
+        return pages[currentPageIndex]
     }
 
-    fun goToNextPage() {
-        if (pages.isEmpty()) return
-        currentPageIndex = (currentPageIndex + 1) % pages.size
-    }
-
-    fun goToPreviousPage() {
-        if (pages.isEmpty()) return
-        currentPageIndex = if (currentPageIndex <= 0) pages.size - 1 else currentPageIndex - 1
+    // Returns widgets for the current page
+    fun getWidgetsForCurrentPage(): List<OverlayWidget> {
+        return pages.getOrNull(currentPageIndex)?.widgets ?: emptyList()
     }
 
     fun addNewPage() {
@@ -93,8 +100,8 @@ class WidgetManager(private val context: Context) {
     }
 
     fun addNewWidgetToCurrentPage(
-        type: OverlayWidget.ContentType,
-        widgetContext: OverlayWidget.WidgetContext, displayMetrics: DisplayMetrics
+        type: ContentType,
+        displayMetrics: DisplayMetrics
     ): OverlayWidget {
         val centerX = displayMetrics.widthPixels / 2f
         val centerY = displayMetrics.heightPixels / 2f
@@ -107,59 +114,10 @@ class WidgetManager(private val context: Context) {
             width = 300f,
             height = 400f,
             zIndex = 10, //TODO: FIX THIS Z-INDEX
-            widgetContext = widgetContext
         )
         pages[currentPageIndex].widgets.add(newWidget)
         save()
         return newWidget
-    }
-
-    fun createDefaultWidgets(displayMetrics: DisplayMetrics) {
-        val centerX = displayMetrics.widthPixels / 2f
-        val centerY = displayMetrics.heightPixels / 2f
-
-        // System logo size (medium equivalent - adjust as needed)
-        val systemLogoWidth = 800f
-        val systemLogoHeight = 300f
-
-        // Game marquee size (medium equivalent - typically wider than system logo)
-        val gameMarqueeWidth = 800f
-        val gameMarqueeHeight = 300f
-
-        // Create default system logo widget (centered)
-        val systemLogoWidget = OverlayWidget(
-            contentType = OverlayWidget.ContentType.SYSTEM_LOGO,
-            description = "",
-            contentPath = "",  // Will be updated when system loads
-            x = centerX - (systemLogoWidth / 2),
-            y = centerY - (systemLogoHeight / 2),
-            width = systemLogoWidth,
-            height = systemLogoHeight,
-            zIndex = 0,
-            widgetContext = OverlayWidget.WidgetContext.SYSTEM
-        )
-
-        // Create default game marquee widget (centered)
-        val gameMarqueeWidget = OverlayWidget(
-            contentType = OverlayWidget.ContentType.MARQUEE,
-            description = "",
-            contentPath = "",  // Will be updated when game loads
-            x = centerX - (gameMarqueeWidth / 2),
-            y = centerY - (gameMarqueeHeight / 2),
-            width = gameMarqueeWidth,
-            height = gameMarqueeHeight,
-            zIndex = 0,
-            widgetContext = OverlayWidget.WidgetContext.GAME
-        )
-
-        // 2. Create Page 1 and add widgets to it
-        val firstPage = WidgetPage(id = "default_page_1")
-        firstPage.widgets.add(systemLogoWidget)
-        firstPage.widgets.add(gameMarqueeWidget)
-
-        // 3. Set pages and save
-        this.pages = mutableListOf(firstPage)
-        save()
     }
 
     fun moveWidgetZOrder(widgetId: String, moveForward: Boolean) {
@@ -174,5 +132,17 @@ class WidgetManager(private val context: Context) {
             java.util.Collections.swap(pageWidgets, index, newIndex)
             save()
         }
+    }
+
+    fun updatePage(updated: WidgetPage) {
+        val idx = pages.indexOfFirst { it.id == updated.id }
+        if (idx != -1) {
+            pages[idx] = updated
+            save()
+        }
+    }
+
+    fun getAllPages(): List<WidgetPage> {
+        return pages
     }
 }

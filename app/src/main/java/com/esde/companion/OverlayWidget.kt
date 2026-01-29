@@ -1,5 +1,7 @@
 package com.esde.companion
 
+import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.ScaleType
 import java.util.UUID
 
 data class OverlayWidget(
@@ -14,48 +16,14 @@ data class OverlayWidget(
     var zIndex: Int = 0,
     var backgroundOpacity: Float = 0.2f,
     var scaleType: ScaleType = ScaleType.FIT,
-    val widgetContext: WidgetContext = WidgetContext.GAME,
     var xPercent: Float? = null,
     var yPercent: Float? = null,
     var widthPercent: Float? = null,
     var heightPercent: Float? = null,
-    var slotIndex: Int = 0,
-    var playAudio: Boolean = true
+    var slot: MediaSlot = MediaSlot.Default,
+    var playAudio: Boolean = true,
+    var isRequired: Boolean = false
 ) {
-    val slot: MediaSlot get() = MediaSlot.fromInt(slotIndex)
-
-    enum class ContentType {
-        MARQUEE,
-        BOX_2D,
-        BOX_3D,
-        MIX_IMAGE,
-        BACK_COVER,
-        PHYSICAL_MEDIA,
-        SCREENSHOT,
-        FANART,
-        TITLE_SCREEN,
-        SYSTEM_LOGO,
-        GAME_DESCRIPTION,
-        VIDEO;
-
-        fun toDisplayName(): String = when(this) {
-            ContentType.BOX_2D -> "2D Boxart"
-            ContentType.BOX_3D -> "3D Boxart"
-            ContentType.SYSTEM_LOGO -> "Logo"
-            else -> this.name.replace("_", " ").lowercase().capitalize()
-        }
-    }
-
-    enum class WidgetContext {
-        GAME,    // Shows in game view
-        SYSTEM   // Shows in system view
-    }
-
-    enum class ScaleType {
-        FIT,      // Fit to container with no cropping (default)
-        CROP      // Fill container with cropping (centerCrop)
-    }
-
     /**
      * Convert absolute pixels to percentages based on screen dimensions
      */
@@ -79,19 +47,16 @@ data class OverlayWidget(
         }
     }
 
-    //this is just a wrapper for the slotIndex value. Assuming 0 is default everywhere in the code is ugly and prone to breaking if the logic ever changes, so we use this to define what default or alternative means
-    sealed class MediaSlot(val index: Int) {
-        object Default : MediaSlot(0)
-        data class Alternative(val id: Int) : MediaSlot(id)
+    enum class MediaSlot(val index: Int) {
+        Default(0),
+        Slot1(1),
+        Slot2(2),
+        Slot3(3);
 
-        val suffix: String get() = when(this) {
-            is Default -> ""
-            is Alternative -> "_alt$id"
-        }
+        val suffix: String get() = if (this == Default) "" else "_alt$index"
 
         companion object {
-            fun fromInt(index: Int): MediaSlot =
-                if (index <= 0) Default else Alternative(index)
+            fun fromInt(value: Int) = entries.find { it.index == value } ?: Default
         }
     }
 }

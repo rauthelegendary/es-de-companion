@@ -1,20 +1,12 @@
 package com.esde.companion.ost.loudness
 
 import android.media.MediaCodec
-import be.tarsos.dsp.AudioEvent
-import be.tarsos.dsp.AudioProcessor
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.log10
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import be.tarsos.dsp.AudioDispatcher
-import be.tarsos.dsp.filters.HighPass
-import be.tarsos.dsp.io.UniversalAudioInputStream
-import be.tarsos.dsp.io.TarsosDSPAudioFormat
-import java.io.FileInputStream
-import kotlin.math.max
 import kotlin.math.sqrt
 
 const val TARGET_LOUDNESS_DB = -24.0

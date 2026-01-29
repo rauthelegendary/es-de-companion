@@ -1,6 +1,6 @@
 package com.esde.companion
 
-import com.esde.companion.OverlayWidget.WidgetContext
+import com.esde.companion.ui.WidgetContext
 
 /**
  * Represents the current state of the ES-DE Companion app.
@@ -144,7 +144,7 @@ fun AppState.getCurrentGameFilename(): String? {
     }
 }
 
-fun AppState.toWidgetContext(): OverlayWidget.WidgetContext {
+fun AppState.toWidgetContext(): WidgetContext {
     if(this.isInGameBrowsingMode() || this.isGameCurrentlyPlaying() || this.isScreensaverActive()) {
         return WidgetContext.GAME
     } else {

@@ -9,24 +9,22 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.LinearLayout
-import android.view.View
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.GestureDetectorCompat
 import com.google.android.material.chip.ChipGroup
 import java.io.File
-
-import android.view.GestureDetector
-import android.view.MotionEvent
-import androidx.core.view.GestureDetectorCompat
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -447,50 +445,12 @@ class SettingsActivity : AppCompatActivity() {
         columnCountSeekBar = findViewById(R.id.columnCountSeekBar)
         columnCountText = findViewById(R.id.columnCountText)
         hideAppsButton = findViewById(R.id.hideAppsButton)
-        dimmingSeekBar = findViewById(R.id.dimmingSeekBar)
-        dimmingText = findViewById(R.id.dimmingText)
-        blurSeekBar = findViewById(R.id.blurSeekBar)
-        blurText = findViewById(R.id.blurText)
         drawerTransparencySeekBar = findViewById(R.id.drawerTransparencySeekBar)
         drawerTransparencyText = findViewById(R.id.drawerTransparencyText)
-        animationStyleChipGroup = findViewById(R.id.animationStyleChipGroup)
-        customAnimationSettings = findViewById(R.id.customAnimationSettings)
-        animationDurationSeekBar = findViewById(R.id.animationDurationSeekBar)
-        animationDurationText = findViewById(R.id.animationDurationText)
-        animationScaleSeekBar = findViewById(R.id.animationScaleSeekBar)
-        animationScaleText = findViewById(R.id.animationScaleText)
-        systemImagePreferenceChipGroup = findViewById(R.id.systemImagePreferenceChipGroup)
-        gameImagePreferenceChipGroup = findViewById(R.id.gameImagePreferenceChipGroup)
-        systemColorPickerLayout = findViewById(R.id.systemColorPickerLayout)
-        gameColorPickerLayout = findViewById(R.id.gameColorPickerLayout)
-        systemColorPickerButton = findViewById(R.id.systemColorPickerButton)
-        gameColorPickerButton = findViewById(R.id.gameColorPickerButton)
-        videoSupportChipGroup = findViewById(R.id.videoSupportChipGroup)
-        videoSettings = findViewById(R.id.videoSettings)
-        videoDelaySeekBar = findViewById(R.id.videoDelaySeekBar)
-        videoDelayText = findViewById(R.id.videoDelayText)
-        videoAudioChipGroup = findViewById(R.id.videoAudioChipGroup)
         gameLaunchBehaviorChipGroup = findViewById(R.id.gameLaunchBehaviorChipGroup)
         screensaverBehaviorChipGroup = findViewById(R.id.screensaverBehaviorChipGroup)
         doubleTapChipGroup = findViewById(R.id.doubleTapChipGroup)
         versionText = findViewById(R.id.versionText)
-        // ========== MUSIC INTEGRATION START ==========
-        if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
-            musicMasterChipGroup = findViewById(R.id.musicMasterChipGroup)
-            musicSettings = findViewById(R.id.musicSettings)
-            musicSystemChipGroup = findViewById(R.id.musicSystemChipGroup)
-            musicGameChipGroup = findViewById(R.id.musicGameChipGroup)
-            musicScreensaverChipGroup = findViewById(R.id.musicScreensaverChipGroup)
-            musicVideoChipGroup = findViewById(R.id.musicVideoChipGroup)
-            musicSystemSpecificChipGroup = findViewById(R.id.musicSystemSpecificChipGroup)
-            musicSongTitleChipGroup = findViewById(R.id.musicSongTitleChipGroup)
-            musicSongTitleDurationSection = findViewById(R.id.musicSongTitleDurationSection)
-            musicSongTitleDurationSeekBar = findViewById(R.id.musicSongTitleDurationSeekBar)
-            musicSongTitleDurationText = findViewById(R.id.musicSongTitleDurationText)
-            musicSongTitleOpacitySeekBar = findViewById(R.id.musicSongTitleOpacitySeekBar)
-            musicSongTitleOpacityText = findViewById(R.id.musicSongTitleOpacityText)
-        }
-        // ========== MUSIC INTEGRATION END ==========
     }
 
     /**
@@ -555,24 +515,12 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         setupColumnCountSlider()
-        setupDimmingSlider()
-        setupBlurSlider()
         setupDrawerTransparencySlider()
-        setupAnimationStyleChips()
-        setupCustomAnimationControls()
-        setupImagePreferenceChips()
-        setupVideoSettings()
         setupGameLaunchBehavior()
         setupScreensaverBehavior()
         setupDoubleTapFunctionality()
 
         android.util.Log.d("SettingsActivity", "All UI components setup complete")
-
-        // ========== MUSIC INTEGRATION START ==========
-        if (FeatureFlags.ENABLE_BACKGROUND_MUSIC) {
-            //setupMusicSettings()
-        }
-        // ========== MUSIC INTEGRATION END ==========
     }
 
     /**
@@ -713,52 +661,6 @@ class SettingsActivity : AppCompatActivity() {
         })
     }
 
-    private fun setupDimmingSlider() {
-        val currentDimming = prefs.getInt(DIMMING_KEY, 25)
-        dimmingSeekBar.min = 0
-        dimmingSeekBar.max = 20  // 0-20 range = 0-100% in 5% increments
-        dimmingSeekBar.progress = currentDimming / 5
-        dimmingText.text = "$currentDimming%"
-
-        dimmingSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val percentage = progress * 5
-                dimmingText.text = "$percentage%"
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                seekBar?.let {
-                    val percentage = it.progress * 5
-                    prefs.edit().putInt(DIMMING_KEY, percentage).commit()
-                }
-            }
-        })
-    }
-
-    private fun setupBlurSlider() {
-        val currentBlur = prefs.getInt(BLUR_KEY, 0)
-        blurSeekBar.min = 0
-        blurSeekBar.max = 25
-        blurSeekBar.progress = currentBlur
-        blurText.text = if (currentBlur == 0) "Off" else "$currentBlur"
-
-        blurSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                blurText.text = if (progress == 0) "Off" else "$progress"
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                seekBar?.let {
-                    prefs.edit().putInt(BLUR_KEY, it.progress).commit()
-                }
-            }
-        })
-    }
-
     private fun setupDrawerTransparencySlider() {
         val currentTransparency = prefs.getInt(DRAWER_TRANSPARENCY_KEY, 70)
         drawerTransparencySeekBar.min = 0
@@ -766,7 +668,8 @@ class SettingsActivity : AppCompatActivity() {
         drawerTransparencySeekBar.progress = currentTransparency / 5
         drawerTransparencyText.text = "$currentTransparency%"
 
-        drawerTransparencySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        drawerTransparencySeekBar.setOnSeekBarChangeListener(object :
+            SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val percentage = progress * 5
                 drawerTransparencyText.text = "$percentage%"
@@ -781,509 +684,6 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
         })
-    }
-
-    private fun setupAnimationStyleChips() {
-        val currentStyle = prefs.getString("animation_style", "scale_fade") ?: "scale_fade"
-
-        val chipToCheck = when (currentStyle) {
-            "none" -> R.id.animationNone
-            "fade" -> R.id.animationFade
-            "scale_fade" -> R.id.animationScaleFade
-            "custom" -> R.id.animationCustom
-            else -> R.id.animationScaleFade
-        }
-        animationStyleChipGroup.check(chipToCheck)
-
-        // Show/hide custom settings based on initial selection
-        if (currentStyle == "custom") {
-            customAnimationSettings.visibility = View.VISIBLE
-        } else {
-            customAnimationSettings.visibility = View.GONE
-        }
-
-        animationStyleChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (checkedIds.isNotEmpty()) {
-                val style = when (checkedIds[0]) {
-                    R.id.animationNone -> "none"
-                    R.id.animationFade -> "fade"
-                    R.id.animationScaleFade -> "scale_fade"
-                    R.id.animationCustom -> "custom"
-                    else -> "scale_fade"
-                }
-                prefs.edit().putString("animation_style", style).apply()
-
-                // Show/hide custom settings with animation
-                if (style == "custom") {
-                    customAnimationSettings.visibility = View.VISIBLE
-                    customAnimationSettings.alpha = 0f
-                    customAnimationSettings.animate()
-                        .alpha(1f)
-                        .setDuration(200)
-                        .start()
-                } else {
-                    customAnimationSettings.animate()
-                        .alpha(0f)
-                        .setDuration(150)
-                        .withEndAction {
-                            customAnimationSettings.visibility = View.GONE
-                        }
-                        .start()
-                }
-            }
-        }
-    }
-
-    private fun setupCustomAnimationControls() {
-        // Duration Slider (100ms - 500ms, in 10ms steps)
-        val currentDuration = prefs.getInt("animation_duration", 250)
-        animationDurationSeekBar.max = 40  // 0-40 = 100ms-500ms (10ms steps)
-        animationDurationSeekBar.progress = (currentDuration - 100) / 10
-        animationDurationText.text = "${currentDuration}ms"
-
-        animationDurationSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val duration = 100 + (progress * 10)  // 100ms to 500ms
-                animationDurationText.text = "${duration}ms"
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                seekBar?.let {
-                    val duration = 100 + (it.progress * 10)
-                    prefs.edit().putInt("animation_duration", duration).apply()
-                }
-            }
-        })
-
-        // Scale Amount Slider (85% - 100%, in 1% steps)
-        val currentScale = prefs.getInt("animation_scale", 95)
-        animationScaleSeekBar.max = 15  // 0-15 = 85%-100%
-        animationScaleSeekBar.progress = currentScale - 85
-        animationScaleText.text = "${currentScale}%"
-
-        animationScaleSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val scale = 85 + progress  // 85% to 100%
-                animationScaleText.text = "${scale}%"
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                seekBar?.let {
-                    val scale = 85 + it.progress
-                    prefs.edit().putInt("animation_scale", scale).apply()
-                }
-            }
-        })
-    }
-
-    private fun setupImagePreferenceChips() {
-
-        // Setup System View Background Priority
-        val systemPref = prefs.getString(SYSTEM_IMAGE_PREFERENCE_KEY, "fanart") ?: "fanart"
-        val systemChipToCheck = when (systemPref) {
-            "screenshot" -> R.id.systemImagePrefScreenshot
-            "solid_color" -> R.id.systemImagePrefSolidColor
-            else -> R.id.systemImagePrefFanart
-        }
-        systemImagePreferenceChipGroup.check(systemChipToCheck)
-
-        // Show/hide system color picker based on selection
-        systemColorPickerLayout.visibility =
-            if (systemPref == "solid_color") View.VISIBLE else View.GONE
-
-        systemImagePreferenceChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (checkedIds.isNotEmpty()) {
-                val preference = when (checkedIds[0]) {
-                    R.id.systemImagePrefScreenshot -> "screenshot"
-                    R.id.systemImagePrefSolidColor -> "solid_color"
-                    R.id.systemImagePrefFanart -> "fanart"
-                    else -> "fanart"
-                }
-                prefs.edit().putString(SYSTEM_IMAGE_PREFERENCE_KEY, preference).apply()
-
-                // Show/hide color picker
-                systemColorPickerLayout.visibility =
-                    if (preference == "solid_color") View.VISIBLE else View.GONE
-
-                imagePreferenceChanged = true
-            }
-        }
-
-        // Setup system color picker button
-        val systemColor =
-            prefs.getInt(SYSTEM_BACKGROUND_COLOR_KEY, android.graphics.Color.parseColor("#1A1A1A"))
-        systemColorPickerButton.setBackgroundColor(systemColor)
-
-        systemColorPickerButton.setOnClickListener {
-            // Get current color from prefs (in case it was changed since last read)
-            val currentSystemColor = prefs.getInt(SYSTEM_BACKGROUND_COLOR_KEY, android.graphics.Color.parseColor("#1A1A1A"))
-            showColorPicker(currentSystemColor, "System View Background Color") { selectedColor ->
-                prefs.edit().putInt(SYSTEM_BACKGROUND_COLOR_KEY, selectedColor).apply()
-                systemColorPickerButton.setBackgroundColor(selectedColor)
-                imagePreferenceChanged = true
-            }
-        }
-
-        // Setup Game View Background Priority
-        val gamePref = prefs.getString(GAME_IMAGE_PREFERENCE_KEY, "fanart") ?: "fanart"
-        val gameChipToCheck = when (gamePref) {
-            "screenshot" -> R.id.gameImagePrefScreenshot
-            "solid_color" -> R.id.gameImagePrefSolidColor
-            else -> R.id.gameImagePrefFanart
-        }
-        gameImagePreferenceChipGroup.check(gameChipToCheck)
-
-        // Show/hide game color picker based on selection
-        gameColorPickerLayout.visibility =
-            if (gamePref == "solid_color") View.VISIBLE else View.GONE
-
-        gameImagePreferenceChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (checkedIds.isNotEmpty()) {
-                val preference = when (checkedIds[0]) {
-                    R.id.gameImagePrefScreenshot -> "screenshot"
-                    R.id.gameImagePrefSolidColor -> "solid_color"
-                    R.id.gameImagePrefFanart -> "fanart"
-                    else -> "fanart"
-                }
-                prefs.edit().putString(GAME_IMAGE_PREFERENCE_KEY, preference).apply()
-
-                // DEBUG: Verify preference was saved
-                val savedPref = prefs.getString(GAME_IMAGE_PREFERENCE_KEY, "NOT_FOUND")
-                android.util.Log.d("SettingsActivity", "━━━ IMAGE PREFERENCE DEBUG ━━━")
-                android.util.Log.d("SettingsActivity", "Chip ID selected: ${checkedIds[0]}")
-                android.util.Log.d("SettingsActivity", "Preference value to save: $preference")
-                android.util.Log.d("SettingsActivity", "Preference key: $GAME_IMAGE_PREFERENCE_KEY")
-                android.util.Log.d("SettingsActivity", "Saved preference readback: $savedPref")
-                android.util.Log.d("SettingsActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-                // Show/hide color picker
-                gameColorPickerLayout.visibility =
-                    if (preference == "solid_color") View.VISIBLE else View.GONE
-
-                imagePreferenceChanged = true
-            }
-        }
-
-        // Setup game color picker button
-        val gameColor =
-            prefs.getInt(GAME_BACKGROUND_COLOR_KEY, android.graphics.Color.parseColor("#1A1A1A"))
-        gameColorPickerButton.setBackgroundColor(gameColor)
-
-        gameColorPickerButton.setOnClickListener {
-            // Get current color from prefs (in case it was changed since last read)
-            val currentGameColor = prefs.getInt(GAME_BACKGROUND_COLOR_KEY, android.graphics.Color.parseColor("#1A1A1A"))
-            showColorPicker(currentGameColor, "Game View Background Color") { selectedColor ->
-                prefs.edit().putInt(GAME_BACKGROUND_COLOR_KEY, selectedColor).apply()
-                gameColorPickerButton.setBackgroundColor(selectedColor)
-                imagePreferenceChanged = true
-            }
-        }
-    }
-
-    private fun showColorPicker(currentColor: Int, title: String, onColorSelected: (Int) -> Unit) {
-        val colors = arrayOf(
-            "#000000", "#1A1A1A", "#2D2D2D", "#424242", "#616161", "#757575", "#9E9E9E",
-            "#B71C1C", "#C62828", "#D32F2F", "#E53935", "#F44336", "#EF5350", "#E57373",
-            "#880E4F", "#AD1457", "#C2185B", "#D81B60", "#E91E63", "#EC407A", "#F06292",
-            "#4A148C", "#6A1B9A", "#7B1FA2", "#8E24AA", "#9C27B0", "#AB47BC", "#BA68C8",
-            "#311B92", "#4527A0", "#512DA8", "#5E35B1", "#673AB7", "#7E57C2", "#9575CD",
-            "#1A237E", "#283593", "#303F9F", "#3949AB", "#3F51B5", "#5C6BC0", "#7986CB",
-            "#0D47A1", "#1565C0", "#1976D2", "#1E88E5", "#2196F3", "#42A5F5", "#64B5F6",
-            "#01579B", "#0277BD", "#0288D1", "#039BE5", "#03A9F4", "#29B6F6", "#4FC3F7",
-            "#006064", "#00838F", "#0097A7", "#00ACC1", "#00BCD4", "#26C6DA", "#4DD0E1",
-            "#004D40", "#00695C", "#00796B", "#00897B", "#009688", "#26A69A", "#4DB6AC",
-            "#1B5E20", "#2E7D32", "#388E3C", "#43A047", "#4CAF50", "#66BB6A", "#81C784",
-            "#33691E", "#558B2F", "#689F38", "#7CB342", "#8BC34A", "#9CCC65", "#AED581",
-            "#827717", "#9E9D24", "#AFB42B", "#C0CA33", "#CDDC39", "#D4E157", "#DCE775",
-            "#F57F17", "#F9A825", "#FBC02D", "#FDD835", "#FFEB3B", "#FFEE58", "#FFF176",
-            "#FF6F00", "#FF8F00", "#FFA000", "#FFB300", "#FFC107", "#FFCA28", "#FFD54F",
-            "#E65100", "#EF6C00", "#F57C00", "#FB8C00", "#FF9800", "#FFA726", "#FFB74D",
-            "#BF360C", "#D84315", "#E64A19", "#F4511E", "#FF5722", "#FF7043", "#FF8A65",
-            "#3E2723", "#4E342E", "#5D4037", "#6D4C41", "#795548", "#8D6E63", "#A1887F",
-            "#263238", "#37474F", "#455A64", "#546E7A", "#607D8B", "#78909C", "#90A4AE",
-            "#FFFFFF", "#FAFAFA", "#F5F5F5", "#EEEEEE", "#E0E0E0", "#BDBDBD", "#9E9E9E"
-        )
-
-        val colorInts = colors.map { android.graphics.Color.parseColor(it) }.toIntArray()
-
-        // Create main container layout
-        val mainLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val padding = (16 * resources.displayMetrics.density).toInt()
-            setPadding(padding, padding, padding, padding)
-        }
-
-        // Add hex input section
-        val hexInputLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val marginBottom = (12 * resources.displayMetrics.density).toInt()
-            setPadding(0, 0, 0, marginBottom)
-        }
-
-        val hexInputLabel = TextView(this).apply {
-            text = "Hex: "
-            textSize = 16f
-            setTextColor(android.graphics.Color.WHITE)
-            val padding = (8 * resources.displayMetrics.density).toInt()
-            setPadding(0, padding, padding, padding)
-        }
-
-        val hexInput = android.widget.EditText(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                0,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                1f
-            )
-            hint = "Enter hex color (e.g., #FF5722)"
-            textSize = 14f
-            setTextColor(android.graphics.Color.WHITE)
-            setHintTextColor(android.graphics.Color.parseColor("#999999"))
-            setBackgroundColor(android.graphics.Color.parseColor("#2D2D2D"))
-            val padding = (12 * resources.displayMetrics.density).toInt()
-            setPadding(padding, padding, padding, padding)
-
-            // Pre-fill with current color - READ FROM PREFS to get latest saved value
-            val latestColor = when(title) {
-                "System View Background Color" -> prefs.getInt(SYSTEM_BACKGROUND_COLOR_KEY, currentColor)
-                "Game View Background Color" -> prefs.getInt(GAME_BACKGROUND_COLOR_KEY, currentColor)
-                else -> currentColor
-            }
-            val currentHex = String.format("#%06X", 0xFFFFFF and latestColor)
-            setText(currentHex)
-            setSelection(text.length) // Move cursor to end
-        }
-
-        hexInputLayout.addView(hexInputLabel)
-        hexInputLayout.addView(hexInput)
-        mainLayout.addView(hexInputLayout)
-
-        // Add color grid with proper padding to prevent clipping
-        val gridView = android.widget.GridView(this).apply {
-            numColumns = 7
-            val spacing = (8 * resources.displayMetrics.density).toInt()
-            verticalSpacing = spacing
-            horizontalSpacing = spacing
-
-            // CRITICAL: Prevent clipping by adding extra padding for selection border
-            clipToPadding = false
-            clipChildren = false
-            val extraPadding = (12 * resources.displayMetrics.density).toInt()
-            setPadding(extraPadding, 0, extraPadding, 0)
-        }
-
-        // Get the latest color from prefs for proper initial selection
-        val initialSelectedColor = when(title) {
-            "System View Background Color" -> prefs.getInt(SYSTEM_BACKGROUND_COLOR_KEY, currentColor)
-            "Game View Background Color" -> prefs.getInt(GAME_BACKGROUND_COLOR_KEY, currentColor)
-            else -> currentColor
-        }
-
-        val adapter = object : android.widget.BaseAdapter() {
-            private var selectedPosition = colorInts.indexOf(initialSelectedColor)
-
-            override fun getCount() = colorInts.size
-            override fun getItem(position: Int) = colorInts[position]
-            override fun getItemId(position: Int) = position.toLong()
-
-            override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup?): android.view.View {
-                val container = convertView as? android.widget.FrameLayout ?: android.widget.FrameLayout(this@SettingsActivity)
-                container.removeAllViews()
-
-                val size = (48 * resources.displayMetrics.density).toInt()
-                container.layoutParams = android.widget.AbsListView.LayoutParams(size, size)
-
-                // Add inner padding to prevent border clipping
-                val innerPadding = (6 * resources.displayMetrics.density).toInt()
-                container.setPadding(innerPadding, innerPadding, innerPadding, innerPadding)
-
-                // Create color square
-                val colorSquare = android.view.View(this@SettingsActivity).apply {
-                    layoutParams = android.widget.FrameLayout.LayoutParams(
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                    val border = android.graphics.drawable.GradientDrawable()
-                    border.setColor(colorInts[position])
-                    border.setStroke(
-                        (2 * resources.displayMetrics.density).toInt(),
-                        android.graphics.Color.parseColor("#666666")
-                    )
-                    background = border
-                }
-
-                container.addView(colorSquare)
-
-                // Add selection indicator if this is the selected color
-                if (position == selectedPosition) {
-                    val selectionBorder = android.view.View(this@SettingsActivity).apply {
-                        // Make it slightly smaller than container to ensure visibility
-                        val margin = (-2 * resources.displayMetrics.density).toInt()
-                        layoutParams = android.widget.FrameLayout.LayoutParams(
-                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                        ).apply {
-                            setMargins(margin, margin, margin, margin)
-                        }
-                        val border = android.graphics.drawable.GradientDrawable()
-                        border.setColor(android.graphics.Color.TRANSPARENT)
-                        border.setStroke(
-                            (4 * resources.displayMetrics.density).toInt(),
-                            android.graphics.Color.WHITE
-                        )
-                        background = border
-                    }
-                    container.addView(selectionBorder)
-                }
-
-                return container
-            }
-
-            fun updateSelection(position: Int) {
-                selectedPosition = position
-                notifyDataSetChanged()
-            }
-        }
-
-        gridView.adapter = adapter
-        mainLayout.addView(gridView)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(mainLayout)
-            .setPositiveButton("OK") { _, _ ->
-                // Try to parse hex input first
-                val hexText = hexInput.text.toString().trim()
-                val finalColor = try {
-                    if (hexText.startsWith("#") && hexText.length == 7) {
-                        android.graphics.Color.parseColor(hexText)
-                    } else if (hexText.length == 6) {
-                        android.graphics.Color.parseColor("#$hexText")
-                    } else {
-                        initialSelectedColor // Invalid format, use current from prefs
-                    }
-                } catch (e: Exception) {
-                    // If parsing fails, use the current color from prefs
-                    initialSelectedColor
-                }
-                onColorSelected(finalColor)
-            }
-            .setNegativeButton("Cancel", null)
-            .create()
-
-        // Update hex input when grid color is selected
-        gridView.setOnItemClickListener { _, _, position, _ ->
-            val selectedColor = colorInts[position]
-            val hexString = String.format("#%06X", 0xFFFFFF and selectedColor)
-            hexInput.setText(hexString)
-            hexInput.setSelection(hexString.length)
-            adapter.updateSelection(position)
-        }
-
-        // Update grid selection when hex is manually entered
-        hexInput.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                val hexText = s.toString().trim()
-                try {
-                    val parsedColor = if (hexText.startsWith("#") && hexText.length == 7) {
-                        android.graphics.Color.parseColor(hexText)
-                    } else if (hexText.length == 6) {
-                        android.graphics.Color.parseColor("#$hexText")
-                    } else {
-                        return // Invalid length, don't update
-                    }
-
-                    // Find if this color exists in the grid
-                    val position = colorInts.indexOf(parsedColor)
-                    if (position >= 0) {
-                        adapter.updateSelection(position)
-                        // Scroll to show the selected color
-                        gridView.smoothScrollToPosition(position)
-                    } else {
-                        // Color not in grid, clear selection
-                        adapter.updateSelection(-1)
-                    }
-                } catch (e: Exception) {
-                    // Invalid color format, ignore
-                }
-            }
-        })
-
-        dialog.show()
-    }
-
-    private fun setupVideoSettings() {
-        // Load saved video enabled state (default: false/off)
-        val videoEnabled = prefs.getBoolean(VIDEO_ENABLED_KEY, false)
-
-        // Set initial chip selection
-        val chipToCheck = if (videoEnabled) R.id.videoOn else R.id.videoOff
-        videoSupportChipGroup.check(chipToCheck)
-
-        // Show/hide video settings box based on initial state
-        videoSettings.visibility = if (videoEnabled) View.VISIBLE else View.GONE
-
-        // Setup video on/off listener
-        videoSupportChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.videoOn
-                prefs.edit().putBoolean(VIDEO_ENABLED_KEY, enabled).apply()
-
-                // Show/hide video settings box
-                videoSettings.visibility = if (enabled) View.VISIBLE else View.GONE
-
-                // Mark that video settings changed
-                videoSettingsChanged = true
-            }
-        }
-
-        // Setup video delay slider (0-5 seconds in 0.5s increments = 0-10 on seekbar)
-        val savedDelay = prefs.getInt(VIDEO_DELAY_KEY, 4) // Default: 4 (2 seconds)
-        videoDelaySeekBar.progress = savedDelay
-        updateVideoDelayText(savedDelay)
-
-        videoDelaySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                updateVideoDelayText(progress)
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                seekBar?.let {
-                    prefs.edit().putInt(VIDEO_DELAY_KEY, it.progress).apply()
-                    // Mark that video settings changed
-                    videoSettingsChanged = true
-                }
-            }
-        })
-
-        // Setup video audio chips
-        val audioEnabled = prefs.getBoolean(VIDEO_AUDIO_ENABLED_KEY, false)
-        val audioChipToCheck = if (audioEnabled) R.id.videoAudioOn else R.id.videoAudioOff
-        videoAudioChipGroup.check(audioChipToCheck)
-
-        videoAudioChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.videoAudioOn
-                prefs.edit().putBoolean(VIDEO_AUDIO_ENABLED_KEY, enabled).apply()
-                // Don't mark as changed - audio is handled by onResume
-            }
-        }
-    }
-
-    private fun updateVideoDelayText(progress: Int) {
-        val delaySeconds = progress * 0.5f
-        videoDelayText.text = if (progress == 0) {
-            "Instant"
-        } else {
-            String.format("%.1fs", delaySeconds)
-        }
     }
 
     private fun setupGameLaunchBehavior() {
@@ -3149,17 +2549,9 @@ Enjoy your enhanced retro gaming experience!
         const val SYSTEM_PATH_KEY = "system_path"
         const val SCRIPTS_PATH_KEY = "scripts_path"
         const val COLUMN_COUNT_KEY = "column_count"
-        const val IMAGE_PREFERENCE_KEY = "image_preference"
-        const val SYSTEM_IMAGE_PREFERENCE_KEY = "system_image_preference"
-        const val GAME_IMAGE_PREFERENCE_KEY = "game_image_preference"
-        const val SYSTEM_BACKGROUND_COLOR_KEY = "system_background_color"
-        const val GAME_BACKGROUND_COLOR_KEY = "game_background_color"
         const val DIMMING_KEY = "dimming"
         const val BLUR_KEY = "blur"
         const val DRAWER_TRANSPARENCY_KEY = "drawer_transparency"
-        const val VIDEO_ENABLED_KEY = "video_enabled"
-        const val VIDEO_DELAY_KEY = "video_delay"
-        const val VIDEO_AUDIO_ENABLED_KEY = "video_audio_enabled"
         const val GAME_LAUNCH_BEHAVIOR_KEY = "game_launch_behavior"
         const val SCREENSAVER_BEHAVIOR_KEY = "screensaver_behavior"
         const val DOUBLE_TAP_BEHAVIOR_KEY = "double_tap_behavior"

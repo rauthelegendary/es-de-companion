@@ -1,6 +1,7 @@
 package com.esde.companion.ui.contextmenu
 
-import com.esde.companion.OverlayWidget
+import com.esde.companion.WidgetPage
+import com.esde.companion.ui.ContentType
 
 data class MenuUiState(
     val locked: Boolean,
@@ -15,5 +16,6 @@ data class WidgetActions(
     val onHelp: () -> Unit,
     val onAddPage: () -> Unit,
     val onRemovePage: () -> Unit,
-    val onAddWidget: (OverlayWidget.ContentType) -> Unit
+    val onAddWidget: (ContentType) -> Unit,
+    val onSavePageSettings: (WidgetPage) -> Unit
 )

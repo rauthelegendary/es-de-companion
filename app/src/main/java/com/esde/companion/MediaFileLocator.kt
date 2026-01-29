@@ -3,8 +3,8 @@ package com.esde.companion
 import android.content.SharedPreferences
 import android.os.Environment
 import com.esde.companion.MediaFileHelper.sanitizeGameFilename
-import com.esde.companion.OverlayWidget.ContentType
 import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.ui.ContentType
 import java.io.File
 
 /**
@@ -39,7 +39,6 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
      */
     fun findImageInFolder(
         systemName: String,
-        gameName: String,
         gameFilename: String,
         folderName: String,
         slot: MediaSlot
@@ -66,31 +65,31 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
      * @return The image file if found, null otherwise
      */
     fun findMediaFile(
-        type: OverlayWidget.ContentType,
+        type: ContentType,
         systemName: String,
         gameFilename: String,
         slot: MediaSlot = MediaSlot.Default
     ): File? {
         val gameName = MediaFileHelper.extractGameFilenameWithoutExtension(sanitizeGameFilename(gameFilename))
-        if(type == OverlayWidget.ContentType.VIDEO) {
+        if(type == ContentType.VIDEO) {
             return findVideoFile(systemName, gameFilename, slot)
         } else {
-            return findImageInFolder(systemName, gameName, gameFilename, getFolderName(type), slot)
+            return findImageInFolder(systemName, gameFilename, getFolderName(type), slot)
         }
     }
 
-    fun getFolderName(type: OverlayWidget.ContentType): String{
+    fun getFolderName(type: ContentType): String{
         return when (type) {
-            OverlayWidget.ContentType.MARQUEE -> "marquees"
-            OverlayWidget.ContentType.BOX_2D -> "covers"
-            OverlayWidget.ContentType.BOX_3D -> "3dboxes"
-            OverlayWidget.ContentType.MIX_IMAGE -> "miximages"
-            OverlayWidget.ContentType.BACK_COVER -> "backcovers"
-            OverlayWidget.ContentType.PHYSICAL_MEDIA -> "physicalmedia"
-            OverlayWidget.ContentType.SCREENSHOT -> "screenshots"
-            OverlayWidget.ContentType.FANART -> "fanart"
-            OverlayWidget.ContentType.TITLE_SCREEN -> "titlescreens"
-            OverlayWidget.ContentType.VIDEO -> "videos"
+            ContentType.MARQUEE -> "marquees"
+            ContentType.BOX_2D -> "covers"
+            ContentType.BOX_3D -> "3dboxes"
+            ContentType.MIX_IMAGE -> "miximages"
+            ContentType.BACK_COVER -> "backcovers"
+            ContentType.PHYSICAL_MEDIA -> "physicalmedia"
+            ContentType.SCREENSHOT -> "screenshots"
+            ContentType.FANART -> "fanart"
+            ContentType.TITLE_SCREEN -> "titlescreens"
+            ContentType.VIDEO -> "videos"
             else -> return ""
         }
     }
@@ -156,7 +155,7 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
 
     private fun getMediaPath(slot: MediaSlot = MediaSlot.Default): String {
         var mediaPath = prefs.getString("media_path", DEFAULT_MEDIA_FOLDER)
-        if(slot is OverlayWidget.MediaSlot.Alternative) {
+        if(slot != MediaSlot.Default) {
             mediaPath = ALT_MEDIA_FOLDER
         }
         return mediaPath ?: ""
@@ -246,6 +245,38 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
             }
         }
         return null
+    }
+
+    fun getMediaBasePath(): String {
+        val customPath = prefs.getString("media_path", null)
+        val path =
+            customPath ?: "${Environment.getExternalStorageDirectory()}/ES-DE/downloaded_media"
+        android.util.Log.d("ESDESecondScreen", "Media base path: $path")
+        return path
+    }
+
+    fun getSystemImagePath(): String {
+        val customPath = prefs.getString("system_path", null)
+        val path = customPath
+            ?: "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_images"
+        android.util.Log.d("ESDESecondScreen", "System image path: $path")
+        return path
+    }
+
+    fun getSystemLogosPath(): String {
+        val customPath = prefs.getString("system_logos_path", null)
+        val path = customPath
+            ?: "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_logos"
+        android.util.Log.d("ESDESecondScreen", "System logos path: $path")
+        return path
+    }
+
+    fun getLogsPath(): String {
+        // Always use fixed internal storage location for logs
+        // This ensures FileObserver works reliably (doesn't work well on SD card)
+        val path = "/storage/emulated/0/ES-DE Companion/logs"
+        android.util.Log.d("MainActivity", "Logs path: $path")
+        return path
     }
     
     /**

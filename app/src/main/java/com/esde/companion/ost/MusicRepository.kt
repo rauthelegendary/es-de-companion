@@ -7,7 +7,7 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
 
 class MusicRepository(
-    private val downloader: MusicDownloader,
+    private val downloader: YoutubeMediaService,
     private val loudnessService: LoudnessService
 ) {
     private val musicDir: File? = File("${Environment.getExternalStorageDirectory()}/ES-DE Companion/music/")
@@ -55,8 +55,8 @@ class MusicRepository(
         return downloader.getYoutubeSearchResultsFiltered(query, gameTitle, system, false)
     }
 
-    suspend fun manualSelection(gameFilename: String, system: String, url: String) {
+    suspend fun manualSelection(gameFilename: String, system: String, url: String, onProgress: (Float)-> Unit) {
         val systemDir: File? = getSystemFolder(system)
-        downloader.downloadGameMusicWithUrl( gameFilename, systemDir, url)
+        downloader.downloadGameMusicWithUrl( gameFilename, systemDir, url, onProgress)
     }
 }

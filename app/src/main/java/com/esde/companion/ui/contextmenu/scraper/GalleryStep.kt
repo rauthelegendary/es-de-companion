@@ -19,14 +19,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.esde.companion.art.ImageSearchResult
+import com.esde.companion.art.MediaSearchResult
 
 @Composable
 fun GalleryStepContent(
-    images: List<ImageSearchResult>,
+    images: List<MediaSearchResult>,
     aspectRatio: Float,
     isLoading: Boolean,
-    onImageSelected: (ImageSearchResult) -> Unit
+    onImageSelected: (MediaSearchResult) -> Unit
 ) {
     if (isLoading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

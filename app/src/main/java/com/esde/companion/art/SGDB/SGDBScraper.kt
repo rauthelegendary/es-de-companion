@@ -4,7 +4,7 @@ import android.util.Log
 import com.esde.companion.NetworkClientManager
 import com.esde.companion.art.ArtScraper
 import com.esde.companion.art.GameSearchResult
-import com.esde.companion.art.ImageSearchResult
+import com.esde.companion.art.MediaSearchResult
 import com.esde.companion.art.MediaCategory
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -31,11 +31,11 @@ class SGDBScraper (apiKey: String) : ArtScraper {
         } else emptyList()
     }
 
-    override suspend fun getAvailableMediaTypes(gameId: Int): List<MediaCategory> {
+    override suspend fun getAvailableMediaTypes(gameId: String): List<MediaCategory> {
         return categories
     }
 
-    override suspend fun fetchImages(gameId: Int, categoryKey: String): List<ImageSearchResult> {
+    override suspend fun fetchImages(gameId: String, categoryKey: String): List<MediaSearchResult> {
         return try {
             var response: SGDBResponse<List<SGDBImage>>? = null
             when(categoryKey) {
@@ -53,7 +53,7 @@ class SGDBScraper (apiKey: String) : ArtScraper {
             //convert result to generic data objects and order by score (votes)
             return if (response != null && response.success) {
                 response.data.map {
-                    ImageSearchResult(it.id, it.url, it.thumb, it.score)
+                    MediaSearchResult(it.id, it.url, it.thumb, it.score)
                 }.sortedByDescending { it.score }
             } else {
                 emptyList()

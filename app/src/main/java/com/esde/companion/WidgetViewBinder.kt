@@ -3,8 +3,10 @@ package com.esde.companion
 import android.graphics.Rect
 import android.view.View
 import androidx.core.view.children
+import androidx.lifecycle.LifecycleOwner
 
 class WidgetViewBinder {
+    private val viewPool = mutableListOf<WidgetView>()
 
     /**
      * synchronizes the UI views in the container with the provided data list.
@@ -12,6 +14,7 @@ class WidgetViewBinder {
      */
     fun sync(
         container: ResizableWidgetContainer,
+        lifecycleOwner: LifecycleOwner,
         dataList: List<OverlayWidget>,
         locked: Boolean,
         snapToGrid: Boolean,
@@ -24,51 +27,53 @@ class WidgetViewBinder {
         },
         onEditRequested: (OverlayWidget) -> Unit
     ) {
-        val existingViews = container.children.filterIsInstance<WidgetView>().toList()
 
-        // 2. Only perform "Heavy Cleanup" if we are actually switching pages
-        if (pageSwap) {
+
+        /**if (pageSwap) {
             existingViews.forEach { view ->
                 view.onPageHide() // Stops videos/audio
                 view.visibility = View.GONE
             }
+        }*/
+
+        val existingViews = container.children.filterIsInstance<WidgetView>().toList()
+        val dataIds = dataList.map { it.id }.toSet()
+
+        existingViews.forEach { view ->
+            if (view.widget.id !in dataIds) {
+                view.prepareForReuse()
+                view.visibility = View.GONE
+                container.removeView(view)
+                viewPool.add(view)
+            }
         }
 
-        // 3. Match Data to Views
         dataList.forEach { data ->
             var view = existingViews.find { it.widget.id == data.id }
 
             if (view == null) {
-                view = WidgetView(container.context, data, onUpdate, onSelect, onEditRequested)
+                if (viewPool.isNotEmpty()) {
+                    view = viewPool.removeAt(0)
+                    view.visibility = View.VISIBLE
+                    view.updateContent(data)
+                } else {
+                    view = WidgetView(container.context, lifecycleOwner, data, onUpdate, onSelect, onEditRequested)
+                }
                 container.addView(view)
-            }
-
-            view.visibility = View.VISIBLE
-            view.setSnapToGrid(snapToGrid, gridSize)
-            view.setLocked(locked)
-
-            // Only trigger updateContent if it's a page swap OR the data changed
-            // Passing isFullPageSwap down tells the view whether to force-reload media
-            if (pageSwap || view.widget != data) {
+            } else {
                 view.updateContent(data)
             }
 
-            // Keep Z-order in sync with the list order
+            view.setSnapToGrid(snapToGrid, gridSize)
+            view.setLocked(locked)
+
+            //TODO: this will go wrong with z-index, no?
             view.bringToFront()
         }
 
-        val dataIds = dataList.map { it.id }.toSet() // Using a Set is faster for lookups
-        container.children.filterIsInstance<WidgetView>()
-            .toList()
-            .forEach { view ->
-                // Only remove if it's NOT in the new data list AND it's actually a child of this container
-                if (view.widget.id !in dataIds) {
-                    if (view.parent == container) {
-                        container.removeView(view)
-                        view.onPageHide() // Clean up media for the removed view
-                    }
-                }
-            }
+        while (viewPool.size > 8) {
+            viewPool.removeAt(0)
+        }
     }
 
     /**

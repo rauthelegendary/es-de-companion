@@ -1,7 +1,7 @@
 package com.esde.companion.art.SGDB
 
 import com.esde.companion.art.GameSearchResult
-import com.esde.companion.art.ImageSearchResult
+import com.esde.companion.art.MediaSearchResult
 
 data class SGDBResponse<T>(
     val success: Boolean,
@@ -9,12 +9,12 @@ data class SGDBResponse<T>(
 )
 
 data class SGDBGame(
-    val id: Int,
+    val id: String,
     val name: String,
 )
 
 data class SGDBImage(
-    val id: Int,
+    val id: String,
     val url: String,
     val thumb: String, // Best for your companion app's gallery
     val score: Int,    // Use this to sort by popularity
@@ -32,8 +32,8 @@ fun SGDBGame.toSearchResult(): GameSearchResult {
     )
 }
 
-fun SGDBImage.toImageSearchResult(): ImageSearchResult {
-    return ImageSearchResult(
+fun SGDBImage.toImageSearchResult(): MediaSearchResult {
+    return MediaSearchResult(
         id = this.id,
         url = this.url,
         thumb = this.thumb,

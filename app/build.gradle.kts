@@ -3,17 +3,19 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("kotlin-kapt")
+    id("org.jetbrains.kotlin.android") version "2.0.21"
+    id("com.google.devtools.ksp") version "2.0.21-1.0.25" // Aligned to fix metadata error
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
+    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
 }
+
 android {
     namespace = "com.esde.companion"
     compileSdk = 35
 
     defaultConfig {
         applicationId = "com.esde.companion"
-        minSdk = 29  // Android 10+ required
+        minSdk = 31
         targetSdk = 35
         versionCode = 20
         versionName = "0.4.5"
@@ -28,6 +30,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     signingConfigs {
@@ -35,10 +38,7 @@ android {
             val keystorePropertiesFile = rootProject.file("keystore.properties")
             if (keystorePropertiesFile.exists()) {
                 val keystoreProperties = Properties()
-                FileInputStream(keystorePropertiesFile).use { fis ->
-                    keystoreProperties.load(fis)
-                }
-
+                FileInputStream(keystorePropertiesFile).use { fis -> keystoreProperties.load(fis) }
                 storeFile = file(keystoreProperties["storeFile"] as String)
                 storePassword = keystoreProperties["storePassword"] as String
                 keyAlias = keystoreProperties["keyAlias"] as String
@@ -57,10 +57,7 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
             signingConfig = signingConfigs.getByName("release")
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
@@ -84,6 +81,7 @@ android {
 }
 
 dependencies {
+    // Restoring EVERY library from your snippet
     implementation(libs.androidx.savedstate.ktx)
     val composeBom = platform("androidx.compose:compose-bom:2024.01.00")
     implementation(composeBom)
@@ -105,14 +103,29 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.cardview:cardview:1.0.0")
 
-    //replacing glide with coil to support compose
+    // IGDB API with necessary Protobuf exclusion
+    implementation("io.github.husnjak:igdb-api-jvm:1.3.1") {
+        exclude(group = "com.google.protobuf", module = "protobuf-java")
+        exclude(group = "com.google.protobuf", module = "protobuf-kotlin")
+        exclude(group = "com.google.protobuf")
+    }
+    implementation("com.google.protobuf:protobuf-java:4.29.3")
+
+    // Coil & Media
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0")
     implementation("io.coil-kt:coil-gif:2.6.0")
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
-    implementation("androidx.media3:media3-ui:1.2.0")
-    implementation ("com.github.TeamNewPipe:NewPipeExtractor:v0.25.0")
+    implementation("androidx.media3:media3-ui:1.4.1")
+
+    // NewPipe Extractor
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
+        exclude(group = "com.google.protobuf")
+    }
+
+
+    implementation("androidx.compose.material:material-icons-extended:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.facebook.shimmer:shimmer:0.5.0")
     implementation("be.tarsos.dsp:core:2.5")
@@ -120,14 +133,27 @@ dependencies {
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation(libs.androidx.runtime)
-    val room_version = "2.6.1"
-    implementation("androidx.room:room-runtime:$room_version")
-    implementation("androidx.room:room-ktx:$room_version")
-    kapt("androidx.room:room-compiler:$room_version")
+
+    // Room
+    val roomVersion = "2.6.1"
+    implementation("androidx.room:room-runtime:$roomVersion")
+    implementation("androidx.room:room-ktx:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("com.google.code.gson:gson:2.10.1")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+}
+
+secrets {
+    defaultPropertiesFileName = "local.properties"
+}
+
+configurations.all {
+    resolutionStrategy {
+        // Force the 4.x version globally
+        force("com.google.protobuf:protobuf-java:4.29.3")
+    }
 }

@@ -2,9 +2,12 @@ package com.esde.companion
 
 import android.content.SharedPreferences
 import android.util.DisplayMetrics
+import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.PageContentType
+import com.esde.companion.ui.WidgetContext
 import java.io.File
 
-class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private val prefs: SharedPreferences) {
+class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val prefs: SharedPreferences) {
 
     fun resolve(
         rawWidgets: List<OverlayWidget>,
@@ -13,7 +16,7 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
         metrics: DisplayMetrics
     ): List<OverlayWidget> {
         if (system != null) {
-            return rawWidgets.map { widget -> resolveSingle(widget, system, gameFilename, metrics)}
+            return rawWidgets.map { widget -> resolveSingle(widget, system, gameFilename, metrics).widget }
         }
         return emptyList()
     }
@@ -23,24 +26,38 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
         system: String?,
         gameFilename: String?,
         metrics: DisplayMetrics
-    ): OverlayWidget {
+    ): ResolutionResult {
         val resolvedWidget = rawWidget.copy()
+        var missingRequired = false
+
         if (system != null) {
-            if(rawWidget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION && gameFilename != null) {
+            if (rawWidget.contentType == ContentType.GAME_DESCRIPTION && gameFilename != null) {
                 resolvedWidget.description = getGameDescription(system, gameFilename)!!
-            } else if (rawWidget.contentType == OverlayWidget.ContentType.SYSTEM_LOGO) {
+
+            } else if (rawWidget.contentType == ContentType.SYSTEM_LOGO) {
                 resolvedWidget.contentPath = findSystemLogo(system) ?: ""
-            } else if(gameFilename != null){
-                val mediaFile = mediaLocator.findMediaFile(rawWidget.contentType, system, gameFilename, rawWidget.slot)
-                if(mediaFile != null) {
+            } else if (gameFilename != null) {
+                val mediaFile = mediaLocator.findMediaFile(
+                    rawWidget.contentType,
+                    system,
+                    gameFilename,
+                    rawWidget.slot
+                )
+                if (mediaFile != null) {
                     resolvedWidget.contentPath = mediaFile.absolutePath
                 } else {
                     resolvedWidget.contentPath = ""
                 }
             }
         }
+        if(resolvedWidget.contentType == ContentType.GAME_DESCRIPTION && (resolvedWidget.description == null || resolvedWidget.description.isEmpty()) && resolvedWidget.isRequired) {
+            missingRequired = true
+        } else if(resolvedWidget.contentType != ContentType.GAME_DESCRIPTION && resolvedWidget.isRequired && resolvedWidget.contentPath.isEmpty()) {
+            missingRequired = true
+        }
+
         resolvedWidget.fromPercentages(metrics.widthPixels, metrics.heightPixels)
-        return resolvedWidget
+        return ResolutionResult(resolvedWidget, missingRequired)
     }
 
     private fun getGameDescription(systemName: String, gameFilename: String): String? {
@@ -59,7 +76,10 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
             android.util.Log.d("MainActivity", "Looking for gamelist: ${gamelistFile.absolutePath}")
 
             if (!gamelistFile.exists()) {
-                android.util.Log.d("MainActivity", "Gamelist file not found for system: $systemName")
+                android.util.Log.d(
+                    "MainActivity",
+                    "Gamelist file not found for system: $systemName"
+                )
                 return null
             }
 
@@ -98,7 +118,10 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
                 android.util.Log.d("MainActivity", "Found description: ${description.take(100)}...")
                 description
             } else {
-                android.util.Log.d("MainActivity", "No description found for game: $sanitizedFilename")
+                android.util.Log.d(
+                    "MainActivity",
+                    "No description found for game: $sanitizedFilename"
+                )
                 null
             }
 
@@ -106,6 +129,51 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
             android.util.Log.e("MainActivity", "Error parsing gamelist.xml", e)
             return null
         }
+    }
+
+    fun getSystemImage(system: String) : File?{
+        val baseFileName = when (system.lowercase()) {
+            "all" -> "auto-allgames"
+            "favorites" -> "auto-favorites"
+            "recent" -> "auto-lastplayed"
+            else -> system.lowercase()
+        }
+
+        // Check for custom system image with multiple format support
+        var imageToUse: File? = null
+        val systemImagePath = mediaLocator.getSystemImagePath()
+        val imageExtensions = listOf("webp", "png", "jpg", "jpeg")
+
+        for (ext in imageExtensions) {
+            val imageFile = File(systemImagePath, "$baseFileName.$ext")
+            if (imageFile.exists()) {
+                imageToUse = imageFile
+                break
+            }
+        }
+        return imageToUse
+    }
+
+    fun getRandomGameImageForSystem(systen: String, screenshotPref: Boolean): File? {
+        val mediaBase = File(mediaLocator.getMediaBasePath(), systen)
+        // Use system_image_preference instead of image_preference
+        val prioritizedFolders = if (screenshotPref) {
+            listOf("screenshots", "fanart")
+        } else {
+            listOf("fanart", "screenshots")
+        }
+        for (folder in prioritizedFolders) {
+            val dir = File(mediaBase, folder)
+            if (dir.exists() && dir.isDirectory) {
+                val images = dir.listFiles { f ->
+                    f.extension.lowercase() in listOf("jpg", "png", "webp")
+                } ?: emptyArray()
+                if (images.isNotEmpty()) {
+                    return images.random()
+                }
+            }
+        }
+        return null
     }
 
     private fun findSystemLogo(systemName: String): String? {
@@ -137,4 +205,60 @@ class WidgetResourceResolver(private val mediaLocator: MediaFileLocator, private
         }
         return "builtin://$baseFileName"
     }
+
+    fun resolvePage(page: WidgetPage, state: AppState): File? {
+        val systemName = state.getCurrentSystemName()
+        val gameName = state.getCurrentGameFilename()
+
+        if (page.backgroundType != PageContentType.SOLID_COLOR)  {
+            if(page.backgroundType != PageContentType.CUSTOM_IMAGE) {
+                if (systemName != null) {
+                    //if we're in a game state
+                    if (state.toWidgetContext() == WidgetContext.GAME) {
+                        if (gameName != null) {
+                            return resolvePageMediaPath(page, systemName, gameName)
+                        }
+                    } else {
+                        //If we're in system page
+                        val screenshotPref = page.backgroundType == PageContentType.SCREENSHOT
+                        //if we want to show a random game fanart or screenshot
+                        if (page.backgroundType == PageContentType.FANART || screenshotPref) {
+                            return getRandomGameImageForSystem(systemName, screenshotPref)
+                        } else {
+                            return getSystemImage(systemName)
+                        }
+                    }
+                }
+            }
+            //Custom path, everything else is irrelevant
+            else {
+                return File(page.customPath!!)
+            }
+        }
+        return null
+    }
+
+    fun resolvePageMediaPath(page: WidgetPage, system: String, gameFilename: String): File? {
+        if (page.customPath != null) {
+            return File(page.customPath)
+        } else {
+            return resolvePageMediaPath(page.backgroundType, system, gameFilename, page.slot)
+        }
+    }
+
+    fun resolvePageMediaPath(contentType: PageContentType, system: String, gameFilename: String, slot: OverlayWidget.MediaSlot): File? {
+        var result: File? = null
+        if (contentType == PageContentType.VIDEO) {
+            result = mediaLocator.findMediaFile(ContentType.VIDEO, system, gameFilename, slot)
+        } else if (contentType == PageContentType.FANART) {
+            result = mediaLocator.findMediaFile(ContentType.FANART, system, gameFilename, slot)
+        }
+        //use screenshot as backup
+        if (contentType == PageContentType.SCREENSHOT || result == null || !result.exists()) {
+            result = mediaLocator.findMediaFile(ContentType.SCREENSHOT, system, gameFilename, slot)
+        }
+        return result
+    }
 }
+
+data class ResolutionResult(val widget: OverlayWidget, val missingRequired: Boolean)

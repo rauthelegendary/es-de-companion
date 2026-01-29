@@ -1,29 +1,22 @@
 package com.esde.companion.ost
 
-import android.R
 import android.util.Log
+import com.esde.companion.art.MediaSearchResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.internal.userAgent
-import org.schabi.newpipe.extractor.Extractor
 import org.schabi.newpipe.extractor.InfoItem
 import org.schabi.newpipe.extractor.ListExtractor
+import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.NewPipe
-import org.schabi.newpipe.extractor.Page
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.ServiceList
-import org.schabi.newpipe.extractor.localization.ContentCountry
-import org.schabi.newpipe.extractor.localization.Localization
-import org.schabi.newpipe.extractor.search.SearchExtractor
+import org.schabi.newpipe.extractor.stream.AudioStream
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
-import java.util.concurrent.TimeUnit
-import kotlin.collections.mutableListOf
-import kotlin.ranges.contains
 
-class MusicDownloader() {
+class YoutubeMediaService(private var httpClient: OkHttpClient) {
     private var newPipe = initNewPipe()
     private val minResults = 20
     private val maxResults = 40
@@ -32,6 +25,8 @@ class MusicDownloader() {
     companion object {
         const val searchString = "OST"
     }
+
+    private val EMPTY_PROGRESS: (Float) -> Unit = {}
 
     private val systemAliases = mapOf(
         "gc" to setOf("gc", "gamecube", "nintendo gamecube", "game cube", "ngc"),
@@ -63,13 +58,13 @@ class MusicDownloader() {
         "gba" to setOf("gameboy", "gba", "game boy", "nintendo game boy", "nintendo gameboy", "gameboy advance", "game boy advance", "nintendo game boy advance", "nintendo gameboy advance")
     )
 
-    private val sharedClient = OkHttpClient.Builder()
+    /**private val sharedClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+        .build()*/
 
     private fun initNewPipe() {
-        newPipe = NewPipe.init(NewPipeDownloader(OkHttpClient()))
+        newPipe = NewPipe.init(NewPipeDownloader(httpClient))
     }
 
     suspend fun downloadGameMusic(gameTitle: String, gameFileName: String, system: String, musicDir: File?): File? {
@@ -84,14 +79,53 @@ class MusicDownloader() {
     suspend fun downloadGameMusicWithUrl(
         gameFilename: String,
         musicDir: File?,
-        url: String
+        url: String,
+        onProgress: (Float) -> Unit = EMPTY_PROGRESS
     ): File? {
         val streamUrl = getYoutubeAudioUrl(url)
         Log.d("CoroutineDebug", "streamUrl: " + streamUrl)
         if (streamUrl != null) {
-            return downloadToLocal(streamUrl, gameFilename, musicDir)
+            return downloadToLocal(streamUrl, gameFilename, musicDir, onProgress)
         }
         return null
+    }
+
+    suspend fun handleIgdbMedia(item: MediaSearchResult): String? {
+        return if (item.url.length == 11) {
+            getPlayableVideoUrl(item.url)
+        } else {
+            item.url
+        }
+    }
+
+    suspend fun getPlayableVideoUrl(videoId: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val videoUrl = "https://www.youtube.com/watch?v=$videoId"
+            val extractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
+            extractor.fetchPage()
+
+            val bestStream = extractor.videoStreams
+                .filter { it.format == MediaFormat.MPEG_4 }
+                .maxByOrNull { it.resolution }
+
+            return@withContext bestStream?.content
+        } catch (e: Exception) {
+            Log.e("VideoDebug", "Failed to extract video stream for ID: $videoId", e)
+            null
+        }
+    }
+
+    suspend fun getPlayableAudioUrl(videoUrl: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val extractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
+            extractor.fetchPage()
+            val bestAudio = getBestAudioStreamFor(extractor.audioStreams)
+
+            return@withContext bestAudio?.content
+        } catch (e: Exception) {
+            Log.e("AudioDebug", "Failed to extract audio stream for url: $videoUrl", e)
+            null
+        }
     }
 
     public suspend fun getYoutubeSearchResultsFiltered(query: String, gameTitle: String, system: String, first: Boolean): List<StreamInfoItem> = withContext(Dispatchers.IO) {
@@ -281,11 +315,7 @@ class MusicDownloader() {
             // Inside your getDirectAudioUrl function
             val audioStreams = extractor.audioStreams
 
-            // Filter for itag 140 (128kbps M4A) or 251 (160kbps Opus/WebM)
-            val bestAudio = audioStreams.find { it.itag == 140 } // M4A (preferred for Android)
-                ?: audioStreams.find { it.itag == 251 } // Opus (Better quality, slightly larger)
-                ?: audioStreams.find { it.itag == 139 } // 48kbps M4A (Smallest)
-                ?: audioStreams.firstOrNull { it.averageBitrate < 200_000 } // Fallback to any low-bitrate stream
+            val bestAudio = getBestAudioStreamFor(audioStreams)
 
             if (bestAudio != null) {
                 Log.d("CoroutineDebug", "Selected itag: ${bestAudio.itag} | Size should be small.")
@@ -298,7 +328,14 @@ class MusicDownloader() {
         return@search ""
     }
 
-    private suspend fun downloadToLocal(url: String, gameTitle: String, musicDir: File?): File = withContext(Dispatchers.IO) {
+    private fun getBestAudioStreamFor(audioStreams: List<AudioStream>): AudioStream? {
+        return audioStreams.find { it.itag == 140 } // M4A (preferred for Android)
+            ?: audioStreams.find { it.itag == 251 } // Opus (Better quality, slightly larger)
+            ?: audioStreams.find { it.itag == 139 } // 48kbps M4A (Smallest)
+            ?: audioStreams.firstOrNull { it.averageBitrate < 200_000 } // Fallback to any low-bitrate stream
+    }
+
+    private suspend fun downloadToLocal(url: String, gameTitle: String, musicDir: File?, onProgress: (Float) -> Unit = EMPTY_PROGRESS): File = withContext(Dispatchers.IO) {
         try {
             val fileName = "${gameTitle}.m4a"
             val file = File(musicDir, fileName)
@@ -314,7 +351,7 @@ class MusicDownloader() {
                 .addHeader("Connection", "keep-alive")
                 .build()
 
-            sharedClient.newCall(request).execute().use { response ->
+            httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw Exception("HTTP Error: ${response.code}")
 
                 val totalBytes = response.body?.contentLength() ?: -1
@@ -325,22 +362,31 @@ class MusicDownloader() {
                         val buffer = ByteArray(8 * 1024) // 8KB buffer
                         var bytesRead: Int
                         var totalDownloaded = 0L
+                        var lastReportedPercentage = -1
 
                         while (input.read(buffer).also { bytesRead = it } != -1) {
                             output.write(buffer, 0, bytesRead)
                             totalDownloaded += bytesRead
 
-                            // Log every 500KB so we can see progress
-                            if (totalDownloaded % (512 * 1024) < 8192) {
-                                Log.d("CoroutineDebug", "Downloaded: $totalDownloaded / $totalBytes")
+                            if (onProgress !== EMPTY_PROGRESS && totalBytes > 0) {
+                                val progress = totalDownloaded.toFloat() / totalBytes.toFloat()
+                                val currentPercentage = (progress * 100).toInt()
+
+                                if (currentPercentage > lastReportedPercentage) {
+                                    lastReportedPercentage = currentPercentage
+
+                                    withContext(Dispatchers.Main) {
+                                        onProgress(progress)
+                                    }
+                                }
                             }
                         }
-                        output.flush() // Ensure everything is written to disk
+                        output.flush()
                     }
                 }
             }
 
-            Log.d("CoroutineDebug", "file being returned from doiwnload local: " + file.toString())
+            Log.d("CoroutineDebug", "file being returned from download local: " + file.toString())
             return@withContext file
         }
         catch (e: Exception) {

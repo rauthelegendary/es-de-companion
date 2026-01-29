@@ -20,11 +20,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.esde.companion.OverlayWidget
 import com.esde.companion.art.ArtRepository
 import com.esde.companion.art.GameSearchResult
-import com.esde.companion.art.ImageSearchResult
 import com.esde.companion.art.MediaCategory
+import com.esde.companion.art.MediaSearchResult
+import com.esde.companion.ost.YoutubeMediaService
+import com.esde.companion.ui.ContentType
 import kotlinx.coroutines.launch
 
 enum class ScraperStep { SEARCH, TYPES, GALLERY, SAVE }
@@ -33,7 +34,8 @@ enum class ScraperStep { SEARCH, TYPES, GALLERY, SAVE }
 fun ScraperMenuContent(
     repository: ArtRepository,
     initialSearchQuery: String,
-    onSave: (url: String, contentType: OverlayWidget.ContentType, slot: Int) -> Unit
+    onSave: (url: String, contentType: ContentType, slot: Int) -> Unit,
+    mediaService: YoutubeMediaService
 ) {
     val scope = rememberCoroutineScope()
     var currentStep by remember { mutableStateOf(ScraperStep.SEARCH) }
@@ -43,10 +45,11 @@ fun ScraperMenuContent(
 
     var searchResults by remember { mutableStateOf<List<GameSearchResult>>(emptyList()) }
     var availableCategories by remember { mutableStateOf<List<MediaCategory>>(emptyList()) }
-    var galleryImages by remember { mutableStateOf<List<ImageSearchResult>>(emptyList()) }
+    var galleryImages by remember { mutableStateOf<List<MediaSearchResult>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var selectedGameId by remember { mutableStateOf("") }
-    var selectedImage by remember { mutableStateOf<ImageSearchResult?>(null) }
+    var selectedImage by remember { mutableStateOf<MediaSearchResult?>(null) }
+    var isVideo by remember {mutableStateOf<Boolean>(false)}
 
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF222222))) {
@@ -64,7 +67,7 @@ fun ScraperMenuContent(
                             currentStep = ScraperStep.SEARCH
                         }
                         .background(if (selectedScraper == type) Color(0xFF444444) else Color.Transparent)
-                        .padding(12.dp),
+                        .padding(6.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(type.name, color = if (selectedScraper == type) Color.Cyan else Color.White)
@@ -102,7 +105,7 @@ fun ScraperMenuContent(
                     val id = selectedGameId ?: return@LaunchedEffect
                     isLoading = true
                     val scraper = repository.getScraper(selectedScraper!!)
-                    availableCategories = scraper?.getAvailableMediaTypes(id.toInt()) ?: emptyList()
+                    availableCategories = scraper?.getAvailableMediaTypes(id) ?: emptyList()
                     isLoading = false
                 }
                 //select type step
@@ -122,7 +125,7 @@ fun ScraperMenuContent(
                         val id = selectedGameId ?: return@LaunchedEffect
                         isLoading = true
                         val scraper = repository.getScraper(selectedScraper!!)
-                        galleryImages = scraper?.fetchImages(id.toInt(), selectedCategoryKey) ?: emptyList()
+                        galleryImages = scraper?.fetchImages(id, selectedCategoryKey) ?: emptyList()
                         isLoading = false
                     }
                 }
@@ -136,17 +139,18 @@ fun ScraperMenuContent(
                     onImageSelected = { image ->
                         selectedImage = image
                         currentStep = ScraperStep.SAVE
+                        isVideo = selectedCategoryKey == "videos"
                     }
                 )
             }
             ScraperStep.SAVE -> {
-                StepHeader(title = "SAVE IMAGE", onBack = { currentStep = ScraperStep.GALLERY })
-                selectedImage?.let { image ->
-                    SaveImageStep(
-                        image = image,
-                        onConfirm = { type, slot ->
-                            onSave(image.url, type, slot)
-                        }
+                StepHeader(title = "SAVE MEDIA", onBack = { currentStep = ScraperStep.GALLERY })
+                selectedImage?.let { media ->
+                    SaveMediaStep(
+                        media = media,
+                        onSave = onSave,
+                        isVideo = isVideo,
+                        mediaService = mediaService
                     )
                 }
             }

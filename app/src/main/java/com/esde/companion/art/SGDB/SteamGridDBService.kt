@@ -13,17 +13,17 @@ interface SteamGridDBService {
 
     @GET("heroes/game/{id}")
     suspend fun getHeroes(
-        @Path("id") gameId: Int
+        @Path("id") gameId: String
     ): SGDBResponse<List<SGDBImage>>
 
     @GET("grids/game/{id}")
     suspend fun getGrids(
-        @Path("id") gameId: Int
+        @Path("id") gameId: String
     ): SGDBResponse<List<SGDBImage>>
 
     @GET("logos/game/{id}")
     suspend fun getLogos(
-        @Path("id") gameId: Int,
+        @Path("id") gameId: String,
         @Query("types") types: String = "static,animated"
     ): SGDBResponse<List<SGDBImage>>
 }
