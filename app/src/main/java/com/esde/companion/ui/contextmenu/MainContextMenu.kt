@@ -1,5 +1,6 @@
 package com.esde.companion.ui.contextmenu
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -34,14 +35,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.esde.companion.AppState
+import com.esde.companion.MediaFileLocator
+import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.PageEditorItem
 import com.esde.companion.WidgetPage
 import com.esde.companion.art.ArtRepository
+import com.esde.companion.art.MediaOverride
+import com.esde.companion.art.MediaOverrideRepository
+import com.esde.companion.art.LaunchBox.LaunchBoxDao
+import com.esde.companion.getCurrentSystemName
 import com.esde.companion.isInGameBrowsingMode
 import com.esde.companion.isInSystemBrowsingMode
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.contextmenu.scraper.ScraperMenuContent
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import java.io.File
 
 
 @Composable
@@ -50,6 +59,8 @@ fun MainContextMenu(
     uiState: MenuUiState,
     currentPageIndex: Int,
     currentPage: WidgetPage,
+    pages: List<WidgetPage>,
+    onSavePages: (List<PageEditorItem>) -> Unit,
     onDismiss: () -> Unit,
     widgetActions: WidgetActions,
     artRepository: ArtRepository,
@@ -58,14 +69,25 @@ fun MainContextMenu(
     onMusicSearch: (String) -> Unit,
     onMusicSelect: (StreamInfoItem, (Float) -> Unit) -> Unit,
     onSave: (String, ContentType, Int) -> Unit,
-    mediaService: YoutubeMediaService
-) {
+    mediaService: YoutubeMediaService,
+    mediaFileLocator: MediaFileLocator,
+    mediaOverrideRepository: MediaOverrideRepository,
+    onSaveOverride: (MediaOverride) -> Unit,
+    onRemoveOverride: (MediaOverride) -> Unit,
+    onCropSave: (File, Bitmap) -> Unit,
+    removeCrop: (File) -> Unit,
+    onRenamePage: (String) -> Unit,
+    swapMedia: (String, ContentType, String, MediaSlot, MediaSlot) -> Unit,
+    deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
+    launchBoxDao: LaunchBoxDao
+    ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    var gameName = ""
+    var fileName = ""
+    val system = state.getCurrentSystemName()!!
     val tabs: List<String> = remember(state) {
         if (state.isInGameBrowsingMode()) {
-            gameName = (state as AppState.GameBrowsing).gameName!!
-            listOf("Widgets", "Music", "Scraper")
+            fileName = (state as AppState.GameBrowsing).gameFilename!!
+            listOf("Widgets", "Game Media", "Music", "Scraper")
         } else {
             listOf("Widgets")
         }
@@ -118,14 +140,30 @@ fun MainContextMenu(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
             ) {
-                Box(modifier = Modifier.weight(1f).padding(16.dp)) {
+                Box(modifier = Modifier.weight(1f).padding(10.dp)) {
                     when (tabs[selectedTab]) {
                         "Widgets" -> WidgetMenuContent(
                             uiState = uiState,
                             isSystemView = state.isInSystemBrowsingMode(),
                             actions = widgetActions,
                             currentPageIndex = currentPageIndex,
-                            currentPage = currentPage
+                            currentPage = currentPage,
+                            pages = pages,
+                            onSavePages = onSavePages,
+                            onRenamePage = onRenamePage
+                        )
+
+                        "Game Media" -> GameMediaContent(
+                            game = fileName,
+                            system = system,
+                            mediaFileLocator = mediaFileLocator,
+                            onSaveOverride = onSaveOverride,
+                            onRemoveOverride = onRemoveOverride,
+                            removeCrop = removeCrop,
+                            onCropSave = onCropSave,
+                            mediaOverrideRepository = mediaOverrideRepository,
+                            swapMedia = swapMedia,
+                            deleteMedia = deleteMedia
                         )
 
                         "Music" -> {
@@ -146,7 +184,11 @@ fun MainContextMenu(
                                 repository = artRepository,
                                 initialSearchQuery = s.gameName!!,
                                 onSave = onSave,
-                                mediaService = mediaService
+                                mediaService = mediaService,
+                                mediaFileLocator = mediaFileLocator,
+                                gameFileName = fileName,
+                                systemName = system,
+                                launchBoxDao = launchBoxDao
                             )
                         }
                     }

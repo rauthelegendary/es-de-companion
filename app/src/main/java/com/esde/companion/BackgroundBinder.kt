@@ -7,8 +7,9 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
-import android.view.animation.DecelerateInterpolator
+import android.view.ViewGroup
 import android.widget.ImageView
+import androidx.compose.ui.platform.ComposeView
 import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
@@ -25,6 +26,7 @@ import coil.dispose
 import coil.load
 import com.esde.companion.OverlayWidget.MediaSlot
 import com.esde.companion.animators.PanZoomAnimator
+import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.WidgetContext
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,12 +39,15 @@ class BackgroundBinder(
     private val lifecycleOwner: LifecycleOwner,
     private val imageView: ImageView,
     private val videoView: PlayerView,
+    private val widgetContainer: ViewGroup,
+    private val rootContainer: ViewGroup,
+    private val videoCover: View,
     private val dimmerView: View,
     private var videoDelayHandler: Handler = Handler(Looper.getMainLooper()),
-    private var widgetsLocked: Boolean,
     private var musicStop: () -> Unit,
     private var widgetHide: () -> Unit,
-    private val pathResolver: WidgetPathResolver
+    private val pathResolver: WidgetPathResolver,
+    private val menuView: ComposeView
 ): DefaultLifecycleObserver {
     private var wasPlayingOnPause: Boolean = false
     var isActivityVisible: Boolean = true
@@ -56,6 +61,11 @@ class BackgroundBinder(
     private var previousSystem : String = ""
     private var previousGame: String = ""
     private var allowedVolume: Float = 1f
+    private var playAnimation = false
+    private var switchedGame = false
+    private var switchedSystem = false
+    private var widgetsLocked = false
+    private var manualMuteInversion = false
 
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
@@ -68,25 +78,31 @@ class BackgroundBinder(
             AudioReferee.currentPriority
                 .flowWithLifecycle(lifecycleOwner.lifecycle, Lifecycle.State.STARTED)
                 .distinctUntilChanged()
-                .collect { priority ->
-                    allowedVolume = getAllowedAudioLevel(priority)
+                .collect {
+                    allowedVolume = getAllowedAudioLevel()
                     player?.volume = allowedVolume//volumeFader.fadeTo(allowedVolume)
                 }
         }
     }
 
-    fun apply(page: WidgetPage, newState: AppState, mediaFile: File?, forcedRefresh: Boolean = false) {
+    fun apply(page: WidgetPage, newState: AppState, mediaFile: File?, widgetsLocked: Boolean, forcedRefresh: Boolean = false) {
         val systemName = newState.getCurrentSystemName()
         val gameName = newState.getCurrentGameFilename()
 
-        if(!forcedRefresh && ((previousSystem == systemName && gameName == null && previousGame == "" || previousGame == gameName) && page.hasSameVisualSettings(currentPage))) {
+        switchedSystem = previousSystem != systemName
+        switchedGame = previousGame != gameName
+        this.widgetsLocked = widgetsLocked
+
+        if(!forcedRefresh && ((!switchedSystem && gameName == null && previousGame == "" || !switchedGame) && page.hasSameVisualSettings(currentPage))) {
             if(widgetsLocked && player != null && player!!.playbackState == Player.STATE_READY && !player!!.playWhenReady) {
                 player?.play()
             }
             return
         }
+        manualMuteInversion = false
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
         currentPage = page
+        playAnimation = currentPage.animation == PageAnimation.PAGE || (currentPage.animation == PageAnimation.CONTEXT && (switchedGame || switchedSystem))
         state = newState
 
         previousSystem = systemName ?: ""
@@ -132,24 +148,46 @@ class BackgroundBinder(
             }
             imageView.visibility = View.VISIBLE
             PanZoomAnimator.stopPanZoom(imageView)
+            imageView.scaleType = ImageView.ScaleType.FIT_CENTER
             imageView.animate().cancel()
             imageView.setTag(R.id.tag_base_scale_applied, false)
 
             imageView.load(file) {
-                if (currentPage.swapAnimation) {
-                    crossfade(currentPage.animationDuration)
-                } else {
-                    crossfade(0)
-                }
-
                 listener(
+                    onStart = {
+                        if (playAnimation) {
+                            imageView.alpha = 0f
+                        }
+                    },
                     onSuccess = { _, _ ->
-                        if (currentPage.panZoomAnimation) {
-                            PanZoomAnimator.applyBaseScaleOnce(imageView)
-                            imageView.post {
+                        val shouldAnimate = currentPage.panZoomAnimation && currentPage.backgroundType != PageContentType.SCREENSHOT
+                        if (playAnimation) {
+                            imageView.animate()
+                                .alpha(1f)
+                                .setDuration(currentPage.animationDuration.toLong())
+                                .withStartAction {
+                                    if (shouldAnimate) {
+                                        imageView.post {
+                                            PanZoomAnimator.applyBaseScaleOnce(imageView)
+                                        }
+                                    }
+                                }
+                                .withEndAction {
+                                    if (shouldAnimate) {
+                                        PanZoomAnimator.startAnimation(imageView)
+                                    }
+                                }
+                                .start()
+                        } else {
+                            imageView.alpha = 1f
+                            if (shouldAnimate) {
+                                PanZoomAnimator.applyBaseScaleOnce(imageView)
                                 PanZoomAnimator.startAnimation(imageView)
                             }
                         }
+                    },
+                    onError = { _, _ ->
+                        imageView.alpha = 1f
                     }
                 )
             }
@@ -165,11 +203,7 @@ class BackgroundBinder(
     }
 
     private fun showVideo(file: File?) {
-        //if (currentVideoPath == file?.absolutePath && (player?.isPlaying == true)) {
-        //    return
-        //}
         imageView.visibility = View.GONE
-        //should I clear image here or something?
         videoView.visibility = View.VISIBLE
 
         if (state is AppState.GamePlaying) {
@@ -184,11 +218,10 @@ class BackgroundBinder(
             return
         }
 
-        // Block videos during widget edit mode
         if (!widgetsLocked) {
             Log.d("MainActivity", "Video blocked - widget edit mode active")
             player?.pause()
-            //stopVideoPlayer()
+            videoView.visibility = View.GONE
             return
         }
 
@@ -196,11 +229,9 @@ class BackgroundBinder(
             val delay = getVideoDelay()
 
             if (delay == 0L) {
-                // Instant - load video immediately
                 loadVideo(file)
             } else {
-                // Delayed - show image first, then video
-                stopVideoPlayer() // Stop any current video
+                stopVideoPlayer()
                 if(!currentPage.isVideoMuted) {
                     AudioReferee.updateBackgroundState(true)
                 }
@@ -210,12 +241,10 @@ class BackgroundBinder(
                 }
 
                 videoDelayRunnable = Runnable {
-                    // Check if conditions are still valid for playing video
-                    // Only check reliable signals
                     val shouldAllowDelayedVideo =
-                        isActivityVisible &&        // Still visible (window-level, not app state)
-                                state is AppState.GameBrowsing &&                 // Still browsing (not playing or screensaver)
-                                widgetsLocked                                     // Widget edit mode OFF
+                        isActivityVisible &&
+                                state is AppState.GameBrowsing &&
+                                widgetsLocked
 
                     if (shouldAllowDelayedVideo) {
                         loadVideo(file)
@@ -223,7 +252,7 @@ class BackgroundBinder(
                         AudioReferee.updateBackgroundState(false)
                     }
                 }
-                val tempImagePath = pathResolver.resolvePageMediaPath(PageContentType.FANART, previousSystem, previousGame, MediaSlot.Default)
+                val tempImagePath = pathResolver.resolvePageMediaPath(PageContentType.FANART, previousSystem, previousGame, MediaSlot.Default, false)
                 showImage(tempImagePath, false)
                 videoDelayHandler.postDelayed(videoDelayRunnable!!, delay)
             }
@@ -232,8 +261,10 @@ class BackgroundBinder(
         }
     }
 
-    private fun getAllowedAudioLevel(priority: AudioReferee.AudioSource): Float {
-        return if (priority == AudioReferee.AudioSource.BACKGROUND && !currentPage.isVideoMuted) 1f else 0f
+    private fun getAllowedAudioLevel(): Float {
+        val muted = if (!manualMuteInversion) currentPage.isVideoMuted else !currentPage.isVideoMuted
+        val audiolevel = if (AudioReferee.currentPriority.value == AudioReferee.AudioSource.BACKGROUND && !muted) 1f else 0f
+        return audiolevel
     }
 
 
@@ -243,45 +274,69 @@ class BackgroundBinder(
             if(player == null) {
                 buildVideoPlayer()
             }
-            // Set volume based on system volume
-            //updateVideoVolume()
 
-            // Create media item
             imageView.visibility = View.GONE
             val mediaItem = MediaItem.fromUri(videoFile.absolutePath)
             videoView.post {
+                updateVideoLayering(currentPage.displayWidgetsOverVideo)
+                videoCover.animate().cancel()
+                if (playAnimation) {
+                    videoCover.alpha = 1f
+                    videoCover.visibility = View.VISIBLE
+                } else {
+                    videoCover.visibility = View.GONE
+                }
+
+                player?.addListener(object : Player.Listener {
+                    override fun onRenderedFirstFrame() {
+                        if (playAnimation) {
+                            videoCover.animate()
+                                .alpha(0f)
+                                .setDuration(currentPage.animationDuration.toLong())
+                                .withEndAction {
+                                    videoCover.visibility = View.GONE
+                                }
+                                .start()
+                        } else {
+                            videoCover.visibility = View.GONE
+                        }
+                        player?.removeListener(this)
+                    }
+                })
+
                 player?.setMediaItem(mediaItem)
                 player?.volume = if (currentPage.isVideoMuted) 0f else allowedVolume
                 player?.prepare()
                 player?.playWhenReady = true
                 player?.repeatMode = Player.REPEAT_MODE_ONE
-                //player?.play()
-
-                //Hide widgets when video plays
-                //widgetHide()
 
                 if(!currentPage.isVideoMuted) {
                     AudioReferee.updateBackgroundState(true)
                 }
-
-                // Show video view with animation
                 videoView.visibility = View.VISIBLE
-                if(currentPage.swapAnimation) {
-                    videoView.alpha = 0f
-                    videoView.scaleX = 1f
-                    videoView.scaleY = 1f
-                    videoView.animate()
-                    .alpha(1f)
-                    .setDuration(currentPage.animationDuration.toLong())
-                    .setInterpolator(DecelerateInterpolator())
-                    .start()
-                }
+                videoView.alpha = 1f
+
                 currentVideoPath = videoFile.absolutePath
             }
         } catch (e: Exception) {
             Log.e("MainActivity", "Error loading video: ${videoFile.absolutePath}", e)
             releasePlayer()
         }
+    }
+
+    fun updateVideoLayering(widgetsOverVideo: Boolean) {
+        if (!widgetsOverVideo) {
+            videoView.bringToFront()
+            menuView.bringToFront()
+        } else {
+           // videoView.translationZ = -1f
+            dimmerView.bringToFront()
+            widgetContainer.bringToFront()
+            menuView.bringToFront()
+        }
+
+        rootContainer.requestLayout()
+        rootContainer.invalidate()
     }
 
     /**
@@ -373,8 +428,7 @@ class BackgroundBinder(
             player?.play()
             wasPlayingOnPause = false
         }
-        //volumeFader.fadeTo(getAllowedAudioLevel(AudioReferee.currentPriority.value))
-        player?.volume = getAllowedAudioLevel(AudioReferee.currentPriority.value)
+        player?.volume = getAllowedAudioLevel()
     }
 
     override fun onStart(owner: LifecycleOwner) {
@@ -390,7 +444,6 @@ class BackgroundBinder(
 
     fun onWindowFocusChanged(hasFocus: Boolean) {
         if (hasFocus) {
-            // The user just returned from Recents or pulled down the notification shade
             Log.d("AppFocus", "Window regained focus - Recovering Background")
             resetVideoPlayer()
         }
@@ -402,6 +455,19 @@ class BackgroundBinder(
         if(player?.isPlaying == true) {
             player?.pause()
             wasPlayingOnPause = true
+        }
+    }
+
+    fun toggleMute() {
+        manualMuteInversion = !manualMuteInversion
+        if(currentPage.backgroundType == PageContentType.VIDEO && player?.isPlaying == true) {
+            if (player?.volume == 0f) {
+                AudioReferee.updateBackgroundState(true)
+                player?.volume = getAllowedAudioLevel()
+            } else {
+                AudioReferee.updateBackgroundState(false)
+                player?.volume = 0f
+            }
         }
     }
 }

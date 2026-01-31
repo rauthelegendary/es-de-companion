@@ -1,4 +1,4 @@
-package com.esde.companion.art.SGDB
+package com.esde.companion.art.steamgrid
 
 import android.util.Log
 import com.esde.companion.NetworkClientManager

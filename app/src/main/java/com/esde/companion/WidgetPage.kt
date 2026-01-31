@@ -1,11 +1,13 @@
 package com.esde.companion
 
 import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
 import java.util.UUID
 
 data class WidgetPage(
     val id: String = UUID.randomUUID().toString(),
+    var name: String = "",
     var widgets: MutableList<OverlayWidget> = mutableListOf(),
     var backgroundType: PageContentType = PageContentType.FANART,
     var backgroundPath: String? = null,
@@ -13,14 +15,16 @@ data class WidgetPage(
     var backgroundOpacity: Float = 1.0f,
     var isVideoMuted: Boolean = true,
     var blurRadius: Float = 0f,
-    var swapAnimation: Boolean = true,
+    var animation: PageAnimation = PageAnimation.CONTEXT,
+    var animateWidgets: Boolean = false,
     var animationDuration: Int = 250,
     var panZoomAnimation: Boolean = true,
     var solidColor: Int? = null,
     var customPath: String? = null,
     var videoDelay: Int = 0,
     var displayWidgets: Boolean = true,
-    var isRequired: Boolean = false
+    var isRequired: Boolean = false,
+    var displayWidgetsOverVideo: Boolean = false
 )
 
 fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
@@ -30,11 +34,13 @@ fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
             this.backgroundOpacity == other.backgroundOpacity &&
             this.isVideoMuted == other.isVideoMuted &&
             this.blurRadius == other.blurRadius &&
-            this.swapAnimation == other.swapAnimation &&
+            this.animation == other.animation &&
+            this.animateWidgets == other.animateWidgets &&
             this.animationDuration == other.animationDuration &&
             this.panZoomAnimation == other.panZoomAnimation &&
             this.solidColor == other.solidColor &&
             this.customPath == other.customPath &&
             this.videoDelay == other.videoDelay &&
-            this.displayWidgets == other.displayWidgets
+            this.displayWidgets == other.displayWidgets &&
+            this.displayWidgetsOverVideo == other.displayWidgetsOverVideo
 }

@@ -102,6 +102,7 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.cardview:cardview:1.0.0")
+    implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
 
     // IGDB API with necessary Protobuf exclusion
     implementation("io.github.husnjak:igdb-api-jvm:1.3.1") {
@@ -118,6 +119,9 @@ dependencies {
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+
+    implementation("com.vanniktech:android-image-cropper:4.7.0")
+
 
     // NewPipe Extractor
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {

@@ -19,6 +19,13 @@
         android:focusableInTouchMode="false"
         app:surface_type="texture_view" />
 
+    <View
+        android:id="@+id/videoCover"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:visibility="gone" />
+
     <ImageView
         android:id="@+id/gameImageView"
         android:layout_width="match_parent"
@@ -32,7 +39,7 @@
         android:id="@+id/dimmingOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#33000000" />
+        android:background="#FF000000" />
 
     <ImageView
         android:id="@+id/marqueeImageView"

@@ -12,14 +12,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +46,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.request.ImageRequest
+import com.esde.companion.MediaFileLocator
+import com.esde.companion.OverlayWidget
 import com.esde.companion.art.MediaSearchResult
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ui.ContentType
@@ -52,8 +59,11 @@ fun SaveMediaStep(
     media: MediaSearchResult,
     onSave: (String, ContentType, Int) -> Unit,
     isVideo: Boolean,
-    mediaService: YoutubeMediaService
-) {
+    mediaService: YoutubeMediaService,
+    mediaFileLocator: MediaFileLocator,
+    gameName: String,
+    systemName: String
+    ) {
     val selectableMediaTypes = listOf<ContentType>(
         ContentType.BOX_2D,
         ContentType.BOX_3D,
@@ -75,8 +85,9 @@ fun SaveMediaStep(
             media.url
         }
     }
-
     val resolvedUrl = playableUrlState.value
+    val displayMetrics = context.resources.displayMetrics
+    val maxScreenDimension = maxOf(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
     val exoPlayer = remember(resolvedUrl) {
         if (isVideo && resolvedUrl != null && resolvedUrl.startsWith("http")) {
@@ -89,6 +100,18 @@ fun SaveMediaStep(
                 volume = 0.7f
             }
         } else null
+    }
+
+    val slotStatus = remember(selectedType, gameName, systemName) {
+        (1..3).associateWith { slot ->
+            val mediaSlot = when(slot) {
+                1 -> OverlayWidget.MediaSlot.Slot1
+                2 -> OverlayWidget.MediaSlot.Slot2
+                3 -> OverlayWidget.MediaSlot.Slot3
+                else -> OverlayWidget.MediaSlot.Default
+            }
+            mediaFileLocator.findMediaFileDefault(selectedType, systemName, gameName, mediaSlot)?.exists() == true
+        }
     }
 
     DisposableEffect(exoPlayer) {
@@ -115,6 +138,7 @@ fun SaveMediaStep(
                         factory = { ctx ->
                             PlayerView(ctx).apply {
                                 player = exoPlayer
+                                player?.volume = 0.6f
                                 useController = true
                             }
                         },
@@ -127,7 +151,11 @@ fun SaveMediaStep(
                 }
             } else {
                 AsyncImage(
-                    model = media.url,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(media.url)
+                        .size(maxScreenDimension)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = null,
                     modifier = Modifier.align(Alignment.Center).padding(8.dp),
                     onState = { state ->
@@ -139,60 +167,76 @@ fun SaveMediaStep(
             }
         }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-            if (!isVideo) {
-                Text("SAVE AS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    selectableMediaTypes.forEach { type ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = { selectedType = type },
-                            label = { Text(type.toDisplayName()) }
-                        )
-                    }
-                }
-            }
-
-            Text("TARGET SLOT", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                (1..3).forEach { slot ->
+        if (!isVideo) {
+            Text("SAVE AS", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                selectableMediaTypes.forEach { type ->
                     FilterChip(
-                        selected = selectedSlot == slot,
-                        onClick = { selectedSlot = slot },
-                        label = { Text("Alt $slot") }
+                        selected = selectedType == type,
+                        onClick = { selectedType = type },
+                        label = { Text(type.toDisplayName()) }
                     )
                 }
             }
+        }
 
-            //a small summary to explain what we're doing
-            val isEsDe = selectedSlot == 0
-            val typeName = selectedType.toDisplayName()
-            //TODO: no longer required but I'll leave it in for now in case I change my mind, doesn't affect anything anyway
-            val summaryText = if (isEsDe) {
-                "Image will overwrite the existing \"$typeName\" within ES-DE. This will affect both ES-DE and the companion app. Are you sure?"
-            } else {
-                "Image will be saved as \"$typeName\" in the \"Alt $selectedSlot\" slot. Any existing image in that slot will be overwritten."
-            }
+        Text("TARGET SLOT", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (1..3).forEach { slot ->
+                val exists = slotStatus[slot] ?: false
 
-            Text(
-                text = summaryText,
-                color = if (isEsDe) Color(0xFFEF5350) else Color.White, // Red for ES-DE warning
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(vertical = 12.dp)
-            )
-
-            Button(
-                onClick = {
-                    exoPlayer?.stop()
-                    onSave(resolvedUrl!!, selectedType, selectedSlot)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isEsDe) Color(0xFFD32F2F) else MaterialTheme.colorScheme.primary
+                FilterChip(
+                    selected = selectedSlot == slot,
+                    onClick = { selectedSlot = slot },
+                    label = {
+                        Text("Alt $slot")
+                    },
+                    trailingIcon = {
+                        if (exists) {
+                            Icon(
+                                imageVector = Icons.Default.Save, // or Icons.Default.CheckCircle
+                                contentDescription = "Occupied",
+                                modifier = Modifier.size(14.dp),
+                                tint = if (selectedSlot == slot)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                else
+                                    MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
                 )
-            ) {
-                Text("CONFIRM AND SAVE")
             }
         }
+
+        val isOccupied = slotStatus[selectedSlot] ?: false
+        val summaryText = if (isOccupied) {
+            "Warning: Alt $selectedSlot already has a file. Saving will permanently overwrite it."
+        } else {
+            "Alt $selectedSlot is empty. Media will be saved in this slot."
+        }
+
+        Text(
+            text = summaryText,
+            color = if (isOccupied) Color(0xFFFFA726) else Color.LightGray, // Orange warning for overwrite
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(vertical = 12.dp)
+        )
+
+        Button(
+            onClick = {
+                if(resolvedUrl != null) {
+                    exoPlayer?.stop()
+                    onSave(resolvedUrl!!, selectedType, selectedSlot)
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Text("CONFIRM AND SAVE")
+        }
     }
+}

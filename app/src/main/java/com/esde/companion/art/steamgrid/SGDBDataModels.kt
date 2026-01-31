@@ -1,4 +1,4 @@
-package com.esde.companion.art.SGDB
+package com.esde.companion.art.steamgrid
 
 import com.esde.companion.art.GameSearchResult
 import com.esde.companion.art.MediaSearchResult

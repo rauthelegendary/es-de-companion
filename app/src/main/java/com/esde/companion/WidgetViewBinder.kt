@@ -16,6 +16,7 @@ class WidgetViewBinder {
         container: ResizableWidgetContainer,
         lifecycleOwner: LifecycleOwner,
         dataList: List<OverlayWidget>,
+        page: WidgetPage,
         locked: Boolean,
         snapToGrid: Boolean,
         gridSize: Float,
@@ -55,13 +56,13 @@ class WidgetViewBinder {
                 if (viewPool.isNotEmpty()) {
                     view = viewPool.removeAt(0)
                     view.visibility = View.VISIBLE
-                    view.updateContent(data)
+                    view.updateContent(data, page)
                 } else {
-                    view = WidgetView(container.context, lifecycleOwner, data, onUpdate, onSelect, onEditRequested)
+                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, onEditRequested)
                 }
                 container.addView(view)
             } else {
-                view.updateContent(data)
+                view.updateContent(data, page)
             }
 
             view.setSnapToGrid(snapToGrid, gridSize)
@@ -141,5 +142,11 @@ class WidgetViewBinder {
 
     fun isWidgetOnLocation(container: ResizableWidgetContainer, x: Float, y: Float): Boolean {
         return findWidgetAt(container, x, y) != null
+    }
+
+    fun syncSingleWidget(widget: OverlayWidget, widgetContainer: ResizableWidgetContainer, widgetPage: WidgetPage) {
+        val existingViews = widgetContainer.children.filterIsInstance<WidgetView>().toList()
+        var view = existingViews.find { it.widget.id == widget.id }
+        view?.updateContent(widget, widgetPage)
     }
 }

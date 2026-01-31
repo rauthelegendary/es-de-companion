@@ -94,6 +94,7 @@ fun MusicMenuContent(
 
             url?.let {
                 exoPlayer.setMediaItem(MediaItem.fromUri(it))
+                exoPlayer.volume = 0.6f
                 exoPlayer.prepare()
                 exoPlayer.play()
             }

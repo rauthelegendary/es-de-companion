@@ -2,12 +2,13 @@ package com.esde.companion
 
 import android.content.SharedPreferences
 import android.util.DisplayMetrics
+import com.esde.companion.art.MediaOverrideRepository
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.WidgetContext
 import java.io.File
 
-class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val prefs: SharedPreferences) {
+class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val prefs: SharedPreferences, private val mediaOverrideRepository: MediaOverrideRepository) {
 
     fun resolve(
         rawWidgets: List<OverlayWidget>,
@@ -32,12 +33,15 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
 
         if (system != null) {
             if (rawWidget.contentType == ContentType.GAME_DESCRIPTION && gameFilename != null) {
-                resolvedWidget.description = getGameDescription(system, gameFilename)!!
-
+                if (getGameDescription(system, gameFilename) != null) {
+                    resolvedWidget.description = getGameDescription(system, gameFilename)!!
+                } else {
+                    resolvedWidget.description = ""
+                }
             } else if (rawWidget.contentType == ContentType.SYSTEM_LOGO) {
                 resolvedWidget.contentPath = findSystemLogo(system) ?: ""
             } else if (gameFilename != null) {
-                val mediaFile = mediaLocator.findMediaFile(
+                val mediaFile = locateFileWithOverride(
                     rawWidget.contentType,
                     system,
                     gameFilename,
@@ -58,6 +62,17 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
 
         resolvedWidget.fromPercentages(metrics.widthPixels, metrics.heightPixels)
         return ResolutionResult(resolvedWidget, missingRequired)
+    }
+
+    fun locateFileWithOverride(contentType: ContentType, system: String, gameFilename: String, givenSlot: OverlayWidget.MediaSlot): File? {
+        var slot = givenSlot
+        if(givenSlot == OverlayWidget.MediaSlot.Default) {
+            val override = mediaOverrideRepository.getOverride(gameFilename, contentType.name)
+            if (override != null) {
+                slot = override.altSlot
+            }
+        }
+        return mediaLocator.findMediaFile(contentType,system, gameFilename, slot)
     }
 
     private fun getGameDescription(systemName: String, gameFilename: String): String? {
@@ -242,22 +257,29 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
         if (page.customPath != null) {
             return File(page.customPath)
         } else {
-            return resolvePageMediaPath(page.backgroundType, system, gameFilename, page.slot)
+            return resolvePageMediaPath(page.backgroundType, system, gameFilename, page.slot, page.isRequired)
         }
     }
 
-    fun resolvePageMediaPath(contentType: PageContentType, system: String, gameFilename: String, slot: OverlayWidget.MediaSlot): File? {
+    fun resolvePageMediaPath(contentType: PageContentType, system: String, gameFilename: String, slot: OverlayWidget.MediaSlot, required: Boolean): File? {
         var result: File? = null
         if (contentType == PageContentType.VIDEO) {
-            result = mediaLocator.findMediaFile(ContentType.VIDEO, system, gameFilename, slot)
+            result = locateFileWithOverride(ContentType.VIDEO, system, gameFilename, slot)
         } else if (contentType == PageContentType.FANART) {
-            result = mediaLocator.findMediaFile(ContentType.FANART, system, gameFilename, slot)
+            result = locateFileWithOverride(ContentType.FANART, system, gameFilename, slot)
         }
         //use screenshot as backup
-        if (contentType == PageContentType.SCREENSHOT || result == null || !result.exists()) {
-            result = mediaLocator.findMediaFile(ContentType.SCREENSHOT, system, gameFilename, slot)
+        if (contentType == PageContentType.SCREENSHOT || ((result == null || !result.exists()) && !required)) {
+            result = locateFileWithOverride(ContentType.SCREENSHOT, system, gameFilename, slot)
         }
         return result
+    }
+
+    fun getCroppedFile(originalFile: File): File {
+        val nameWithoutExtension = originalFile.nameWithoutExtension
+        val extension = originalFile.extension
+        val parent = originalFile.parentFile
+        return File(parent, "${nameWithoutExtension}_cropped.$extension")
     }
 }
 

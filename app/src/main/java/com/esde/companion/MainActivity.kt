@@ -43,7 +43,6 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.webkit.MimeTypeMap
 import android.widget.CheckBox
 import android.widget.EditText
@@ -84,14 +83,18 @@ import com.api.igdb.request.IGDBWrapper
 import com.caverock.androidsvg.SVG
 import com.esde.companion.MediaFileHelper.extractGameFilenameWithoutExtension
 import com.esde.companion.MediaFileHelper.sanitizeGameFilename
+import com.esde.companion.OverlayWidget.MediaSlot
 import com.esde.companion.art.ArtRepository
-import com.esde.companion.art.IGDB.IgdbArtScraper
-import com.esde.companion.art.IGDB.TwitchAuth
-import com.esde.companion.art.SGDB.SGDBScraper
+import com.esde.companion.art.LaunchBox.LaunchBoxScraper
+import com.esde.companion.art.MediaOverride
+import com.esde.companion.art.MediaOverrideRepository
+import com.esde.companion.art.MediaService
+import com.esde.companion.art.igdb.IgdbArtScraper
+import com.esde.companion.art.igdb.TwitchAuth
+import com.esde.companion.art.steamgrid.SGDBScraper
 import com.esde.companion.ost.MusicPlayer
 import com.esde.companion.ost.MusicRepository
 import com.esde.companion.ost.YoutubeMediaService
-import com.esde.companion.ost.loudness.AppDatabase
 import com.esde.companion.ost.loudness.LoudnessService
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
@@ -111,6 +114,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import kotlin.math.abs
 
@@ -142,8 +146,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             .build()
     }
 
+    private var listeningToAudioRef: Boolean = false
     private lateinit var menuComposeView: ComposeView
     private lateinit var artRepository: ArtRepository
+    private lateinit var mediaOverrideRepository: MediaOverrideRepository
     private lateinit var rootLayout: RelativeLayout
     private lateinit var appDrawer: View
     private lateinit var appRecyclerView: RecyclerView
@@ -154,6 +160,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var androidSettingsButton: ImageButton
     private lateinit var prefs: SharedPreferences
     private lateinit var appLaunchPrefs: AppLaunchPreferences
+    private lateinit var mediaService: MediaService
     private lateinit var mediaFileLocator: MediaFileLocator
 
     // ========== MUSIC INTEGRATION START ==========
@@ -405,14 +412,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                     // Game is playing - skip reload
                     skipNextReload = true
                 }
-                // ========== MUSIC ==========
-
-                // ===========================
             } else {
                 // No settings changed that require reload - skip the reload in onResume
                 skipNextReload = true
             }
-            // Note: Video audio changes are handled automatically in onResume
 
             // Start script verification if requested
             if (startVerification) {
@@ -424,12 +427,30 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
+    fun onSwapMedia(game: String, contentType: ContentType, system: String, originalSlot: MediaSlot, targetSlot: MediaSlot) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                mediaService.swapMedia(game, contentType, system, originalSlot, targetSlot)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Swapped successfully", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         val database = AppDatabase.getDatabase(this)
         val loudnessDao = database.loudnessDao()
+        val mediaOverrideDao = database.mediaOverrideDao()
+        val launchBoxDao = database.launchBoxDao()
+        mediaOverrideRepository = MediaOverrideRepository(mediaOverrideDao)
 
         /**lifecycleScope.launch(Dispatchers.IO) {
         loudnessDao.clearAllLoudnessData()
@@ -437,18 +458,20 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         ////SCRAPING STUFF////
         val steamGrid = SGDBScraper(BuildConfig.STEAM_GRID_API_KEY)
+        val launchBoxScraper = LaunchBoxScraper(launchBoxDao)
         lifecycleScope.launch(Dispatchers.IO) {
-        val token = TwitchAuth.getTwitchAccessToken()
-            if(token != null) {
-                IGDBWrapper.setCredentials(
-                    BuildConfig.IGDB_CLIENT_ID,
-                    token
-                )
-                var igdbScraper: IgdbArtScraper = IgdbArtScraper()
-                artRepository = ArtRepository(steamGrid, igdbScraper)
-            }
+            mediaOverrideRepository.initialize()
+            val token = TwitchAuth.getTwitchAccessToken()
+                if(token != null) {
+                    IGDBWrapper.setCredentials(
+                        BuildConfig.IGDB_CLIENT_ID,
+                        token
+                    )
+                    var igdbScraper: IgdbArtScraper = IgdbArtScraper()
+                    artRepository = ArtRepository(steamGrid, igdbScraper, launchBoxScraper)
+                }
         }
-        var youtubeService = YoutubeMediaService(NetworkClientManager.baseClient)
+        val youtubeService = YoutubeMediaService(NetworkClientManager.baseClient)
 
         musicRepository = MusicRepository(youtubeService, LoudnessService(loudnessDao))
         val audioAttributes = AudioAttributes.Builder()
@@ -468,6 +491,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         prefs = getSharedPreferences("ESDESecondScreenPrefs", MODE_PRIVATE)
         appLaunchPrefs = AppLaunchPreferences(this)
         mediaFileLocator = MediaFileLocator(prefs)
+        mediaService = MediaService(mediaOverrideRepository, mediaFileLocator)
 
         // ========== MUSIC INTEGRATION START ==========
 
@@ -498,22 +522,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         widgetContainer = findViewById(R.id.widgetContainer)
         gameWidgetManager = WidgetManager(this, WidgetContext.GAME)
         systemWidgetManager = WidgetManager(this, WidgetContext.SYSTEM)
-        widgetPathResolver = WidgetPathResolver(mediaFileLocator, prefs)
+        widgetPathResolver = WidgetPathResolver(mediaFileLocator, prefs, mediaOverrideRepository)
         widgetViewBinder = WidgetViewBinder()
-
-
-        backgroundBinder = BackgroundBinder(
-            context = this,
-            lifecycleOwner = this,
-            imageView = findViewById(R.id.gameImageView),
-            videoView = findViewById(R.id.videoView),
-            dimmerView = findViewById(R.id.dimmingOverlay),
-            widgetsLocked = widgetsLocked,
-            musicStop = ::releaseMusicPlayer,
-            widgetHide = ::hideWidgets,
-            pathResolver = widgetPathResolver
-        )
-
 
         // Set initial position off-screen (above the top)
         val displayHeight = resources.displayMetrics.heightPixels.toFloat()
@@ -535,80 +545,125 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         updateDrawerTransparency()
 
         menuComposeView = findViewById<ComposeView>(R.id.menu_compose_view)
-
         menuComposeView.apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
-                    if (menuState.showMenu) {
-                        MainContextMenu(
-                            state = state,
-                            uiState = MenuUiState(widgetsLocked, snapToGrid, showGrid),
-                            onDismiss = {
-                                hideContextMenu()
-                            },
-                            widgetActions = WidgetActions(
-                                onToggleLock = { toggleWidgetLock() },
-                                onToggleSnap = { toggleSnapToGrid() },
-                                onToggleGrid = { toggleShowGrid() },
-                                onHelp = {
-                                    hideContextMenu()
-                                    showWidgetSystemTutorial(false)
-                                }, //this is likely to not work
-                                onAddPage = {
-                                    onAddPageSelected()
-                                    hideContextMenu()
-                                },
-                                onRemovePage = {
-                                    onRemovePageSelected()
-                                    hideContextMenu()
-                                },
-                                onAddWidget = { type ->
-                                    if (!widgetsLocked) {
-                                        addNewWidget(type)
-                                        hideContextMenu()
-                                    }
-                                },
-                                onSavePageSettings = { updated ->
-                                    onPageUpdated(updated)
-                                }
-                            ),
-                            artRepository = artRepository,
-                            musicResults = musicResults,
-                            isSearchingMusic = isSearchingMusic,
-                            onMusicSearch = { query -> performMusicSearch(query) },
-                            onMusicSelect = { selected, onProgress -> onMusicResultSelected(selected, onProgress) },
-                            onSave = { url, contentType, slot ->
-                                onScraperContentSave(
-                                    url,
-                                    contentType,
-                                    slot
-                                )
-                            },
-                            currentPageIndex = currentWidgetManager().currentPageIndex,
-                            currentPage = currentWidgetManager().getCurrentPage(),
-                            mediaService = youtubeService
-                        )
-                    }
+                     val pages = currentWidgetManager().pages
+                     if(menuState.showMenu) {
+                         MainContextMenu(
+                             state = state,
+                             uiState = MenuUiState(widgetsLocked, snapToGrid, showGrid),
+                             onDismiss = {
+                                 hideContextMenu()
+                             },
+                             widgetActions = WidgetActions(
+                                 onToggleLock = { toggleWidgetLock() },
+                                 onToggleSnap = { toggleSnapToGrid() },
+                                 onToggleGrid = { toggleShowGrid() },
+                                 onHelp = {
+                                     hideContextMenu()
+                                     showWidgetSystemTutorial(false)
+                                 }, //this is likely to not work
+                                 onAddPage = {
+                                     onAddPageSelected()
+                                     hideContextMenu()
+                                 },
+                                 onRemovePage = {
+                                     onRemovePageSelected()
+                                     hideContextMenu()
+                                 },
+                                 onAddWidget = { type ->
+                                     if (!widgetsLocked) {
+                                         addNewWidget(type)
+                                         hideContextMenu()
+                                     }
+                                 },
+                                 onSavePageSettings = { updated ->
+                                     onPageUpdated(updated)
+                                 }
+                             ),
+                             artRepository = artRepository,
+                             musicResults = musicResults,
+                             isSearchingMusic = isSearchingMusic,
+                             onMusicSearch = { query -> performMusicSearch(query) },
+                             onMusicSelect = { selected, onProgress ->
+                                 onMusicResultSelected(
+                                     selected,
+                                     onProgress
+                                 )
+                             },
+                             onSave = { url, contentType, slot ->
+                                 onScraperContentSave(
+                                     url,
+                                     contentType,
+                                     slot
+                                 )
+                             },
+                             currentPageIndex = currentWidgetManager().currentPageIndex,
+                             currentPage = currentWidgetManager().getCurrentPage(),
+                             mediaService = youtubeService,
+                             mediaFileLocator = mediaFileLocator,
+                             mediaOverrideRepository = mediaOverrideRepository,
+                             onSaveOverride = { mediaOverride -> onMediaOverride(mediaOverride) },
+                             onRemoveOverride = { mediaOverride ->
+                                 onRemoveMediaOverride(
+                                     mediaOverride
+                                 )
+                             },
+                             onCropSave = { file, bitmap -> handleCropSave(file, bitmap) },
+                             removeCrop = { file -> removeCrop(file) },
+                             pages = pages,
+                             onSavePages = { pageItems -> onSaveNewPageOrder(pageItems) },
+                             onRenamePage = { name -> onRenamePage(name)},
+                             swapMedia = { game, type, system, originalSlot, targetSlot -> onSwapMedia(game, type, system, originalSlot, targetSlot)},
+                             deleteMedia = { game, type, system, originalSlot -> onDeleteMedia(game, type, system, originalSlot)},
+                             launchBoxDao = launchBoxDao
+                         )
+                     }
 
-                    if(menuState.widgetToEditState != null) {
-                        WidgetSettingsOverlay(
-                            widget = menuState.widgetToEditState!!,
-                            currentPageIndex = currentWidgetManager().currentPageIndex,
-                            onDismiss = {
-                                menuState.widgetToEditState = null
-                            },
-                            onUpdate = { updated ->
-                                onWidgetUpdated(updated)
-                                menuState.widgetToEditState = null
-                            },
-                            onDelete = {deleted -> onWidgetDeleted(deleted)},
-                            onReorder = {widget, forward -> onWidgetReordered(widget, forward)}
-                        )
-                    }
-                }
+                     if (menuState.widgetToEditState != null) {
+                         WidgetSettingsOverlay(
+                             widget = menuState.widgetToEditState!!,
+                             currentPageIndex = currentWidgetManager().currentPageIndex,
+                             onDismiss = {
+                                 menuState.widgetToEditState = null
+                             },
+                             onUpdate = { updated ->
+                                 onWidgetUpdated(updated)
+                                 menuState.widgetToEditState = null
+                             },
+                             onDelete = {
+                                 deleted -> onWidgetDeleted(deleted)
+                                 menuState.widgetToEditState = null
+                             },
+                             onReorder = { widget, forward ->
+                                 onWidgetReordered(
+                                     widget,
+                                     forward
+                                 )
+                             }
+                         )
+                     }
+                 }
             }
         }
+
+
+        backgroundBinder = BackgroundBinder(
+            context = this,
+            lifecycleOwner = this,
+            imageView = findViewById(R.id.gameImageView),
+            videoView = findViewById(R.id.videoView),
+            videoCover = findViewById(R.id.videoCover),
+            dimmerView = findViewById(R.id.dimmingOverlay),
+            musicStop = ::releaseMusicPlayer,
+            widgetHide = ::hideWidgets,
+            pathResolver = widgetPathResolver,
+            widgetContainer = widgetContainer,
+            rootContainer = rootLayout,
+            menuView = menuComposeView
+        )
 
         val logsDir = File(mediaFileLocator.getLogsPath())
         Log.d("MainActivity", "Logs directory: ${logsDir.absolutePath}")
@@ -670,20 +725,98 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
     }
 
+    private fun onDeleteMedia(
+        game: String,
+        type: ContentType,
+        system: String,
+        slot: MediaSlot
+    ) {
+        lifecycleScope.launch {
+            try {
+                mediaService.deleteMedia(game, type, system, slot)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Deleted media", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun onSaveNewPageOrder(pageItems: List<PageEditorItem>) {
+        currentWidgetManager().reorderPagesByEditorList(pageItems)
+        currentWidgetManager().currentPageIndex = 0
+        hideContextMenu()
+    }
+
+    fun onRenamePage(name: String) {
+        currentWidgetManager().renameCurrentPage(name)
+    }
+
+    fun onRemoveMediaOverride(mediaOverride: MediaOverride) {
+        lifecycleScope.launch {
+            try{
+            mediaOverrideRepository.removeOverride(mediaOverride)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Failed to delete override", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+
+    fun onMediaOverride(mediaOverride: MediaOverride) {
+        lifecycleScope.launch {
+            try {
+                mediaOverrideRepository.updateOverride(mediaOverride)
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Failed to save override", Toast.LENGTH_SHORT)
+            }
+        }
+    }
+
+    fun removeCrop(croppedFile: File) {
+        if (croppedFile.exists() && croppedFile.name.endsWith("_cropped.png")) {
+            croppedFile.delete()
+        }
+    }
+
+    fun handleCropSave(originalFile: File, bitmap: Bitmap) {
+        val croppedFile = File(
+            originalFile.parent,
+            "${originalFile.nameWithoutExtension}_cropped.${originalFile.extension}"
+        )
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                FileOutputStream(croppedFile).use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+
+                croppedFile.setLastModified(System.currentTimeMillis())
+            } catch (e: Exception) {
+                Log.e("Crop", "Failed to save: ${e.message}")
+            }
+        }
+    }
+
     private fun onPageUpdated(updated: WidgetPage) {
         currentWidgetManager().updatePage(updated)
         refreshWidgets(pageSwap = true)
     }
 
     private fun onAudioPriorityChanged(priority: AudioReferee.AudioSource) {
-        if (priority == AudioReferee.AudioSource.MUSIC) {
-            if (!musicPlayer.isPlaying() && !AudioReferee.getMenuState() && state.toWidgetContext() == WidgetContext.GAME) {// && musicPlayer.hasBeenPlayed()) {
-                startMusicPlayer()
+        if(listeningToAudioRef) {
+            if (priority == AudioReferee.AudioSource.MUSIC) {
+                if (!musicPlayer.isPlaying() && !AudioReferee.getMenuState() && state.toWidgetContext() == WidgetContext.GAME) {// && musicPlayer.hasBeenPlayed()) {
+                    startMusicPlayer()
+                }
+            } else if (musicPlayer.isPlaying()) {
+                volumeFader.fadeTo(0f, 100) {
+                    musicPlayer.pause()
+                }
             }
-        } else if (musicPlayer.isPlaying()) {
-            volumeFader.fadeTo(0f, 100) {
-                musicPlayer.pause()
-           }
         }
     }
 
@@ -697,7 +830,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             try {
                 val s = state as AppState.GameBrowsing
                 val fileName = extractGameFilenameWithoutExtension(s.gameFilename)
-                val mediaSlot = OverlayWidget.MediaSlot.fromInt(slot)
+                val mediaSlot = MediaSlot.fromInt(slot)
                 val dir = mediaFileLocator.getDir(
                     s.systemName,
                     mediaFileLocator.getFolderName(contentType),
@@ -727,11 +860,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                         downloadFile(url, newFile)
                     }
                 }
-
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "Saved to Alt $slot", Toast.LENGTH_SHORT).show()
-                    hideContextMenu()
-                    refreshWidgets()
                 }
             } catch (e: Exception) {
                 Log.e("SaveError", "Failed to save content", e)
@@ -1275,6 +1405,10 @@ Access this help anytime from the widget menu!
         appDrawer.setBackgroundColor(color)
     }
 
+    private fun handleVideoMuteToggle() {
+        backgroundBinder.toggleMute()
+    }
+
     private fun setupGestureDetector() {
         gestureDetector =
             GestureDetectorCompat(this, object : GestureDetector.SimpleOnGestureListener() {
@@ -1305,6 +1439,13 @@ Access this help anytime from the widget menu!
                         }
                     }
                     return false
+                }
+
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    if (!widgetMenuShowing && menuState.widgetToEditState == null && !menuState.showMenu) {
+                        handleVideoMuteToggle()
+                    }
+                    return true
                 }
 
                 override fun onSingleTapUp(event: MotionEvent): Boolean {
@@ -1811,240 +1952,249 @@ Access this help anytime from the widget menu!
                                 onScriptVerificationSuccess()
                             }
 
-                            when (path) {
-                                "esde_system_name.txt" -> {
-                                    // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
-                                    if (isLaunchingFromScreensaver) {
-                                        Log.d(
-                                            "MainActivity",
-                                            "Game scroll ignored - launching from screensaver"
-                                        )
-                                        return@postDelayed
-                                    }
-
-                                    // Ignore if screensaver is active
-                                    if (state is AppState.Screensaver) {
-                                        Log.d(
-                                            "MainActivity",
-                                            "System scroll ignored - screensaver active"
-                                        )
-                                        return@postDelayed
-                                    }
-                                    Log.d("MainActivity", "System scroll detected")
-                                    loadSystemImageDebounced()
-                                }
-
-                                "esde_game_filename.txt" -> {
-                                    // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
-                                    if (isLaunchingFromScreensaver) {
-                                        Log.d(
-                                            "MainActivity",
-                                            "Game scroll ignored - launching from screensaver"
-                                        )
-                                        return@postDelayed
-                                    }
-
-                                    // Ignore if screensaver is active
-                                    if (state is AppState.Screensaver) {
-                                        Log.d(
-                                            "MainActivity",
-                                            "Game scroll ignored - screensaver active"
-                                        )
-                                        return@postDelayed
-                                    }
-
-                                    // ADDED: Ignore game-select events that happen shortly after game-start or game-end
-                                    val currentTime = System.currentTimeMillis()
-                                    if (currentTime - lastGameStartTime < GAME_EVENT_DEBOUNCE) {
-                                        Log.d(
-                                            "MainActivity",
-                                            "Game scroll ignored - too soon after game start"
-                                        )
-                                        return@postDelayed
-                                    }
-                                    if (currentTime - lastGameEndTime < GAME_EVENT_DEBOUNCE) {
-                                        Log.d(
-                                            "MainActivity",
-                                            "Game scroll ignored - too soon after game end"
-                                        )
-                                        return@postDelayed
-                                    }
-
-                                    // Read the game filename
-                                    val gameFile = File(watchDir, "esde_game_filename.txt")
-                                    if (gameFile.exists()) {
-                                        val gameFilename = gameFile.readText().trim()
-
-                                        // Ignore if this is the same game that's currently playing
-                                        if (state is AppState.GamePlaying && gameFilename == (state as AppState.GamePlaying).gameFilename) {
+                            if (!menuState.showMenu && menuState.widgetToEditState == null) {
+                                //TODO: we should probably have a more elaborate and less crashy way of handling events fired while we're in state sensitive menu
+                                when (path) {
+                                    "esde_system_name.txt" -> {
+                                        // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
+                                        if (isLaunchingFromScreensaver) {
                                             Log.d(
                                                 "MainActivity",
-                                                "Game scroll ignored - same as playing game: $gameFilename"
+                                                "Game scroll ignored - launching from screensaver"
                                             )
                                             return@postDelayed
                                         }
-                                    }
 
-                                    Log.d("MainActivity", "Game scroll detected")
-                                    loadGameInfoDebounced()
-                                }
-
-                                "esde_gamestart_filename.txt" -> {
-                                    Log.d("MainActivity", "Game start detected")
-                                    handleGameStart()
-                                }
-
-                                "esde_gameend_filename.txt" -> {
-                                    Log.d("MainActivity", "Game end detected")
-                                    handleGameEnd()
-                                }
-
-                                "esde_screensaver_start.txt" -> {
-                                    Log.d("MainActivity", "Screensaver start detected")
-                                    handleScreensaverStart()
-                                }
-
-                                "esde_screensaver_end.txt" -> {
-                                    // Read the screensaver end reason
-                                    val screensaverEndFile =
-                                        File(watchDir, "esde_screensaver_end.txt")
-                                    val endReason = if (screensaverEndFile.exists()) {
-                                        screensaverEndFile.readText().trim()
-                                    } else {
-                                        "cancel"
-                                    }
-
-                                    Log.d(
-                                        "MainActivity",
-                                        "Screensaver end detected: $endReason"
-                                    )
-                                    handleScreensaverEnd(endReason)
-                                }
-
-                                "esde_screensavergameselect_filename.txt" -> {
-                                    // DEFENSIVE FIX: Auto-initialize screensaver state if screensaver-start event was missed
-                                    if (state !is AppState.Screensaver) {
-                                        Log.w(
-                                            "MainActivity",
-                                            "⚠️ FALLBACK: Screensaver game-select fired without screensaver-start event!"
-                                        )
-                                        Log.w(
-                                            "MainActivity",
-                                            "Auto-initializing screensaver state as defensive fallback"
-                                        )
-                                        Log.d(
-                                            "MainActivity",
-                                            "Current state before fallback: $state"
-                                        )
-
-                                        // Create saved state for screensaver from current state
-                                        val savedState = when (val s = state) {
-                                            is AppState.SystemBrowsing -> {
-                                                SavedBrowsingState.InSystemView(s.systemName)
-                                            }
-
-                                            is AppState.GameBrowsing -> {
-                                                SavedBrowsingState.InGameView(
-                                                    systemName = s.systemName,
-                                                    gameFilename = s.gameFilename,
-                                                    gameName = s.gameName
-                                                )
-                                            }
-
-                                            else -> {
-                                                // Fallback for unexpected states
-                                                Log.w(
-                                                    "MainActivity",
-                                                    "Unexpected state when screensaver fallback: $state"
-                                                )
-                                                SavedBrowsingState.InSystemView(
-                                                    state.getCurrentSystemName() ?: ""
-                                                )
-                                            }
-                                        }
-
-                                        // Update state to Screensaver
-                                        updateState(
-                                            AppState.Screensaver(
-                                                currentGame = null,
-                                                previousState = savedState
-                                            )
-                                        )
-
-                                        Log.d(
-                                            "MainActivity",
-                                            "Saved state for screensaver: $savedState"
-                                        )
-
-                                        // Apply screensaver behavior preferences
-                                        val screensaverBehavior =
-                                            prefs.getString("screensaver_behavior", "game_image")
-                                                ?: "game_image"
-                                        Log.d(
-                                            "MainActivity",
-                                            "Applying screensaver behavior: $screensaverBehavior"
-                                        )
-
-                                        // Handle black screen preference
-                                        if (screensaverBehavior == "black_screen") {
+                                        // Ignore if screensaver is active
+                                        if (state is AppState.Screensaver) {
                                             Log.d(
                                                 "MainActivity",
-                                                "Black screen behavior - clearing display"
+                                                "System scroll ignored - screensaver active"
                                             )
-                                            backgroundBinder.onBlackscreen()
-                                            gridOverlayView?.visibility = View.GONE
+                                            return@postDelayed
+                                        }
+                                        Log.d("MainActivity", "System scroll detected")
+                                        loadSystemImageDebounced()
+                                    }
+
+                                    "esde_game_filename.txt" -> {
+                                        // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
+                                        if (isLaunchingFromScreensaver) {
+                                            Log.d(
+                                                "MainActivity",
+                                                "Game scroll ignored - launching from screensaver"
+                                            )
+                                            return@postDelayed
                                         }
 
-                                        // Clear widgets (will be loaded by handleScreensaverGameSelect)
-                                        //widgetContainer.removeAllViews()
-                                        //activeWidgets.clear()
+                                        // Ignore if screensaver is active
+                                        if (state is AppState.Screensaver) {
+                                            Log.d(
+                                                "MainActivity",
+                                                "Game scroll ignored - screensaver active"
+                                            )
+                                            return@postDelayed
+                                        }
+
+                                        // ADDED: Ignore game-select events that happen shortly after game-start or game-end
+                                        val currentTime = System.currentTimeMillis()
+                                        if (currentTime - lastGameStartTime < GAME_EVENT_DEBOUNCE) {
+                                            Log.d(
+                                                "MainActivity",
+                                                "Game scroll ignored - too soon after game start"
+                                            )
+                                            return@postDelayed
+                                        }
+                                        if (currentTime - lastGameEndTime < GAME_EVENT_DEBOUNCE) {
+                                            Log.d(
+                                                "MainActivity",
+                                                "Game scroll ignored - too soon after game end"
+                                            )
+                                            return@postDelayed
+                                        }
+
+                                        // Read the game filename
+                                        val gameFile = File(watchDir, "esde_game_filename.txt")
+                                        if (gameFile.exists()) {
+                                            val gameFilename = gameFile.readText().trim()
+
+                                            // Ignore if this is the same game that's currently playing
+                                            if (state is AppState.GamePlaying && gameFilename == (state as AppState.GamePlaying).gameFilename) {
+                                                Log.d(
+                                                    "MainActivity",
+                                                    "Game scroll ignored - same as playing game: $gameFilename"
+                                                )
+                                                return@postDelayed
+                                            }
+                                        }
+
+                                        Log.d("MainActivity", "Game scroll detected")
+                                        loadGameInfoDebounced()
+                                    }
+
+                                    "esde_gamestart_filename.txt" -> {
+                                        Log.d("MainActivity", "Game start detected")
+                                        handleGameStart()
+                                    }
+
+                                    "esde_gameend_filename.txt" -> {
+                                        Log.d("MainActivity", "Game end detected")
+                                        handleGameEnd()
+                                    }
+
+                                    "esde_screensaver_start.txt" -> {
+                                        Log.d("MainActivity", "Screensaver start detected")
+                                        handleScreensaverStart()
+                                    }
+
+                                    "esde_screensaver_end.txt" -> {
+                                        // Read the screensaver end reason
+                                        val screensaverEndFile =
+                                            File(watchDir, "esde_screensaver_end.txt")
+                                        val endReason = if (screensaverEndFile.exists()) {
+                                            screensaverEndFile.readText().trim()
+                                        } else {
+                                            "cancel"
+                                        }
+
                                         Log.d(
                                             "MainActivity",
-                                            "Fallback initialization complete - widgets cleared"
+                                            "Screensaver end detected: $endReason"
                                         )
+                                        handleScreensaverEnd(endReason)
                                     }
 
-                                    // Read screensaver game info and update state
-                                    val filenameFile =
-                                        File(watchDir, "esde_screensavergameselect_filename.txt")
-                                    val nameFile =
-                                        File(watchDir, "esde_screensavergameselect_name.txt")
-                                    val systemFile =
-                                        File(watchDir, "esde_screensavergameselect_system.txt")
+                                    "esde_screensavergameselect_filename.txt" -> {
+                                        // DEFENSIVE FIX: Auto-initialize screensaver state if screensaver-start event was missed
+                                        if (state !is AppState.Screensaver) {
+                                            Log.w(
+                                                "MainActivity",
+                                                "⚠️ FALLBACK: Screensaver game-select fired without screensaver-start event!"
+                                            )
+                                            Log.w(
+                                                "MainActivity",
+                                                "Auto-initializing screensaver state as defensive fallback"
+                                            )
+                                            Log.d(
+                                                "MainActivity",
+                                                "Current state before fallback: $state"
+                                            )
 
-                                    var gameFilename: String? = null
-                                    var gameName: String? = null
-                                    var systemName: String? = null
+                                            // Create saved state for screensaver from current state
+                                            val savedState = when (val s = state) {
+                                                is AppState.SystemBrowsing -> {
+                                                    SavedBrowsingState.InSystemView(s.systemName)
+                                                }
 
-                                    if (filenameFile.exists()) {
-                                        gameFilename = filenameFile.readText().trim()
-                                    }
-                                    if (nameFile.exists()) {
-                                        gameName = nameFile.readText().trim()
-                                    }
-                                    if (systemFile.exists()) {
-                                        systemName = systemFile.readText().trim()
-                                    }
+                                                is AppState.GameBrowsing -> {
+                                                    SavedBrowsingState.InGameView(
+                                                        systemName = s.systemName,
+                                                        gameFilename = s.gameFilename,
+                                                        gameName = s.gameName
+                                                    )
+                                                }
 
-                                    // Update screensaver state with current game
-                                    if (state is AppState.Screensaver && gameFilename != null && systemName != null) {
-                                        val screensaverState = state as AppState.Screensaver
-                                        updateState(
-                                            screensaverState.copy(
-                                                currentGame = ScreensaverGame(
-                                                    gameFilename = gameFilename,
-                                                    gameName = gameName,
-                                                    systemName = systemName
+                                                else -> {
+                                                    // Fallback for unexpected states
+                                                    Log.w(
+                                                        "MainActivity",
+                                                        "Unexpected state when screensaver fallback: $state"
+                                                    )
+                                                    SavedBrowsingState.InSystemView(
+                                                        state.getCurrentSystemName() ?: ""
+                                                    )
+                                                }
+                                            }
+
+                                            // Update state to Screensaver
+                                            updateState(
+                                                AppState.Screensaver(
+                                                    currentGame = null,
+                                                    previousState = savedState
                                                 )
                                             )
-                                        )
-                                    }
 
-                                    Log.d(
-                                        "MainActivity",
-                                        "Screensaver game: $gameName ($gameFilename) - $systemName"
-                                    )
-                                    handleScreensaverGameSelect()
+                                            Log.d(
+                                                "MainActivity",
+                                                "Saved state for screensaver: $savedState"
+                                            )
+
+                                            // Apply screensaver behavior preferences
+                                            val screensaverBehavior =
+                                                prefs.getString(
+                                                    "screensaver_behavior",
+                                                    "game_image"
+                                                )
+                                                    ?: "game_image"
+                                            Log.d(
+                                                "MainActivity",
+                                                "Applying screensaver behavior: $screensaverBehavior"
+                                            )
+
+                                            // Handle black screen preference
+                                            if (screensaverBehavior == "black_screen") {
+                                                Log.d(
+                                                    "MainActivity",
+                                                    "Black screen behavior - clearing display"
+                                                )
+                                                backgroundBinder.onBlackscreen()
+                                                gridOverlayView?.visibility = View.GONE
+                                            }
+
+                                            // Clear widgets (will be loaded by handleScreensaverGameSelect)
+                                            //widgetContainer.removeAllViews()
+                                            //activeWidgets.clear()
+                                            Log.d(
+                                                "MainActivity",
+                                                "Fallback initialization complete - widgets cleared"
+                                            )
+                                        }
+
+                                        // Read screensaver game info and update state
+                                        val filenameFile =
+                                            File(
+                                                watchDir,
+                                                "esde_screensavergameselect_filename.txt"
+                                            )
+                                        val nameFile =
+                                            File(watchDir, "esde_screensavergameselect_name.txt")
+                                        val systemFile =
+                                            File(watchDir, "esde_screensavergameselect_system.txt")
+
+                                        var gameFilename: String? = null
+                                        var gameName: String? = null
+                                        var systemName: String? = null
+
+                                        if (filenameFile.exists()) {
+                                            gameFilename = filenameFile.readText().trim()
+                                        }
+                                        if (nameFile.exists()) {
+                                            gameName = nameFile.readText().trim()
+                                        }
+                                        if (systemFile.exists()) {
+                                            systemName = systemFile.readText().trim()
+                                        }
+
+                                        // Update screensaver state with current game
+                                        if (state is AppState.Screensaver && gameFilename != null && systemName != null) {
+                                            val screensaverState = state as AppState.Screensaver
+                                            updateState(
+                                                screensaverState.copy(
+                                                    currentGame = ScreensaverGame(
+                                                        gameFilename = gameFilename,
+                                                        gameName = gameName,
+                                                        systemName = systemName
+                                                    )
+                                                )
+                                            )
+                                        }
+
+                                        Log.d(
+                                            "MainActivity",
+                                            "Screensaver game: $gameName ($gameFilename) - $systemName"
+                                        )
+                                        handleScreensaverGameSelect()
+                                    }
                                 }
                             }
                         }, 50) // 50ms delay to ensure file is written
@@ -2254,29 +2404,24 @@ Access this help anytime from the widget menu!
         // Release video player
         backgroundBinder.releasePlayer()
         releaseMusicPlayer(false)
-
-        // ========== MUSIC ==========
-        // ===========================
     }
-
-    // ========== MUSIC INTEGRATION START ==========
-    // ========== MUSIC INTEGRATION END ==========
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         hasWindowFocus = hasFocus
 
-        // Don't use focus changes to block videos - too unreliable
-        // Just log for debugging
         if (hasFocus) {
             Log.d("MainActivity", "Window focus gained")
             backgroundBinder.onWindowFocusChanged(hasFocus)
+            listeningToAudioRef = true
             startMusicPlayer()
+            refreshWidgets()
         } else {
             Log.d("MainActivity", "Window focus lost (ignoring for video blocking)")
             // Stop videos when we lose focus (game launched on same screen)
             backgroundBinder.onPause(this)
             musicPlayer.pause()
+            listeningToAudioRef = false
         }
     }
 
@@ -2374,7 +2519,7 @@ Access this help anytime from the widget menu!
 
 
         val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
-        backgroundBinder.apply(processPage, state, pageMediaFile)
+        backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked)
 
         //TODO: do we need a method callback that releases everything?
 
@@ -2390,20 +2535,17 @@ Access this help anytime from the widget menu!
                 container = widgetContainer,
                 lifecycleOwner = this,
                 dataList = resolved,
-                widgetsLocked,
-                snapToGrid,
-                gridSize,
-                pageSwap,
+                page = currentPage,
+                locked = widgetsLocked,
+                snapToGrid = snapToGrid,
+                gridSize = gridSize,
+                pageSwap = pageSwap,
                 onUpdate = ::onWidgetUpdated,
                 onEditRequested = ::openWidgetSettings
             )
         } else {
             hideWidgets()
         }
-    }
-
-    private fun isCurrentPageValid() {
-        TODO("Not yet implemented")
     }
 
     private fun startMusicPlayer() {
@@ -2442,7 +2584,14 @@ Access this help anytime from the widget menu!
 
     private fun onWidgetUpdated(widget: OverlayWidget) {
         currentWidgetManager().updateWidget(widget, resources.displayMetrics)
-        refreshWidgets()
+        val page = currentWidgetManager().getCurrentPage()
+        val resolved = widgetPathResolver.resolveSingle(
+            widget,
+            state.getCurrentSystemName(),
+            state.getCurrentGameFilename(),
+            resources.displayMetrics
+        )
+        widgetViewBinder.syncSingleWidget(resolved.widget, widgetContainer, page)
     }
 
     private fun currentWidgetManager(): WidgetManager {
@@ -2454,7 +2603,7 @@ Access this help anytime from the widget menu!
 
     private fun onWidgetDeleted(widget: OverlayWidget) {
         currentWidgetManager().deleteWidget(widget.id)
-        hideContextMenu()
+        Toast.makeText(this, "Widget has been deleted", Toast.LENGTH_SHORT).show()
         refreshWidgets()
     }
 
@@ -2521,42 +2670,6 @@ Access this help anytime from the widget menu!
         }
 
         return true
-    }
-
-    private fun screenTransition(onFadeOut: () -> Unit) {
-        onFadeOut()
-        return
-        widgetContainer.animation?.cancel()
-        widgetContainer.animate()
-            .alpha(0f)
-            .setDuration(100)
-            .setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction {
-
-                widgetContainer.animate()
-                    .alpha(1f)
-                    .setDuration(100)
-                    .setInterpolator(AccelerateDecelerateInterpolator())
-                    .start()
-            }
-            .start()
-
-        rootLayout.animation?.cancel()
-        rootLayout.animate()
-            .alpha(0f)
-            .setStartDelay(50)
-            .setDuration(50)
-            .setInterpolator(AccelerateDecelerateInterpolator())
-            .withEndAction {
-                onFadeOut()
-
-                rootLayout.animate()
-                    .alpha(1f)
-                    .setDuration(50)
-                    .setInterpolator(AccelerateDecelerateInterpolator())
-                    .start()
-            }
-            .start()
     }
 
     /**
@@ -3087,12 +3200,13 @@ Access this help anytime from the widget menu!
                     gameName = gameDisplayName
                 )
             )
+
             musicResults = emptyList()
             musicLoadRunnable = Runnable {
                 loadGameMusic()
             }
             musicLoadHandler.postDelayed(musicLoadRunnable!!, 500)
-            screenTransition({refreshWidgets()})
+            refreshWidgets()
         } catch (e: Exception) {
             // Don't clear images on exception - keep last valid images
             Log.e("MainActivity", "Error loading game info", e)
@@ -3127,6 +3241,7 @@ Access this help anytime from the widget menu!
                 if (gameName.isNotEmpty()) {
                     val found = musicPlayer.onGameFocused(gameDisplayName, gameName, systemName)
                     if(found) {
+                        listeningToAudioRef = true
                         startMusicPlayer()
                     }
                 }
@@ -3609,7 +3724,7 @@ Access this help anytime from the widget menu!
                     gameName = null  // Will be loaded by loadGameInfo if needed
                 )
             )
-            refreshWidgets()
+            loadGameInfo()
         } else {
             Log.w("MainActivity", "Game end but not in GamePlaying state: $state")
         }
@@ -4165,6 +4280,7 @@ Access this help anytime from the widget menu!
         } else {
             musicPlayer.stopPlaying()
         }
+        listeningToAudioRef = false
     }
 
     private fun showContextMenu() {
@@ -4190,6 +4306,7 @@ Access this help anytime from the widget menu!
         menuState.widgetToEditState == null
         AudioReferee.updateMenuState(false)
         AudioReferee.forceUpdate()
+        refreshWidgets()
     }
 
     private fun openWidgetSettings(widget: OverlayWidget) {
@@ -4249,8 +4366,8 @@ Access this help anytime from the widget menu!
                     if(AudioReferee.getMenuState()) {
                         //musicPlayer.setVolume(0f)
                     } else {
-                        musicPlayer.setVolume(musicPlayer.targetVolume)
                         musicPlayer.play()
+                        musicPlayer.setVolume(musicPlayer.targetVolume)
                     }
                 }
             }
@@ -4311,6 +4428,13 @@ Access this help anytime from the widget menu!
 
             // Reload widgets with current images so they're visible during editing
             refreshWidgets()
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_UI_HIDDEN) {
+            imageLoader.memoryCache?.clear()
         }
     }
 

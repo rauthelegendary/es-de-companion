@@ -3,6 +3,7 @@ package com.esde.companion
 import android.content.Context
 import android.util.DisplayMetrics
 import android.util.Log
+import androidx.compose.runtime.mutableStateListOf
 import androidx.core.content.edit
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.WidgetContext
@@ -22,7 +23,7 @@ class WidgetManager(
     }
     private val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
     private val gson = Gson()
-    private var pages: MutableList<WidgetPage> = mutableListOf()
+    var pages = mutableStateListOf<WidgetPage>()
     var currentPageIndex: Int = 0
 
 
@@ -30,21 +31,26 @@ class WidgetManager(
         val json = prefs.getString(preferenceKey, null)
         try {
             if (json != null) {
-                val type = object : TypeToken<MutableList<WidgetPage>>() {}.type
-                pages = gson.fromJson(json, type)
+                val type = object : TypeToken<List<WidgetPage>>() {}.type
+                val loadedPages: List<WidgetPage> = gson.fromJson(json, type)
+
+                pages.clear()
+                pages.addAll(loadedPages)
             }
 
             if (pages.isEmpty()) {
-                pages.add(WidgetPage())
+                pages.add(WidgetPage(name = "Base"))
             }
         } catch (e: Exception) {
             Log.e("WidgetManager", "Failed to load pages, resetting to default", e)
-            pages = mutableListOf(WidgetPage())
+            pages.clear()
+            pages.add(WidgetPage())
         }
     }
 
-    fun save() {
-        val json = gson.toJson(pages)
+    private fun save() {
+        val listForGson = pages.toList()
+        val json = gson.toJson(listForGson)
         prefs.edit { putString(preferenceKey, json) }
     }
 
@@ -55,6 +61,21 @@ class WidgetManager(
     // Returns widgets for the current page
     fun getWidgetsForCurrentPage(): List<OverlayWidget> {
         return pages.getOrNull(currentPageIndex)?.widgets ?: emptyList()
+    }
+
+    fun reorderPagesByEditorList(editorPages: List<PageEditorItem>) {
+        val pageMap = pages.associateBy { it.id }
+
+        val newPages = editorPages.map { editorItem ->
+            val originalPage = pageMap[editorItem.id]
+                ?: throw IllegalStateException("Page with ID ${editorItem.id} not found!")
+
+            originalPage.copy(name = editorItem.name)
+        }
+
+        pages.clear()
+        pages.addAll(newPages)
+        save()
     }
 
     fun addNewPage() {
@@ -137,6 +158,8 @@ class WidgetManager(
     fun updatePage(updated: WidgetPage) {
         val idx = pages.indexOfFirst { it.id == updated.id }
         if (idx != -1) {
+            //this is a bit of a hack, names are getting updated elsewhere and overwritten by the update method, so we force it to the name in our state
+            updated.name = pages[idx].name
             pages[idx] = updated
             save()
         }
@@ -144,5 +167,11 @@ class WidgetManager(
 
     fun getAllPages(): List<WidgetPage> {
         return pages
+    }
+
+    fun renameCurrentPage(name: String) {
+        val newPage = pages[currentPageIndex].copy(name = name)
+        pages[currentPageIndex] = newPage
+        save()
     }
 }

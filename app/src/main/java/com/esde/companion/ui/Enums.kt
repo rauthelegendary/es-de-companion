@@ -10,6 +10,18 @@ enum class ScaleType {
     CROP      // Fill container with cropping (centerCrop)
 }
 
+enum class PageAnimation {
+    CONTEXT,
+    PAGE,
+    NONE;
+
+    fun toDisplayName(): String = when(this) {
+        PageAnimation.CONTEXT -> "Only on game/system switch"
+        PageAnimation.PAGE -> "Every page flip"
+        PageAnimation.NONE -> "No page animation"
+    }
+}
+
 enum class ContentType {
     MARQUEE,
     BOX_2D,

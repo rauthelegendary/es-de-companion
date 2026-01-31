@@ -1,4 +1,4 @@
-package com.esde.companion.art.SGDB
+package com.esde.companion.art.steamgrid
 
 import retrofit2.http.GET
 import retrofit2.http.Path

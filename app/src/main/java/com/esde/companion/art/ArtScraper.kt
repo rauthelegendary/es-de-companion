@@ -20,7 +20,8 @@ data class GameSearchResult(
     val gameId: String,
     val title: String,
     val source: String,
-    val thumbnail: String? = null
+    val thumbnail: String? = null,
+    val platform: String = ""
 )
 
 data class MediaSearchResult(

@@ -2,10 +2,12 @@ package com.esde.companion
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -51,6 +53,7 @@ class WidgetView(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
     var widget: OverlayWidget,
+    var page: WidgetPage,
     private val onUpdate: (OverlayWidget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
     private val onEditRequested: (OverlayWidget) -> Unit
@@ -64,6 +67,13 @@ class WidgetView(
     private val playerView: PlayerView = PlayerView(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         useController = false
+        visibility = View.GONE
+
+    }
+
+    private val videoCover = View(context).apply {
+        layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        setBackgroundColor(Color.BLACK)
         visibility = View.GONE
     }
     private val scrollView: AutoScrollOnlyView
@@ -180,6 +190,7 @@ class WidgetView(
         addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(playerView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(videoCover, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
        // }
 
         // Make sure onDraw (which draws handles) happens after child views
@@ -239,12 +250,13 @@ class WidgetView(
     }
 
     //added to replace content instead of recreating views:
-    fun updateContent(newWidget: OverlayWidget) {
+    fun updateContent(newWidget: OverlayWidget, page: WidgetPage) {
         val isDifferentWidget = this.widget.id != newWidget.id
         if (isDifferentWidget) {
             prepareForReuse()
         }
         this.widget = newWidget
+        this.page = page
 
         updateLayout()
         loadWidgetContent()
@@ -512,52 +524,44 @@ class WidgetView(
     }
 
     private fun loadImage(file: File, isMarquee: Boolean) {
-        /**val request = ImageRequest.Builder(context)
-            .data(file)
-            .memoryCacheKey("${file.absolutePath}_${file.lastModified()}")
-            .size(widget.width.toInt(), widget.height.toInt())
-            // Only disable hardware if we are applying the Glint animation
-            .allowHardware(!isMarquee)
-            .target(
-                onStart = { placeholder ->
-                    (imageView.drawable as? GlintDrawable)?.stop()
-                    imageView.setImageDrawable(placeholder)
-                },
-                onSuccess = { result ->
-                    if (isMarquee) {
-                        val shiny = GlintDrawable(result)
-                        imageView.setImageDrawable(shiny)
-                        shiny.start()
-                    } else {
-                        imageView.setImageDrawable(result)
-                    }
-                },
-                onError = { error ->
-                    imageView.setImageDrawable(error)
-                }
-            )
-            .build()
 
-        context.imageLoader.enqueue(request)*/
-
+        if (isMarquee) {
+            imageView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+        } else {
+            imageView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        }
         context.imageLoader.enqueue(
             ImageRequest.Builder(context)
                 .data(file)
                 .size(widget.width.toInt(), widget.height.toInt())
                 .allowHardware(!isMarquee)
-                .target(imageView)
-                .listener(
-                    onSuccess = { _, _ ->
-                        if (isMarquee) {
-                            val shiny = GlintDrawable(imageView.drawable!!)
-                            imageView.setImageDrawable(shiny)
-                            shiny.start()
+                .target(
+                    onStart = { placeholder ->
+                        // Start the new request at 0 alpha if it's a new image
+                        imageView.alpha = if (page.animateWidgets) 0f else 1f
+                        imageView.setImageDrawable(placeholder)
+                    },
+                    onSuccess = { result ->
+                        val finalDrawable = if (isMarquee) {
+                            GlintDrawable(result).apply { start() }
+                        } else {
+                            result
+                        }
+                        imageView.animate().cancel()
+                        imageView.setImageDrawable(finalDrawable)
+                        if(page.animateWidgets) {
+                            imageView.animate()
+                                .alpha(1f)
+                                .setDuration(page.animationDuration.toLong())
+                                .start()
+                        } else {
+                            imageView.alpha = 1f
                         }
                     },
-                    onError = {request, result ->
-                        Log.e("WIDGET_IMAGE_ERROR", "Failed to load: ${widget.contentPath}, Error: ${result.throwable}")
+                    onError = { error ->
+                        imageView.setImageDrawable(error)
+                        imageView.alpha = 1f
                     }
-
                 )
                 .build()
         )
@@ -593,6 +597,26 @@ class WidgetView(
             volumeFader.setPlayer(player)
         }
         if(currentVideoPath != videoPath) {
+            videoCover.animate()?.cancel()
+            if (page.animateWidgets) {
+                videoCover.alpha = 1f
+                videoCover.visibility = View.VISIBLE
+            }
+
+            player?.addListener(object : Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    if (page.animateWidgets) {
+                        videoCover.animate()
+                            .alpha(0f)
+                            .setDuration(page.animationDuration.toLong())
+                            .setInterpolator(DecelerateInterpolator())
+                            .withEndAction { videoCover.visibility = View.GONE }
+                            .start()
+                    }
+                    player?.removeListener(this)
+                }
+            })
+
             val mediaItem = MediaItem.fromUri(videoPath)
             player?.setMediaItem(mediaItem)
             player?.prepare()

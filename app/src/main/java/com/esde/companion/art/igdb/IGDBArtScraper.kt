@@ -1,4 +1,4 @@
-package com.esde.companion.art.IGDB
+package com.esde.companion.art.igdb
 
 import android.util.Log
 import com.api.igdb.apicalypse.APICalypse

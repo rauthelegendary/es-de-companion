@@ -53,9 +53,13 @@ fun SearchStepContent(
             Text("No results yet. Enter a title and press Search.", color = Color.Gray)
         }
 
-        // The Results
+
         LazyColumn {
             items(results) { result ->
+                var label = result.title
+                if(result.platform.isNotEmpty()) {
+                    label = "$label - ${result.platform}"
+                }
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -63,7 +67,7 @@ fun SearchStepContent(
                         .clickable { onGameSelected(result.gameId.toString()) },
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF333333))
                 ) {
-                    Text(result.title, modifier = Modifier.padding(16.dp), color = Color.White)
+                    Text(label, modifier = Modifier.padding(16.dp), color = Color.White)
                 }
             }
         }

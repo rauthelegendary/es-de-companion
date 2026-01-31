@@ -70,12 +70,33 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
         gameFilename: String,
         slot: MediaSlot = MediaSlot.Default
     ): File? {
-        val gameName = MediaFileHelper.extractGameFilenameWithoutExtension(sanitizeGameFilename(gameFilename))
+        val fileFound = this.findMediaFileDefault(type, systemName, gameFilename, slot)
+        if(type != ContentType.VIDEO) {
+            return checkCroppedAlternative(fileFound)
+        }
+        return fileFound
+    }
+
+    fun findMediaFileDefault(
+        type: ContentType,
+        systemName: String,
+        gameFilename: String,
+        slot: MediaSlot = MediaSlot.Default
+    ): File? {
         if(type == ContentType.VIDEO) {
             return findVideoFile(systemName, gameFilename, slot)
         } else {
             return findImageInFolder(systemName, gameFilename, getFolderName(type), slot)
         }
+    }
+
+    private fun checkCroppedAlternative(file: java.io.File?): java.io.File? {
+        if (file == null) return null
+
+        val name = file.nameWithoutExtension
+        val ext = "png"
+        val croppedFile = File(file.parentFile, "${name}_cropped.$ext")
+        return if (croppedFile.exists()) croppedFile else file
     }
 
     fun getFolderName(type: ContentType): String{
@@ -298,5 +319,18 @@ class MediaFileLocator(private val prefs: SharedPreferences) {
         val subfolder = beforeFilename.substringAfterLast("/", "")
         
         return if (subfolder.isNotEmpty()) subfolder else null
+    }
+
+    fun getPotentialFile(
+        type: ContentType,
+        systemName: String,
+        gameFilename: String,
+        slot: MediaSlot = MediaSlot.Default
+    ): File {
+        val folderName = getFolderName(type)
+        val dir = getDir(systemName, folderName, slot)
+        val nameWithoutExt = MediaFileHelper.extractGameFilenameWithoutExtension(sanitizeGameFilename(gameFilename))
+        val extension = if (type == ContentType.VIDEO) "mp4" else "png"
+        return File(dir, "$nameWithoutExt${slot.suffix}.$extension")
     }
 }
