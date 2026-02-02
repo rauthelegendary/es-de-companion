@@ -2,6 +2,7 @@ package com.esde.companion.art
 
 import com.esde.companion.MediaFileLocator
 import com.esde.companion.OverlayWidget
+import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.ui.ContentType
 import java.io.File
 
@@ -21,15 +22,15 @@ class MediaService (
                 if (it.exists()) it.delete()
             }
 
-            val currentOverride = mediaOverrideRepository.getOverride(game, type.name)
+            val currentOverride = mediaOverrideRepository.getOverride(game, system, type)
             if (currentOverride?.altSlot == slot) {
-                mediaOverrideRepository.removeOverride(currentOverride)
+                mediaOverrideRepository.removeOverride(game, system, type)
             }
         }
     }
 
     /**
-     * Swaps all media assets between two slots.
+     * Swaps media assets between two slots
      */
     suspend fun swapMedia(game: String, type: ContentType, system: String, sourceSlot: OverlayWidget.MediaSlot, targetSlot: OverlayWidget.MediaSlot) {
         val sourceFile = mediaFileLocator.findMediaFileDefault(type, system, game, sourceSlot) ?: mediaFileLocator.getPotentialFile(type, system, game, sourceSlot)
@@ -37,15 +38,25 @@ class MediaService (
 
         swapPhysicalFiles(sourceFile, targetFile)
 
-        val sourceCrop = sourceFile?.let { File(it.parent, "${it.nameWithoutExtension}_cropped.png") }
-        val targetCrop = targetFile?.let { File(it.parent, "${it.nameWithoutExtension}_cropped.png") }
+        val sourceCrop = sourceFile?.let {
+            File(
+                it.parent,
+                "${it.nameWithoutExtension}_cropped.png"
+            )
+        }
+        val targetCrop = targetFile?.let {
+            File(
+                it.parent,
+                "${it.nameWithoutExtension}_cropped.png"
+            )
+        }
         swapPhysicalFiles(sourceCrop, targetCrop)
 
-        val currentOverride = mediaOverrideRepository.getOverride(game, type.name)
+        val currentOverride = mediaOverrideRepository.getOverride(game, system, type)
         if (currentOverride?.altSlot == sourceSlot) {
-            mediaOverrideRepository.updateOverride(currentOverride.copy(altSlot = targetSlot))
+            mediaOverrideRepository.updateOverride(game, system, type, targetSlot)
         } else if (currentOverride?.altSlot == targetSlot) {
-            mediaOverrideRepository.updateOverride(currentOverride.copy(altSlot = sourceSlot))
+            mediaOverrideRepository.updateOverride(game, system, type, sourceSlot)
         }
     }
 

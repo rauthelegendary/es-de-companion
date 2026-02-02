@@ -37,7 +37,6 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
         interpolator = LinearInterpolator()
         addUpdateListener {
             offset = it.animatedValue as Float
-            // Performance: only invalidate when the glint is actually visible
             if (offset < 2.5f) invalidateSelf()
         }
     }
@@ -46,7 +45,7 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
         if (bounds.width() <= 0 || bounds.height() <= 0) return
         clearCache()
 
-        val margin = 45
+        val margin = 35
         val bitmap = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888)
         val tempCanvas = Canvas(bitmap)
 
@@ -61,30 +60,38 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
 
         actualLogoRect.set(left, top, left + finalWidth, top + finalHeight)
 
-        // 1. Bake Shadow
         val scratchBitmap = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888)
         val scratchCanvas = Canvas(scratchBitmap)
         original.bounds = Rect(left.toInt(), top.toInt(), (left + finalWidth).toInt(), (top + finalHeight).toInt())
         original.draw(scratchCanvas)
 
         val alphaMask = scratchBitmap.extractAlpha()
-        val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+        val isDark = isBitmapDark(scratchBitmap)
 
-        shadowPaint.maskFilter = BlurMaskFilter(35f, BlurMaskFilter.Blur.NORMAL)
-        shadowPaint.alpha = 160
-        tempCanvas.drawBitmap(alphaMask, 0f, 0f, shadowPaint)
+        val backPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        shadowPaint.maskFilter = BlurMaskFilter(10f, BlurMaskFilter.Blur.NORMAL)
-        shadowPaint.alpha = 230
-        tempCanvas.drawBitmap(alphaMask, 0f, 0f, shadowPaint)
+        if (isDark) {
+            backPaint.color = Color.WHITE
+            backPaint.maskFilter = BlurMaskFilter(12f, BlurMaskFilter.Blur.OUTER)
+            backPaint.alpha = 150
+            tempCanvas.drawBitmap(alphaMask, 0f, 0f, backPaint)
+        } else {
+            backPaint.color = Color.BLACK
 
-        // 2. Bake Logo
+            backPaint.maskFilter = BlurMaskFilter(30f, BlurMaskFilter.Blur.NORMAL)
+            backPaint.alpha = 140
+            tempCanvas.drawBitmap(alphaMask, 0f, 0f, backPaint)
+
+            backPaint.maskFilter = BlurMaskFilter(10f, BlurMaskFilter.Blur.NORMAL)
+            backPaint.alpha = 210
+            tempCanvas.drawBitmap(alphaMask, 0f, 0f, backPaint)
+        }
+
         original.draw(tempCanvas)
 
         alphaMask.recycle()
         scratchBitmap.recycle()
 
-        // 3. Setup Shaders
         cachedBitmap = bitmap
         val lShader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
         logoShader = lShader
@@ -95,8 +102,30 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
             floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
         glintShader = gShader
 
-        // Performance Fix: Pre-create ComposeShader so draw() doesn't allocate memory
         paint.shader = ComposeShader(lShader, gShader, PorterDuff.Mode.SRC_ATOP)
+    }
+
+    private fun isBitmapDark(bitmap: Bitmap): Boolean {
+        val pixelCount = 15
+        var totalLuminance = 0f
+        var samples = 0
+
+        val stepX = (bitmap.width / pixelCount).coerceAtLeast(1)
+        val stepY = (bitmap.height / pixelCount).coerceAtLeast(1)
+
+        for (x in 0 until bitmap.width step stepX) {
+            for (y in 0 until bitmap.height step stepY) {
+                val pixel = bitmap.getPixel(x, y)
+                if (Color.alpha(pixel) > 180) { // Only check solid pixels
+                    val r = Color.red(pixel)
+                    val g = Color.green(pixel)
+                    val b = Color.blue(pixel)
+                    totalLuminance += (0.299f * r + 0.587f * g + 0.114f * b)
+                    samples++
+                }
+            }
+        }
+        return if (samples > 0) (totalLuminance / samples) < 85 else false
     }
 
     override fun draw(canvas: Canvas) {
@@ -104,10 +133,8 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
         val gShader = glintShader ?: return
         if (bitmap.isRecycled) return
 
-        // 1. Draw Static Layer (Logo + Shadow)
         canvas.drawBitmap(bitmap, 0f, 0f, bitmapPaint)
 
-        // 2. Update Glint Position
         val shineWidth = actualLogoRect.width() * 0.4f
         val currentX = actualLogoRect.left + (actualLogoRect.width() * offset)
 
@@ -116,7 +143,6 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
         glintMatrix.preRotate(25f, shineWidth / 2f, actualLogoRect.height() / 2f)
         gShader.setLocalMatrix(glintMatrix)
 
-        // 3. Draw Glint (Shader is already set in updateCache)
         canvas.drawRect(bounds, paint)
     }
 
@@ -125,7 +151,7 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
         cachedBitmap = null
         logoShader = null
         glintShader = null
-        paint.shader = null // Crucial to prevent holding onto recycled bitmaps
+        paint.shader = null
     }
 
     override fun onBoundsChange(bounds: Rect) {
@@ -134,10 +160,11 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
     }
 
     override fun start() { if (!animator.isRunning) animator.start() }
-    override fun stop() { animator.cancel(); clearCache() }
     override fun isRunning() = animator.isRunning
     override fun getIntrinsicWidth() = original.intrinsicWidth
     override fun getIntrinsicHeight() = original.intrinsicHeight
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+    override fun stop() { animator.cancel(); clearCache() }
 
     override fun setAlpha(alpha: Int) {
         paint.alpha = alpha
@@ -150,6 +177,4 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
         bitmapPaint.colorFilter = filter
         invalidateSelf()
     }
-
-    override fun getOpacity() = PixelFormat.TRANSLUCENT
 }

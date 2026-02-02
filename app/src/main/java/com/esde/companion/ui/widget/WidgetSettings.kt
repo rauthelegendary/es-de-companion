@@ -25,16 +25,24 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.esde.companion.OverlayWidget
 import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.PageContentType.FontType
 import com.esde.companion.ui.ScaleType
+import com.esde.companion.ui.TextAlignment
 import com.esde.companion.ui.contextmenu.ActionButton
 import com.esde.companion.ui.contextmenu.MediaSlotScreen
 import com.esde.companion.ui.contextmenu.MenuChip
+import com.esde.companion.ui.contextmenu.MenuSlider
+import com.esde.companion.ui.contextmenu.MenuToggle
 
 @Composable
 fun WidgetSettingsOverlay(
@@ -45,6 +53,8 @@ fun WidgetSettingsOverlay(
     onDelete: (OverlayWidget) -> Unit,
     onReorder: (OverlayWidget, Boolean) -> Unit
 ) {
+    var liveWidget by remember(widget.id) { mutableStateOf(widget) }
+
     DisposableEffect(Unit) {
         onDispose {
             onDismiss()
@@ -55,41 +65,45 @@ fun WidgetSettingsOverlay(
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.85f).verticalScroll(rememberScrollState()).clickable(enabled = false) { },
+            modifier = Modifier.fillMaxWidth(0.85f).clickable(false) { },
             shape = RoundedCornerShape(20.dp),
             color = Color(0xFF1A1A1A)
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text("Edit ${widget.contentType.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                Text("Current zIndex: ${widget.zIndex}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Column(modifier = Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
+                Text("Edit ${liveWidget.contentType.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White)
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(12.dp))
 
-                MediaSlotScreen(currentSlot = widget.slot) { newSlot ->
-                    widget.slot = newSlot
-                    onUpdate(widget)
+                MediaSlotScreen(currentSlot = liveWidget.slot) { newSlot ->
+                    liveWidget = liveWidget.copy(slot = newSlot)
+                    onUpdate(liveWidget)
                 }
 
                 Spacer(Modifier.height(2.dp))
 
                 if(currentPageIndex != 0) {
-                    MenuChip("Required content", widget.isRequired, {
-                        widget.isRequired = !widget.isRequired
-                        onUpdate(widget)
+                    MenuChip("Required content", liveWidget.isRequired, {
+                        liveWidget = liveWidget.copy(isRequired = !liveWidget.isRequired)
+                        onUpdate(liveWidget)
                     })
                 }
 
-                Divider(Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
+                if (!liveWidget.contentType.isTextWidget() && liveWidget.contentType != ContentType.VIDEO) {
+                    MenuChip("Cycle image slot on touch", liveWidget.cycle, {
+                        liveWidget = liveWidget.copy(cycle = !liveWidget.cycle)
+                        onUpdate(liveWidget)
+                    })
 
-                if (widget.contentType != ContentType.GAME_DESCRIPTION) {
+                    Divider(Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
+
                     Text("Scale Type", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(ScaleType.FIT, ScaleType.CROP).forEach { type ->
-                            val isSelected = widget.scaleType == type
+                            val isSelected = liveWidget.scaleType == type
                             Button(
                                 onClick = {
-                                    widget.scaleType = type
-                                    onUpdate(widget)
+                                    liveWidget = liveWidget.copy(scaleType = type)
+                                    onUpdate(liveWidget)
                                 },
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(
@@ -102,24 +116,127 @@ fun WidgetSettingsOverlay(
                     }
                 }
 
-                if (widget.contentType == ContentType.GAME_DESCRIPTION) {
-                    OpacitySlider(currentOpacity = widget.backgroundOpacity) { newOpacity ->
-                        widget.backgroundOpacity = newOpacity
-                        onUpdate(widget)
+                if (liveWidget.contentType.isTextWidget()) {
+                    Divider(Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
+
+                    OpacitySlider(currentOpacity = liveWidget.backgroundOpacity) { newOpacity ->
+                        liveWidget = liveWidget.copy(backgroundOpacity = newOpacity)
+                        onUpdate(liveWidget)
+                    }
+                    MenuSlider(
+                        "Font size",
+                        liveWidget.fontSize,
+                        16f,
+                        80f,
+                        ""
+                    ) {
+                            size -> liveWidget = liveWidget.copy(fontSize = size)
+                        onUpdate(liveWidget)
+                    }
+                    MenuSlider(
+                        "Text padding",
+                        liveWidget.textPadding.toFloat(),
+                        0f,
+                        150f,
+                        ""
+                    ) {
+                            padding -> liveWidget = liveWidget.copy(textPadding = padding.toInt())
+                        onUpdate(liveWidget)
+                    }
+                    MenuSlider(
+                        "Text shadow radius",
+                        liveWidget.shadowRadius,
+                        0f,
+                        50f,
+                        ""
+                    ) {
+                            shadowRadius -> liveWidget = liveWidget.copy(shadowRadius = shadowRadius)
+                        onUpdate(liveWidget)
+                    }
+                    Text("Font type", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FontType.entries.forEach { type ->
+                            val isSelected = liveWidget.fontType == type
+                            Button(
+                                onClick = {
+                                    liveWidget = liveWidget.copy(fontType = type)
+                                    onUpdate(liveWidget)
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) Color(0xFF03DAC6) else Color(0xFF333333)
+                                )
+                            ) {
+                                Text(type.toDisplayName(), color = if (isSelected) Color.Black else Color.White)
+                            }
+                        }
+                    }
+                    Text("Text Alignment", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextAlignment.entries.forEach { alignment ->
+                            val isSelected = liveWidget.textAlignment == alignment
+                            Button(
+                                onClick = {
+                                    liveWidget = liveWidget.copy(textAlignment = alignment)
+                                    onUpdate(liveWidget)
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) Color(0xFF03DAC6) else Color(0xFF333333)
+                                )
+                            ) {
+                                Text(alignment.toDisplayName(), color = if (isSelected) Color.Black else Color.White)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MenuChip("Allow scrolling", liveWidget.scrollText, {
+                            liveWidget = liveWidget.copy(scrollText = !liveWidget.scrollText)
+                            onUpdate(liveWidget)
+                        })
+                        MenuChip("Bold font", liveWidget.isBold, {
+                            liveWidget = liveWidget.copy(isBold = !liveWidget.isBold)
+                            onUpdate(liveWidget)
+                        })
+                        MenuChip("Italic font", liveWidget.isItalic, {
+                            liveWidget = liveWidget.copy(isItalic = !liveWidget.isItalic)
+                            onUpdate(liveWidget)
+                        })
+                    }
+
+                }
+
+                if (liveWidget.contentType == ContentType.VIDEO) {
+                    MenuToggle("Mute video", !liveWidget.playAudio) { muted ->
+                        liveWidget = liveWidget.copy(playAudio = !muted)
+                        onUpdate(liveWidget)
+                    }
+                    MenuSlider(
+                        "Video volume",
+                        liveWidget.videoVolume * 100,
+                        0f,
+                        100f,
+                        ""
+                    ) {
+                        volume -> liveWidget = liveWidget.copy(videoVolume = (volume / 100))
+                        onUpdate(liveWidget)
                     }
                 }
 
                 Spacer(Modifier.height(16.dp))
 
                 Text("Layering", color = Color.Gray, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(2.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("Backward", { onReorder(widget, false) })
-                    ActionButton("Forward", { onReorder(widget, true) })
+                Spacer(Modifier.height(2.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ActionButton("Backward", { onReorder(liveWidget, false) })
+                    ActionButton("Forward", { onReorder(liveWidget, true) })
                 }
 
                 Spacer(Modifier.height(10.dp))
 
-                // --- DELETE ---
                 Button(
                     onClick = { onDelete(widget) },
                     modifier = Modifier.fillMaxWidth(),

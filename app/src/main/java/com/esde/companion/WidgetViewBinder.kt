@@ -26,7 +26,8 @@ class WidgetViewBinder {
                 deselectAll(container)
                 selectedView.isWidgetSelected = true
         },
-        onEditRequested: (OverlayWidget) -> Unit
+        onEditRequested: (OverlayWidget) -> Unit,
+        animationSettings: AnimationSettings
     ) {
 
 
@@ -58,7 +59,7 @@ class WidgetViewBinder {
                     view.visibility = View.VISIBLE
                     view.updateContent(data, page)
                 } else {
-                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, onEditRequested)
+                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, onEditRequested, animationSettings)
                 }
                 container.addView(view)
             } else {

@@ -4,7 +4,13 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
@@ -12,6 +18,7 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
+import android.widget.TextView
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -24,9 +31,12 @@ import androidx.media3.ui.PlayerView
 import coil.dispose
 import coil.imageLoader
 import coil.request.ImageRequest
+import com.esde.companion.OverlayWidget.MediaSlot
 import com.esde.companion.animators.GlintDrawable
 import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
+import com.esde.companion.ui.TextAlignment
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -56,11 +66,14 @@ class WidgetView(
     var page: WidgetPage,
     private val onUpdate: (OverlayWidget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
-    private val onEditRequested: (OverlayWidget) -> Unit
+    private val onEditRequested: (OverlayWidget) -> Unit,
+    private val animationSettings: AnimationSettings
 ) : RelativeLayout(context) {
 
+    private var imageList: List<File?> = emptyList()
+    private var currentImageIndex: MediaSlot = MediaSlot.Default
     private val imageView: ImageView
-    private val textView: android.widget.TextView
+    private val textView: TextView
 
     private var player: ExoPlayer? = null
 
@@ -68,7 +81,6 @@ class WidgetView(
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         useController = false
         visibility = View.GONE
-
     }
 
     private val videoCover = View(context).apply {
@@ -78,6 +90,8 @@ class WidgetView(
     }
     private val scrollView: AutoScrollOnlyView
     private val settingsButton: ImageButton
+
+    private var isPausing = false
 
     private val borderPaint = Paint().apply {
         style = Paint.Style.STROKE
@@ -131,7 +145,6 @@ class WidgetView(
 
         lifecycleOwner.lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onPause(owner: LifecycleOwner) {
-                // This stops the widget audio the MOMENT you hit the Home button
                 player?.pause()
             }
 
@@ -161,16 +174,11 @@ class WidgetView(
         }
 
         // Also make TextView non-interactive
-        textView = android.widget.TextView(context).apply {
+        textView = TextView(context).apply {
             layoutParams = LayoutParams(
                 LayoutParams.MATCH_PARENT,
                 LayoutParams.WRAP_CONTENT
             )
-            textSize = 16f
-            setTextColor(android.graphics.Color.WHITE)
-            setPadding(20, 20, 20, 20)
-            setBackgroundColor(android.graphics.Color.parseColor("#66000000"))
-
             // Make completely non-interactive
             isClickable = false
             isFocusable = false
@@ -249,21 +257,21 @@ class WidgetView(
         }
     }
 
-    //added to replace content instead of recreating views:
     fun updateContent(newWidget: OverlayWidget, page: WidgetPage) {
         val isDifferentWidget = this.widget.id != newWidget.id
         if (isDifferentWidget) {
             prepareForReuse()
+            currentImageIndex = newWidget.slot
         }
         this.widget = newWidget
         this.page = page
 
-        updateLayout()
-        loadWidgetContent()
-
-        if (widget.contentType == ContentType.GAME_DESCRIPTION) {
+        if (widget.contentType.isTextWidget()) {
             scrollView.scrollTo(0, 0)
         }
+
+        updateLayout()
+        loadWidgetContent()
     }
 
     private fun updateLayout() {
@@ -326,120 +334,145 @@ class WidgetView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // If locked, don't allow any interaction
         if (isLocked) {
-            return false
-        }
-
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                dragStartX = event.rawX
-                dragStartY = event.rawY
-                initialX = widget.x
-                initialY = widget.y
-                initialWidth = widget.width
-                initialHeight = widget.height
-
-                // Cancel any long press timer immediately when touching a widget
-                val mainActivity = context as? MainActivity
-                mainActivity?.cancelLongPress()
-
-                // Check if touching any resize handle
-                val touchX = event.x
-                val touchY = event.y
-                if (isWidgetSelected) {
-                    resizeCorner = getTouchedResizeCorner(touchX, touchY)
-                    if (resizeCorner != ResizeCorner.NONE) {
-                        isResizing = true
-                        parent.requestDisallowInterceptTouchEvent(true)
-                        return true
-                    }
-                }
-
-                // Not touching handle - this is a drag
-                isDragging = true
-                return true
+            if (event.action == MotionEvent.ACTION_UP) {
+                cycleImage()
+                return false
             }
+        } else {
 
-            MotionEvent.ACTION_MOVE -> {
-                val deltaX = event.rawX - dragStartX
-                val deltaY = event.rawY - dragStartY
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragStartX = event.rawX
+                    dragStartY = event.rawY
+                    initialX = widget.x
+                    initialY = widget.y
+                    initialWidth = widget.width
+                    initialHeight = widget.height
 
-                // CHANGED: Request parent disallow immediately when resizing starts
-                if (isResizing) {
-                    parent.requestDisallowInterceptTouchEvent(true)
-                }
+                    // Cancel any long press timer immediately when touching a widget
+                    val mainActivity = context as? MainActivity
+                    mainActivity?.cancelLongPress()
 
-                // CHANGED: Lower threshold for detecting movement
-                if (abs(deltaX) > 5 || abs(deltaY) > 5) {  // Reduced from 10 to 5
-                    if (isResizing || (isWidgetSelected && isDragging)) {
-                        parent.requestDisallowInterceptTouchEvent(true)
-                    }
-                }
-
-                if (isResizing) {
-                    // Resize based on which corner is being dragged
-                    resizeFromCorner(resizeCorner, deltaX, deltaY)
-                    updateLayout()
-                } else if (isDragging && isWidgetSelected) {
-                    // Move the widget only if selected
-                    val newX = initialX + deltaX
-                    val newY = initialY + deltaY
-
-                    widget.x = if (snapToGrid) snapXToGrid(newX) else newX
-                    widget.y = if (snapToGrid) snapYToGrid(newY) else newY
-                    updateLayout()
-                }
-
-                return true
-            }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                parent.requestDisallowInterceptTouchEvent(false)
-
-                val deltaX = event.rawX - dragStartX
-                val deltaY = event.rawY - dragStartY
-                val wasMoved = abs(deltaX) > 5 || abs(deltaY) > 5
-                val wasResized = isResizing  // Track if we were resizing
-
-                // Check for tap (to select/deselect)
-                if (!wasMoved && !isResizing) {
+                    // Check if touching any resize handle
+                    val touchX = event.x
+                    val touchY = event.y
                     if (isWidgetSelected) {
-                        // Already selected - deselect this one
-                        isWidgetSelected = false
-                        updateButtonVisibility()
-                        invalidate()
-                    } else {
-                        // Not selected - deselect all others first, then select this one
-                        onSelect(this)
-                        isWidgetSelected = true
-                        updateButtonVisibility()
-                        invalidate()
+                        resizeCorner = getTouchedResizeCorner(touchX, touchY)
+                        if (resizeCorner != ResizeCorner.NONE) {
+                            isResizing = true
+                            parent.requestDisallowInterceptTouchEvent(true)
+                            return true
+                        }
                     }
+
+                    // Not touching handle - this is a drag
+                    isDragging = true
+                    return true
                 }
 
-                // Apply final snap on release if enabled
-                if (snapToGrid && (isDragging || isResizing)) {
-                    widget.x = snapXToGrid(widget.x)
-                    widget.y = snapYToGrid(widget.y)
-                    widget.width = snapToGridValue(widget.width)
-                    widget.height = snapToGridValue(widget.height)
-                    updateLayout()
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaX = event.rawX - dragStartX
+                    val deltaY = event.rawY - dragStartY
+
+                    // CHANGED: Request parent disallow immediately when resizing starts
+                    if (isResizing) {
+                        parent.requestDisallowInterceptTouchEvent(true)
+                    }
+
+                    // CHANGED: Lower threshold for detecting movement
+                    if (abs(deltaX) > 5 || abs(deltaY) > 5) {  // Reduced from 10 to 5
+                        if (isResizing || (isWidgetSelected && isDragging)) {
+                            parent.requestDisallowInterceptTouchEvent(true)
+                        }
+                    }
+
+                    if (isResizing) {
+                        // Resize based on which corner is being dragged
+                        resizeFromCorner(resizeCorner, deltaX, deltaY)
+                        updateLayout()
+                    } else if (isDragging && isWidgetSelected) {
+                        // Move the widget only if selected
+                        val newX = initialX + deltaX
+                        val newY = initialY + deltaY
+
+                        widget.x = if (snapToGrid) snapXToGrid(newX) else newX
+                        widget.y = if (snapToGrid) snapYToGrid(newY) else newY
+                        updateLayout()
+                    }
+
+                    return true
                 }
 
-                isDragging = false
-                isResizing = false
-                resizeCorner = ResizeCorner.NONE
-                // Save widget state
-                onUpdate(widget)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    parent.requestDisallowInterceptTouchEvent(false)
 
-                // ADDED: Reload image after resize to fit new dimensions
-                if (wasResized) {
-                    loadWidgetContent()
+                    val deltaX = event.rawX - dragStartX
+                    val deltaY = event.rawY - dragStartY
+                    val wasMoved = abs(deltaX) > 5 || abs(deltaY) > 5
+                    val wasResized = isResizing  // Track if we were resizing
+
+                    // Check for tap (to select/deselect)
+                    if (!wasMoved && !isResizing) {
+                        if (isWidgetSelected) {
+                            // Already selected - deselect this one
+                            isWidgetSelected = false
+                            updateButtonVisibility()
+                            invalidate()
+                        } else {
+                            // Not selected - deselect all others first, then select this one
+                            onSelect(this)
+                            isWidgetSelected = true
+                            updateButtonVisibility()
+                            invalidate()
+                        }
+                    }
+
+                    // Apply final snap on release if enabled
+                    if (snapToGrid && (isDragging || isResizing)) {
+                        widget.x = snapXToGrid(widget.x)
+                        widget.y = snapYToGrid(widget.y)
+                        widget.width = snapToGridValue(widget.width)
+                        widget.height = snapToGridValue(widget.height)
+                        updateLayout()
+                    }
+
+                    isDragging = false
+                    isResizing = false
+                    resizeCorner = ResizeCorner.NONE
+                    // Save widget state
+                    onUpdate(widget)
+
+                    // ADDED: Reload image after resize to fit new dimensions
+                    if (wasResized) {
+                        loadWidgetContent()
+                    }
+
+                    return true
                 }
-
-                return true
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    private fun cycleImage() {
+        if(widget.images != null && widget.cycle) {
+            val activeSlots = MediaSlot.entries.filter { slot ->
+                widget.images!!.containsKey(slot)
+                widget.images!![slot] != null
+            }
+
+            if (activeSlots.isEmpty()) return
+
+            val currentActiveIndex = activeSlots.indexOf(currentImageIndex)
+
+            val nextIndex = (currentActiveIndex + 1) % activeSlots.size
+            val nextSlot = activeSlots[nextIndex]
+
+            currentImageIndex = nextSlot
+            val imageFile = widget.images!![nextSlot]
+
+            imageFile?.let { loadImage(it, widget.contentType == ContentType.MARQUEE) }
+        }
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
@@ -468,42 +501,30 @@ class WidgetView(
        scrollView.visibility = View.GONE
         val isMarquee = widget.contentType == ContentType.MARQUEE
 
-        // 1. Handle Game Description (Text)
-        if (widget.contentType == ContentType.GAME_DESCRIPTION) {
-            handleDescriptionWidget()
+        if (widget.contentType.isTextWidget()) {
+            handleTextWidget()
             AudioReferee.updateWidgetState(widget.id,false)
             return
         }
 
-        // 2. Handle Video
         if (widget.contentType == ContentType.VIDEO) {
-            loadVideo(widget.contentPath)
+            loadVideo(widget.contentPath!!)
             return
         }
 
-        // Set scale type once for all image types
         imageView.scaleType = when (widget.scaleType ?: ScaleType.FIT) {
             ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
             ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
         }
 
-        // 4. Determine Data Source
         val path = widget.contentPath
         val mainActivity = context as? MainActivity
 
         when {
             //path is empty or file missing, handle fallback or clear
-            path.isEmpty() || (path.startsWith("/") && !File(path).exists()) -> {
-                if (isMarquee && mainActivity != null) {
-                    val fallback = mainActivity.createMarqueeTextFallback(
-                        extractGameNameFromWidget(), widget.width.toInt(), widget.height.toInt()
-                    )
-                    imageView.setImageDrawable(fallback)
-                    imageView.invalidate()
-                } else {
-                    imageView.dispose()
-                    imageView.setImageDrawable(null)
-                }
+            path!!.isEmpty() || (path.startsWith("/") && !File(path).exists()) -> {
+                imageView.dispose()
+                imageView.setImageDrawable(null)
             }
             //using built in source
             path.startsWith("builtin://") -> {
@@ -511,20 +532,42 @@ class WidgetView(
                 val drawable = mainActivity?.loadSystemLogoFromAssets(
                     systemName, widget.width.toInt(), widget.height.toInt()
                 )
-                imageView.setImageDrawable(drawable)
-                imageView.invalidate()
+                if(drawable != null) showDrawableImage(drawable) else imageView.setImageDrawable(null)
             }
             //normal case
             else -> {
-                loadImage(File(path), isMarquee)
+                var currentFile = File(path)
+                if(widget.cycle) {
+                    currentFile = widget.images!![currentImageIndex] ?: currentFile
+                }
+                loadImage(currentFile, isMarquee)
             }
         }
        imageView.visibility = View.VISIBLE
        AudioReferee.updateWidgetState(widget.id,false)
     }
 
-    private fun loadImage(file: File, isMarquee: Boolean) {
+    private fun showDrawableImage(drawable: Drawable) {
+        imageView.animate().cancel()
 
+        if (animationSettings.animateWidgets.value) {
+            imageView.alpha = 0f
+            imageView.setImageDrawable(drawable)
+
+            imageView.animate()
+                .alpha(1f)
+                .setDuration(animationSettings.duration.value.toLong())
+                .withEndAction {
+                    imageView.alpha = 1f
+                }
+                .start()
+        } else {
+            imageView.alpha = 1f
+            imageView.setImageDrawable(drawable)
+        }
+    }
+
+    private fun loadImage(file: File, isMarquee: Boolean) {
         if (isMarquee) {
             imageView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
         } else {
@@ -538,7 +581,7 @@ class WidgetView(
                 .target(
                     onStart = { placeholder ->
                         // Start the new request at 0 alpha if it's a new image
-                        imageView.alpha = if (page.animateWidgets) 0f else 1f
+                        imageView.alpha = if (animationSettings.animateWidgets.value) 0f else 1f
                         imageView.setImageDrawable(placeholder)
                     },
                     onSuccess = { result ->
@@ -549,10 +592,10 @@ class WidgetView(
                         }
                         imageView.animate().cancel()
                         imageView.setImageDrawable(finalDrawable)
-                        if(page.animateWidgets) {
+                        if(animationSettings.animateWidgets.value) {
                             imageView.animate()
                                 .alpha(1f)
-                                .setDuration(page.animationDuration.toLong())
+                                .setDuration(animationSettings.duration.value.toLong())
                                 .start()
                         } else {
                             imageView.alpha = 1f
@@ -568,20 +611,62 @@ class WidgetView(
     }
 
     /**
-     * Handles the logic for the Description type widget
+     * Handles the logic for the text type widget
      */
-    private fun handleDescriptionWidget() {
+    private fun handleTextWidget() {
         imageView.visibility = View.GONE
-        val description = widget.description
+        stopAutoScroll()
 
-        if (description.isNotEmpty()) {
+        if (widget.text.isNotEmpty()) {
             scrollView.visibility = View.VISIBLE
-            textView.text = description
-            textView.setBackgroundColor(android.graphics.Color.parseColor("#4D000000"))
-            postDelayed({ startAutoScroll() }, 2000)
+            scrollView.clipToPadding = false
+            textView.setTextColor(android.graphics.Color.WHITE)
+            textView.gravity = Gravity.CENTER
+            textView.setPadding(widget.textPadding, widget.textPadding, widget.textPadding, widget.textPadding)
+            textView.setShadowLayer(
+                widget.shadowRadius,
+                0f,
+                0f,
+                Color.parseColor("#CC000000")
+            )
+
+            textView.setTextSize(TypedValue.COMPLEX_UNIT_SP, widget.fontSize)
+
+            val alignment = when (widget.textAlignment) {
+                TextAlignment.CENTER -> TEXT_ALIGNMENT_CENTER
+                TextAlignment.LEFT -> TEXT_ALIGNMENT_TEXT_START
+                TextAlignment.RIGHT -> TEXT_ALIGNMENT_TEXT_END
+            }
+            textView.textAlignment = alignment
+
+            val style = when {
+                widget.isBold && widget.isItalic -> Typeface.BOLD_ITALIC
+                widget.isBold -> Typeface.BOLD
+                widget.isItalic -> Typeface.ITALIC
+                else -> Typeface.NORMAL
+            }
+
+            val baseTypeface = when (widget.fontType) {
+                PageContentType.FontType.SERIF -> Typeface.SERIF
+                PageContentType.FontType.MONO -> Typeface.MONOSPACE
+                PageContentType.FontType.SANSSERIF -> Typeface.SANS_SERIF
+                else -> Typeface.DEFAULT
+            }
+            textView.typeface = Typeface.create(baseTypeface, style)
+            textView.letterSpacing = if (widget.fontSize <= 14f) 0.1f else 0f
+            textView.setBackgroundColor(Color.parseColor("#4D000000"))
+            setBackgroundOpacity(widget.backgroundOpacity)
+
+            textView.text = widget.text
+            if(widget.scrollText) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    startAutoScroll()
+                }, 5000)
+            } else {
+                stopAutoScroll()
+            }
         } else {
             scrollView.visibility = View.GONE
-            textView.text = ""
         }
     }
 
@@ -598,17 +683,17 @@ class WidgetView(
         }
         if(currentVideoPath != videoPath) {
             videoCover.animate()?.cancel()
-            if (page.animateWidgets) {
+            if (animationSettings.animateWidgets.value) {
                 videoCover.alpha = 1f
                 videoCover.visibility = View.VISIBLE
             }
 
             player?.addListener(object : Player.Listener {
                 override fun onRenderedFirstFrame() {
-                    if (page.animateWidgets) {
+                    if (animationSettings.animateWidgets.value) {
                         videoCover.animate()
                             .alpha(0f)
-                            .setDuration(page.animationDuration.toLong())
+                            .setDuration(animationSettings.duration.value.toLong())
                             .setInterpolator(DecelerateInterpolator())
                             .withEndAction { videoCover.visibility = View.GONE }
                             .start()
@@ -626,8 +711,8 @@ class WidgetView(
 
         if(widget.playAudio) {
             AudioReferee.updateWidgetState(widget.id, true)
-            if(AudioReferee.currentPriority.value == AudioReferee.AudioSource.WIDGET && player?.volume == 0f) {
-                volumeFader.fadeTo(1f, 500)
+            if(AudioReferee.currentPriority.value == AudioReferee.AudioSource.WIDGET) {
+                volumeFader.fadeTo(widget.videoVolume, 500)
             }
         } else {
             AudioReferee.updateWidgetState(widget.id,false)
@@ -675,7 +760,7 @@ class WidgetView(
     }
 
     private fun getTouchedResizeCorner(x: Float, y: Float): ResizeCorner {
-        val extend = handleHitZone / 2  // Half extends outside
+        val extend = handleHitZone / 10  // Half extends outside
 
         // Check top-left (extended outside)
         if (x >= -extend && x <= handleHitZone - extend &&
@@ -800,40 +885,23 @@ class WidgetView(
         settingsButton.visibility = if (shouldShow) VISIBLE else GONE
     }
 
-    /**
-     *
-     *  fun setBackgroundOpacity(opacity: Float) {
-     *         android.util.Log.d("WidgetView", "setBackgroundOpacity called for widget type: ${widget.contentType}, opacity: $opacity")
-     *
-     *         // Only apply to THIS widget if it's a Game Description
-     *         if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
-     *             android.util.Log.d("WidgetView", "Not a Game Description widget, ignoring opacity change")
-     *             return
-     *         }
-     *
-     *         widget.backgroundOpacity = opacity
-     *
-     *         // Apply opacity to the text background
-     *         val alpha = (opacity * 255).toInt().coerceIn(0, 255)
-     *
-     *         // Set background on scrollView
-     *         scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
-     *         textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-     *
-     *         // Also set the parent container background if needed
-     *         if (alpha == 0) {
-     *             // At 0%, make the container transparent (but only for this specific widget view)
-     *             this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-     *         }
-     *
-     *         android.util.Log.d("WidgetView", "About to save all widgets")
-     *
-     *         onUpdate(this.widget)
-     *     }
-     *
 
-     *
-     *     private fun showDeleteDialog() {
+     fun setBackgroundOpacity(opacity: Float) {
+            if (!widget.contentType.isTextWidget()) {
+                return
+            }
+            widget.backgroundOpacity = opacity
+            val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+            scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
+            textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            if (alpha == 0) {
+                this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            }
+        }
+
+
+
+     /**     private fun showDeleteDialog() {
      *         android.app.AlertDialog.Builder(context)
      *             .setTitle("Delete Widget")
      *             .setMessage("Remove this overlay widget?")
@@ -993,39 +1061,50 @@ class WidgetView(
      *
      */
 
-    private fun startAutoScroll() {
-        stopAutoScroll()  // Stop any existing scroll
+     private fun startAutoScroll() {
+         stopAutoScroll() // Clears the previous job
+         isPausing = false
 
-        scrollJob = object : Runnable {
-            override fun run() {
-                val maxScroll = textView.height - scrollView.height
-                if (maxScroll > 0) {
-                    val currentScroll = scrollView.scrollY
+         scrollJob = object : Runnable {
+             override fun run() {
+                 if (scrollJob == null) return
 
-                    // Scroll down
-                    if (currentScroll < maxScroll) {
-                        scrollView.scrollTo(0, currentScroll + scrollSpeed)
-                        postDelayed(this, scrollDelay)
-                    } else {
-                        // Reached bottom, pause then reset
-                        postDelayed({
-                            scrollView.scrollTo(0, 0)
-                            // Restart scrolling after pause
-                            postDelayed(this, 2000)
-                        }, 2000)
-                    }
-                }
-            }
-        }
+                 val maxScroll = textView.height - scrollView.height
+                 if (maxScroll <= 0 || isPausing) return
 
-        post(scrollJob!!)
-    }
+                 val currentScroll = scrollView.scrollY
+
+                 if (currentScroll < maxScroll) {
+                     scrollView.scrollTo(0, currentScroll + scrollSpeed)
+                     postDelayed(this, scrollDelay)
+                 } else {
+                     isPausing = true
+
+                     postDelayed({
+                         if (scrollJob == null) return@postDelayed
+                         scrollView.scrollTo(0, 0)
+
+                         postDelayed({
+                             if (scrollJob == null) return@postDelayed
+                             isPausing = false
+                             run() // Restart the loop
+                         }, 3000)
+                     }, 3000)
+                 }
+             }
+         }
+         post(scrollJob!!)
+     }
 
     private fun stopAutoScroll() {
+        isPausing = true
         scrollJob?.let {
             removeCallbacks(it)
-            scrollJob = null
         }
+        handler?.removeCallbacksAndMessages(null)
+
+        scrollJob = null
+        scrollView.scrollTo(0, 0)
     }
 
     // Update onDetachedFromWindow to stop scrolling
@@ -1043,8 +1122,11 @@ class WidgetView(
         }
         player = null
         currentVideoPath = ""
+        imageList = emptyList<File?>()
 
-        (imageView.drawable as? GlintDrawable)?.stop()
+        (imageView.drawable as? GlintDrawable)?.let { glint ->
+            glint.stop()
+        }
         imageView.setImageDrawable(null)
         imageView.dispose()
         volumeFader.setPlayer(null)
@@ -1080,7 +1162,7 @@ class WidgetView(
                 .distinctUntilChanged()
                 .collect { priority ->
                     if (widget.contentType == ContentType.VIDEO) {
-                        allowedVolume = if (priority == AudioReferee.AudioSource.WIDGET && widget.playAudio) 1f else 0f
+                        allowedVolume = if (priority == AudioReferee.AudioSource.WIDGET && widget.playAudio) widget.videoVolume else 0f
                         volumeFader.fadeTo(allowedVolume)
                     }
                 }

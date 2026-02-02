@@ -7,8 +7,8 @@ import androidx.room.Query
 
 @Dao
 interface LoudnessDao {
-    @Query("SELECT * FROM loudness_metadata WHERE fileName = :path LIMIT 1")
-    suspend fun getMetadata(path: String): LoudnessMetadata?
+    @Query("SELECT * FROM loudness_metadata WHERE fileName = :path AND system = :system LIMIT 1")
+    suspend fun getMetadata(path: String, system: String): LoudnessMetadata?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMetadata(metadata: LoudnessMetadata)

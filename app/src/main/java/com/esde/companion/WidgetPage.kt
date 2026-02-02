@@ -1,7 +1,6 @@
 package com.esde.companion
 
 import com.esde.companion.OverlayWidget.MediaSlot
-import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
 import java.util.UUID
 
@@ -14,10 +13,8 @@ data class WidgetPage(
     var slot: MediaSlot = MediaSlot.Default,
     var backgroundOpacity: Float = 1.0f,
     var isVideoMuted: Boolean = true,
+    var videoVolume: Float = 0.5f,
     var blurRadius: Float = 0f,
-    var animation: PageAnimation = PageAnimation.CONTEXT,
-    var animateWidgets: Boolean = false,
-    var animationDuration: Int = 250,
     var panZoomAnimation: Boolean = true,
     var solidColor: Int? = null,
     var customPath: String? = null,
@@ -34,13 +31,11 @@ fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
             this.backgroundOpacity == other.backgroundOpacity &&
             this.isVideoMuted == other.isVideoMuted &&
             this.blurRadius == other.blurRadius &&
-            this.animation == other.animation &&
-            this.animateWidgets == other.animateWidgets &&
-            this.animationDuration == other.animationDuration &&
             this.panZoomAnimation == other.panZoomAnimation &&
             this.solidColor == other.solidColor &&
             this.customPath == other.customPath &&
             this.videoDelay == other.videoDelay &&
             this.displayWidgets == other.displayWidgets &&
-            this.displayWidgetsOverVideo == other.displayWidgetsOverVideo
+            this.displayWidgetsOverVideo == other.displayWidgetsOverVideo &&
+            this.videoVolume == other.videoVolume
 }

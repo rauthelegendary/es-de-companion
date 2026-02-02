@@ -33,13 +33,41 @@ enum class ContentType {
     FANART,
     TITLE_SCREEN,
     SYSTEM_LOGO,
+    SYSTEM_IMAGE,
     GAME_DESCRIPTION,
-    VIDEO;
+    VIDEO,
+    TITLE,
+    DEVELOPER,
+    PUBLISHER,
+    GENRE,
+    RELEASE_DATE;
 
     fun toDisplayName(): String = when(this) {
         ContentType.BOX_2D -> "2D Boxart"
         ContentType.BOX_3D -> "3D Boxart"
-        ContentType.SYSTEM_LOGO -> "Logo"
+        else -> this.name.replace("_", " ").lowercase().capitalize()
+    }
+
+    fun isTextWidget(): Boolean = when(this) {
+        ContentType.GAME_DESCRIPTION -> true
+        ContentType.TITLE -> true
+        ContentType.DEVELOPER -> true
+        ContentType.PUBLISHER -> true
+        ContentType.GENRE -> true
+        ContentType.RELEASE_DATE -> true
+        else -> false
+    }
+}
+
+enum class TextAlignment {
+    LEFT,
+    CENTER,
+    RIGHT;
+
+    fun toDisplayName(): String = when (this) {
+        LEFT -> "Left"
+        CENTER -> "Centered"
+        RIGHT -> "Right"
         else -> this.name.replace("_", " ").lowercase().capitalize()
     }
 }
@@ -53,10 +81,26 @@ enum class PageContentType {
     CUSTOM_IMAGE;
 
 
-    fun toDisplayName(): String = when(this) {
+    fun toDisplayName(): String = when (this) {
         PageContentType.FANART -> "Fan art"
         PageContentType.SOLID_COLOR -> "Solid color"
         PageContentType.CUSTOM_IMAGE -> "Custom image"
         else -> this.name.replace("_", " ").lowercase().capitalize()
+    }
+
+
+    enum class FontType {
+        SERIF,
+        MONO,
+        SANSSERIF,
+        DEFAULT;
+
+        fun toDisplayName(): String = when (this) {
+            SERIF -> "Serif"
+            MONO -> "Monospace"
+            SANSSERIF -> "Sans Serif"
+            DEFAULT -> "Default"
+            else -> this.name.replace("_", " ").lowercase().capitalize()
+        }
     }
 }

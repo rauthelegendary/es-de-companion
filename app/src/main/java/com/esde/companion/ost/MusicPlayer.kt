@@ -1,24 +1,69 @@
 package com.esde.companion.ost
 
+import android.media.audiofx.LoudnessEnhancer
 import android.util.Log
+import androidx.annotation.OptIn
 import androidx.core.net.toUri
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.esde.companion.ost.loudness.TARGET_LOUDNESS_DB
 import kotlin.math.pow
 
-class MusicPlayer(
+class MusicPlayer @OptIn(UnstableApi::class) constructor
+    (
     private val repository: MusicRepository,
     private val player: ExoPlayer
 ) {
-    var targetVolume: Float = 1f
+    private var enhancer: LoudnessEnhancer? = null
+
+    // The "Natural" volume determined by the song's DB
+    private var normalizedTarget: Float = 1f
+
+    // The "User" volume (e.g., from a settings slider or mute toggle)
+    private var userMasterVolume: Float = 1f
+
     private var hasBeenPlayed = false
+
+    init {
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                // Check if the player is ready or a new track started
+                if (events.containsAny(Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                    if (player.playbackState == Player.STATE_READY) {
+                        val exoPlayer = player as? ExoPlayer
+                        val sessionId = exoPlayer?.audioSessionId ?: C.AUDIO_SESSION_ID_UNSET
+
+                        if (sessionId != C.AUDIO_SESSION_ID_UNSET) {
+                            initEnhancer(sessionId)
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    fun setMasterVolume(vol: Float) {
+        userMasterVolume = vol.coerceIn(0f, 1f)
+        applyFinalVolume()
+    }
+
+    private fun initEnhancer(sessionId: Int) {
+        try {
+            enhancer?.release()
+            enhancer = LoudnessEnhancer(sessionId).apply { enabled = true }
+        } catch (e: Exception) {
+            Log.e("MusicPlayer", "LoudnessEnhancer not supported: ${e.message}")
+        }
+    }
 
     suspend fun onGameFocused(gameTitle: String, gameFileName: String?, system: String): Boolean {
         stopPlaying()
         hasBeenPlayed = false
         val song: Song? = repository.getMusicFile(gameTitle, gameFileName!!, system)
-        if(song != null && song.file.exists()) {
+        if (song != null && song.file.exists()) {
             playFile(song)
             return true
         }
@@ -26,21 +71,38 @@ class MusicPlayer(
     }
 
     private fun playFile(song: Song) {
-        Log.d("CoroutineDebug", "PLAYING MUSIC: " + song.toString())
         player.playWhenReady = false
         player.setMediaItem(MediaItem.fromUri(song.file.toUri()))
-        setNormalizedVolume(song.loudnessDb)
+
+        calculateNormalization(song.loudnessDb)
+
         player.prepare()
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
-        Log.d("MusicDebug", "Player: ${System.identityHashCode(player)}")
     }
 
-    fun setVolume(vol: Float) {
-        player.volume = vol
+    private fun calculateNormalization(songDb: Double) {
+        val targetDb = TARGET_LOUDNESS_DB
+        val difference = targetDb - songDb
+
+        if (difference <= 0) {
+            normalizedTarget = 10.0.pow(difference / 20.0).toFloat().coerceIn(0f, 1f)
+            try { enhancer?.setTargetGain(0) } catch (e: Exception) {}
+        } else {
+            normalizedTarget = 1.0f
+            val boost = difference.coerceAtMost(7.0)
+            try {
+                enhancer?.setTargetGain((boost * 100).toInt())
+            } catch (e: Exception) {
+                normalizedTarget = 10.0.pow(boost / 20.0).toFloat()
+            }
+        }
+        applyFinalVolume()
     }
 
-    fun pause() {
-        player.pause()
+    private fun applyFinalVolume() {
+        var norm = normalizedTarget
+        var mas =userMasterVolume
+        player.volume = norm * mas
     }
 
     fun play() {
@@ -48,30 +110,28 @@ class MusicPlayer(
         player.play()
     }
 
-    fun isPlaying(): Boolean {
-        return player.isPlaying
+    fun pause() {
+        player.pause()
     }
+
+    fun getMasterVolume(): Float {
+        return userMasterVolume
+    }
+
+    fun isPlaying(): Boolean = player.isPlaying
 
     fun stopPlaying() {
         player.pause()
-        //player.stop()
-        //player.clearMediaItems()
+        // Optional: Reset enhancer gain when stopping
+        try { enhancer?.setTargetGain(0) } catch (e: Exception) {}
     }
 
-    private fun setNormalizedVolume(songDb: Double) {
-        val targetDb = TARGET_LOUDNESS_DB
-        val difference = targetDb - songDb
-
-        //limit gain to avoid distortion
-        val safeAdjustment = difference.coerceAtMost(6.0)
-
-        //player values need to be between 0-1
-        val linearVolume = 10.0.pow(safeAdjustment / 20.0).toFloat()
-        targetVolume = linearVolume.coerceIn(0f, 1f)
+    /**
+     * Required clean-up for the hardware effects
+     */
+    fun release() {
+        enhancer?.release()
+        enhancer = null
+        player.release()
     }
-
-    fun hasBeenPlayed(): Boolean {
-        return hasBeenPlayed
-    }
-
 }

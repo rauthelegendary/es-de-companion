@@ -5,21 +5,40 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.media3.exoplayer.ExoPlayer
+import com.esde.companion.ost.MusicPlayer
 
-class VolumeFader(private var player: ExoPlayer?) {
+class VolumeFader(private var player: Any?) { // Changed to Any
     private var animator: ValueAnimator? = null
     private var defaultDuration: Long = 400
 
-    // Track the "Goal" so we don't pause if the user changed their mind mid-fade
-    var targetVolume: Float = player?.volume ?: 1f
+    var targetVolume: Float = 1f
         private set
 
-    fun setPlayer(player: ExoPlayer?) {
-        this.player = player
+    fun setPlayer(newPlayer: Any?) {
+        this.player = newPlayer
+    }
+
+    private fun getVolume(): Float {
+        return when (val p = player) {
+            is MusicPlayer -> p.getMasterVolume()
+            is ExoPlayer -> p.volume
+            else -> 0f
+        }
+    }
+
+    private fun setVolume(vol: Float) {
+        when (val p = player) {
+            is MusicPlayer ->
+            {
+                p.setMasterVolume(vol)
+            }
+            is ExoPlayer -> p.volume = vol
+            else -> {}
+        }
     }
 
     fun fadeTo(goal: Float, duration: Long = defaultDuration, onComplete: (() -> Unit)? = null) {
-        val startVol = player?.volume ?: 0f
+        val startVol = getVolume()
         targetVolume = goal
         animator?.cancel()
 
@@ -28,15 +47,12 @@ class VolumeFader(private var player: ExoPlayer?) {
             interpolator = AccelerateDecelerateInterpolator()
 
             addUpdateListener { animation ->
-                // ALWAYS use the class-level 'player' property
-                // If it was swapped via setPlayer(), we target the new one instantly
-                player?.volume = animation.animatedValue as Float
+                setVolume(animation.animatedValue as Float)
             }
 
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    //only fire onComplete if the fade wasn't interrupted
-                    if (player?.volume == targetVolume || player?.isPlaying == true) {
+                    if (getVolume() == targetVolume) {
                         onComplete?.invoke()
                     }
                 }

@@ -129,7 +129,7 @@ class WidgetManager(
         val newWidget = OverlayWidget(
             contentType = type,
             contentPath = "",
-            description = "",
+            text = "",
             x = centerX,
             y = centerY,
             width = 300f,

@@ -47,11 +47,12 @@ class BackgroundBinder(
     private var musicStop: () -> Unit,
     private var widgetHide: () -> Unit,
     private val pathResolver: WidgetPathResolver,
-    private val menuView: ComposeView
+    private val menuView: ComposeView,
+    private val animationSettings: AnimationSettings
 ): DefaultLifecycleObserver {
     private var wasPlayingOnPause: Boolean = false
     var isActivityVisible: Boolean = true
-    private lateinit var currentPage: WidgetPage
+    private var currentPage: WidgetPage? = null
     private var player: ExoPlayer? = null
     private var volumeFader: VolumeFader = VolumeFader(player)
     private lateinit var state: AppState
@@ -80,7 +81,7 @@ class BackgroundBinder(
                 .distinctUntilChanged()
                 .collect {
                     allowedVolume = getAllowedAudioLevel()
-                    player?.volume = allowedVolume//volumeFader.fadeTo(allowedVolume)
+                    volumeFader.fadeTo(allowedVolume)
                 }
         }
     }
@@ -93,7 +94,7 @@ class BackgroundBinder(
         switchedGame = previousGame != gameName
         this.widgetsLocked = widgetsLocked
 
-        if(!forcedRefresh && ((!switchedSystem && gameName == null && previousGame == "" || !switchedGame) && page.hasSameVisualSettings(currentPage))) {
+        if(!forcedRefresh && ((!switchedSystem && gameName == null && previousGame == "" || !switchedGame) && currentPage != null && page.hasSameVisualSettings(currentPage!!))) {
             if(widgetsLocked && player != null && player!!.playbackState == Player.STATE_READY && !player!!.playWhenReady) {
                 player?.play()
             }
@@ -102,7 +103,8 @@ class BackgroundBinder(
         manualMuteInversion = false
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
         currentPage = page
-        playAnimation = currentPage.animation == PageAnimation.PAGE || (currentPage.animation == PageAnimation.CONTEXT && (switchedGame || switchedSystem))
+        val animationType = animationSettings.transitionTarget.value
+        playAnimation = animationType == PageAnimation.PAGE || (animationType == PageAnimation.CONTEXT && (switchedGame || switchedSystem))
         state = newState
 
         previousSystem = systemName ?: ""
@@ -123,8 +125,7 @@ class BackgroundBinder(
                 }
             }
         } else {
-            imageView.setImageDrawable(page.solidColor!!.toDrawable())
-            AudioReferee.updateBackgroundState(false)
+            showSolidColor(page.solidColor!!)
         }
 
         dimmerView.alpha = 1.0f - page.backgroundOpacity
@@ -138,6 +139,32 @@ class BackgroundBinder(
             imageView.setRenderEffect(blurEffect)
         } else {
             imageView.setRenderEffect(null)
+        }
+    }
+
+    private fun showSolidColor(color: Int) {
+        stopVideoPlayer()
+        imageView.visibility = View.VISIBLE
+        PanZoomAnimator.stopPanZoom(imageView)
+        imageView.animate().cancel()
+        AudioReferee.updateBackgroundState(false)
+
+        val colorDrawable = color.toDrawable()
+
+        if (playAnimation) {
+            imageView.alpha = 0f
+            imageView.setImageDrawable(colorDrawable)
+
+            imageView.animate()
+                .alpha(1f)
+                .setDuration(animationSettings.duration.value.toLong())
+                .withEndAction {
+                    imageView.alpha = 1f
+                }
+                .start()
+        } else {
+            imageView.alpha = 1f
+            imageView.setImageDrawable(colorDrawable)
         }
     }
 
@@ -160,11 +187,11 @@ class BackgroundBinder(
                         }
                     },
                     onSuccess = { _, _ ->
-                        val shouldAnimate = currentPage.panZoomAnimation && currentPage.backgroundType != PageContentType.SCREENSHOT
+                        val shouldAnimate = currentPage?.panZoomAnimation == true && currentPage?.backgroundType != PageContentType.SCREENSHOT
                         if (playAnimation) {
                             imageView.animate()
                                 .alpha(1f)
-                                .setDuration(currentPage.animationDuration.toLong())
+                                .setDuration(animationSettings.duration.value.toLong())
                                 .withStartAction {
                                     if (shouldAnimate) {
                                         imageView.post {
@@ -232,7 +259,7 @@ class BackgroundBinder(
                 loadVideo(file)
             } else {
                 stopVideoPlayer()
-                if(!currentPage.isVideoMuted) {
+                if(currentPage?.isVideoMuted == false) {
                     AudioReferee.updateBackgroundState(true)
                 }
 
@@ -262,23 +289,73 @@ class BackgroundBinder(
     }
 
     private fun getAllowedAudioLevel(): Float {
-        val muted = if (!manualMuteInversion) currentPage.isVideoMuted else !currentPage.isVideoMuted
-        val audiolevel = if (AudioReferee.currentPriority.value == AudioReferee.AudioSource.BACKGROUND && !muted) 1f else 0f
-        return audiolevel
+        val isVideoMuted = currentPage?.isVideoMuted ?: false
+        val vol = currentPage?.videoVolume ?: 1f
+        val muted = if (!manualMuteInversion) isVideoMuted else !isVideoMuted
+        return if (AudioReferee.currentPriority.value == AudioReferee.AudioSource.BACKGROUND && !muted) vol else 0f
     }
 
+    private var videoFirstFrameListener: Player.Listener? = null
 
     private fun loadVideo(videoFile: File) {
         try {
             stopVideoPlayer()
-            if(player == null) {
-                buildVideoPlayer()
+            if (player == null) buildVideoPlayer()
+
+            // 1. Immediate Logic Setup
+            imageView.visibility = View.GONE
+            currentVideoPath = videoFile.absolutePath
+            val mediaItem = MediaItem.fromUri(videoFile.absolutePath)
+
+            // 2. Setup the First Frame Listener
+            // We remove any existing listener first to prevent "ghost" animations
+            videoFirstFrameListener?.let { player?.removeListener(it) }
+
+            videoFirstFrameListener = object : Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    // Ensure UI changes happen on the Main Thread
+                    videoCover.post {
+                        if (playAnimation) {
+                            videoCover.animate()
+                                .alpha(0f)
+                                .setDuration(animationSettings.duration.value.toLong())
+                                .withEndAction { videoCover.visibility = View.GONE }
+                                .start()
+                        } else {
+                            videoCover.visibility = View.GONE
+                        }
+                    }
+                    // Cleanup: Stop listening once the frame is shown
+                    videoFirstFrameListener?.let { player?.removeListener(it) }
+                    videoFirstFrameListener = null
+                }
             }
 
-            imageView.visibility = View.GONE
-            val mediaItem = MediaItem.fromUri(videoFile.absolutePath)
-            videoView.post {
-                updateVideoLayering(currentPage.displayWidgetsOverVideo)
+            player?.addListener(videoFirstFrameListener!!)
+
+            // 3. Start Player Immediately (Don't wait for .post)
+            player?.apply {
+                setMediaItem(mediaItem)
+                volume = 0f
+                repeatMode = Player.REPEAT_MODE_ONE
+                prepare()
+                playWhenReady = true
+            }
+
+            // 4. Audio Management
+            if (currentPage?.isVideoMuted == false) {
+                allowedVolume = this.getAllowedAudioLevel()
+                volumeFader.fadeTo(allowedVolume)
+                AudioReferee.updateBackgroundState(true)
+            }
+
+            // 5. UI Layering and Visibility
+            // Using a manual check instead of just .post to handle detached views
+            val runLayoutLogic = {
+                updateVideoLayering(currentPage?.displayWidgetsOverVideo == true)
+                videoView.visibility = View.VISIBLE
+                videoView.alpha = 1f
+
                 videoCover.animate().cancel()
                 if (playAnimation) {
                     videoCover.alpha = 1f
@@ -286,38 +363,14 @@ class BackgroundBinder(
                 } else {
                     videoCover.visibility = View.GONE
                 }
-
-                player?.addListener(object : Player.Listener {
-                    override fun onRenderedFirstFrame() {
-                        if (playAnimation) {
-                            videoCover.animate()
-                                .alpha(0f)
-                                .setDuration(currentPage.animationDuration.toLong())
-                                .withEndAction {
-                                    videoCover.visibility = View.GONE
-                                }
-                                .start()
-                        } else {
-                            videoCover.visibility = View.GONE
-                        }
-                        player?.removeListener(this)
-                    }
-                })
-
-                player?.setMediaItem(mediaItem)
-                player?.volume = if (currentPage.isVideoMuted) 0f else allowedVolume
-                player?.prepare()
-                player?.playWhenReady = true
-                player?.repeatMode = Player.REPEAT_MODE_ONE
-
-                if(!currentPage.isVideoMuted) {
-                    AudioReferee.updateBackgroundState(true)
-                }
-                videoView.visibility = View.VISIBLE
-                videoView.alpha = 1f
-
-                currentVideoPath = videoFile.absolutePath
             }
+
+            if (videoView.isAttachedToWindow) {
+                runLayoutLogic()
+            } else {
+                videoView.post { runLayoutLogic() }
+            }
+
         } catch (e: Exception) {
             Log.e("MainActivity", "Error loading video: ${videoFile.absolutePath}", e)
             releasePlayer()
@@ -408,7 +461,7 @@ class BackgroundBinder(
      * Get video delay in milliseconds
      */
     private fun getVideoDelay(): Long {
-        return (currentPage.videoDelay * 1000L)
+        return (currentPage!!.videoDelay * 1000L)
     }
 
     private fun resetVideoPlayer() {
@@ -429,10 +482,6 @@ class BackgroundBinder(
             wasPlayingOnPause = false
         }
         player?.volume = getAllowedAudioLevel()
-    }
-
-    override fun onStart(owner: LifecycleOwner) {
-        resetVideoPlayer()
     }
 
     private fun buildVideoPlayer() {
@@ -460,7 +509,7 @@ class BackgroundBinder(
 
     fun toggleMute() {
         manualMuteInversion = !manualMuteInversion
-        if(currentPage.backgroundType == PageContentType.VIDEO && player?.isPlaying == true) {
+        if(currentPage!!.backgroundType == PageContentType.VIDEO && player?.isPlaying == true) {
             if (player?.volume == 0f) {
                 AudioReferee.updateBackgroundState(true)
                 player?.volume = getAllowedAudioLevel()

@@ -64,8 +64,9 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.esde.companion.MediaFileLocator
 import com.esde.companion.OverlayWidget.MediaSlot
-import com.esde.companion.art.MediaOverride
-import com.esde.companion.art.MediaOverrideRepository
+import com.esde.companion.art.mediaoverride.MediaOverride
+import com.esde.companion.art.mediaoverride.MediaOverrideKey
+import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.ui.ContentType
 import java.io.File
 
@@ -92,7 +93,7 @@ fun GameMediaContent(
     var refreshKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(game, selectedType, refreshKey) {
-        activeOverride = mediaOverrideRepository.getOverride(game, selectedType.name)
+        activeOverride = mediaOverrideRepository.getOverride(game, system, selectedType)
     }
 
     val availableSlots = remember(game, system, selectedType, refreshKey) {
@@ -104,7 +105,7 @@ fun GameMediaContent(
 
     val visibleTypes = remember {
         ContentType.entries.filter {
-            it != ContentType.GAME_DESCRIPTION && it != ContentType.SYSTEM_LOGO
+            !it.isTextWidget() && it != ContentType.SYSTEM_LOGO && it != ContentType.SYSTEM_IMAGE
         }
     }
 
@@ -385,7 +386,7 @@ fun PreviewActions(
             }
         } else {
             Button(
-                onClick = { onSetDefault(MediaOverride(game, type, slot)) },
+                onClick = { onSetDefault(MediaOverride(MediaOverrideKey(game, system, type), slot)) },
                 modifier = Modifier.weight(1f),
                 enabled = slot != MediaSlot.Default && file?.exists() == true
             ) {

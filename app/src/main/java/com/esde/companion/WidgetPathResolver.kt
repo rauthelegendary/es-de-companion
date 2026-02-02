@@ -2,15 +2,21 @@ package com.esde.companion
 
 import android.content.SharedPreferences
 import android.util.DisplayMetrics
-import com.esde.companion.art.MediaOverrideRepository
+import com.esde.companion.art.mediaoverride.MediaOverrideRepository
+import com.esde.companion.metadata.GameRepository
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.WidgetContext
 import java.io.File
 
-class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val prefs: SharedPreferences, private val mediaOverrideRepository: MediaOverrideRepository) {
+class WidgetPathResolver(
+    private val mediaLocator: MediaFileLocator,
+    private val prefs: SharedPreferences,
+    private val mediaOverrideRepository: MediaOverrideRepository,
+    private val gameRepository: GameRepository
+) {
 
-    fun resolve(
+    suspend fun resolve(
         rawWidgets: List<OverlayWidget>,
         system: String?,
         gameFilename: String?,
@@ -22,7 +28,7 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
         return emptyList()
     }
 
-    fun resolveSingle(
+    suspend fun resolveSingle(
         rawWidget: OverlayWidget,
         system: String?,
         gameFilename: String?,
@@ -32,14 +38,12 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
         var missingRequired = false
 
         if (system != null) {
-            if (rawWidget.contentType == ContentType.GAME_DESCRIPTION && gameFilename != null) {
-                if (getGameDescription(system, gameFilename) != null) {
-                    resolvedWidget.description = getGameDescription(system, gameFilename)!!
-                } else {
-                    resolvedWidget.description = ""
-                }
+            if (rawWidget.contentType.isTextWidget() && gameFilename != null) {
+                resolvedWidget.text = getGameTextWidget(system, gameFilename, rawWidget.contentType) ?: ""
             } else if (rawWidget.contentType == ContentType.SYSTEM_LOGO) {
                 resolvedWidget.contentPath = findSystemLogo(system) ?: ""
+            } else if (rawWidget.contentType == ContentType.SYSTEM_IMAGE) {
+                resolvedWidget.contentPath = getSystemImage(system)?.path ?: ""
             } else if (gameFilename != null) {
                 val mediaFile = locateFileWithOverride(
                     rawWidget.contentType,
@@ -52,11 +56,14 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
                 } else {
                     resolvedWidget.contentPath = ""
                 }
+                if(rawWidget.cycle) {
+                    rawWidget.images = getAllImagesForGameAndContentType(rawWidget.contentType, gameFilename, system)
+                }
             }
         }
-        if(resolvedWidget.contentType == ContentType.GAME_DESCRIPTION && (resolvedWidget.description == null || resolvedWidget.description.isEmpty()) && resolvedWidget.isRequired) {
+        if(resolvedWidget.contentType.isTextWidget() && (resolvedWidget.text.isEmpty() && resolvedWidget.isRequired)) {
             missingRequired = true
-        } else if(resolvedWidget.contentType != ContentType.GAME_DESCRIPTION && resolvedWidget.isRequired && resolvedWidget.contentPath.isEmpty()) {
+        } else if(resolvedWidget.contentType != ContentType.GAME_DESCRIPTION && resolvedWidget.isRequired && resolvedWidget.contentPath != null && resolvedWidget.contentPath!!.isEmpty()) {
             missingRequired = true
         }
 
@@ -67,7 +74,7 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
     fun locateFileWithOverride(contentType: ContentType, system: String, gameFilename: String, givenSlot: OverlayWidget.MediaSlot): File? {
         var slot = givenSlot
         if(givenSlot == OverlayWidget.MediaSlot.Default) {
-            val override = mediaOverrideRepository.getOverride(gameFilename, contentType.name)
+            val override = mediaOverrideRepository.getOverride(gameFilename, system, contentType)
             if (override != null) {
                 slot = override.altSlot
             }
@@ -75,75 +82,28 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
         return mediaLocator.findMediaFile(contentType,system, gameFilename, slot)
     }
 
-    private fun getGameDescription(systemName: String, gameFilename: String): String? {
-        try {
-            // Get scripts path and navigate to ES-DE folder
-            val scriptsPath = prefs.getString("scripts_path", "/storage/emulated/0/ES-DE/scripts")
-                ?: return null
-
-            // Get ES-DE root folder (parent of scripts folder)
-            val scriptsDir = File(scriptsPath)
-            val esdeRoot = scriptsDir.parentFile ?: return null
-
-            // Build path to gamelist.xml: ~/ES-DE/gamelists/<systemname>/gamelist.xml
-            val gamelistFile = File(esdeRoot, "gamelists/$systemName/gamelist.xml")
-
-            android.util.Log.d("MainActivity", "Looking for gamelist: ${gamelistFile.absolutePath}")
-
-            if (!gamelistFile.exists()) {
-                android.util.Log.d(
-                    "MainActivity",
-                    "Gamelist file not found for system: $systemName"
-                )
-                return null
-            }
-
-            // Parse XML to find the game's description
-            val xmlContent = gamelistFile.readText()
-            val sanitizedFilename = gameFilename.replace("\\", "").substringAfterLast("/")
-
-            // Look for the game entry with matching path
-            // Match pattern: <path>./filename</path>
-            val pathPattern = "<path>\\./\\Q$sanitizedFilename\\E</path>".toRegex()
-            val pathMatch = pathPattern.find(xmlContent)
-
-            if (pathMatch == null) {
-                android.util.Log.d("MainActivity", "Game not found in gamelist: $sanitizedFilename")
-                return null
-            }
-
-            // Find the <desc> tag after this <path> tag
-            val gameStartIndex = pathMatch.range.first
-
-            // Search for <desc>...</desc> within this game entry (before next <game> tag)
-            val remainingXml = xmlContent.substring(gameStartIndex)
-            val nextGameIndex = remainingXml.indexOf("<game>", startIndex = 1)
-            val searchSpace = if (nextGameIndex > 0) {
-                remainingXml.substring(0, nextGameIndex)
-            } else {
-                remainingXml
-            }
-
-            // Extract description text between <desc> and </desc>
-            val descPattern = "<desc>([\\s\\S]*?)</desc>".toRegex()
-            val descMatch = descPattern.find(searchSpace)
-
-            return if (descMatch != null) {
-                val description = descMatch.groupValues[1].trim()
-                android.util.Log.d("MainActivity", "Found description: ${description.take(100)}...")
-                description
-            } else {
-                android.util.Log.d(
-                    "MainActivity",
-                    "No description found for game: $sanitizedFilename"
-                )
-                null
-            }
-
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Error parsing gamelist.xml", e)
-            return null
+    fun getAllImagesForGameAndContentType(type: ContentType, game: String, system: String): Map<OverlayWidget.MediaSlot, File?> {
+        val imageList = mutableMapOf<OverlayWidget.MediaSlot, File?>()
+        OverlayWidget.MediaSlot.entries.forEach { slot ->
+            imageList[slot] = mediaLocator.findMediaFile(type,system, game, slot)
         }
+        return imageList
+    }
+
+    private suspend fun getGameTextWidget(systemName: String, gameFilename: String, contentType: ContentType): String? {
+        val game = gameRepository.getMetadata(MediaFileHelper.getRelativePathToGame(gameFilename), systemName)
+        if (game != null) {
+            return when (contentType) {
+                ContentType.GAME_DESCRIPTION -> game.description
+                ContentType.TITLE -> game.name
+                ContentType.DEVELOPER -> game.developer
+                ContentType.PUBLISHER -> game.publisher
+                ContentType.GENRE -> game.genre
+                ContentType.RELEASE_DATE -> game.releaseDate
+                else -> ""
+            }
+        }
+        return ""
     }
 
     fun getSystemImage(system: String) : File?{
@@ -273,13 +233,6 @@ class WidgetPathResolver(private val mediaLocator: MediaFileLocator, private val
             result = locateFileWithOverride(ContentType.SCREENSHOT, system, gameFilename, slot)
         }
         return result
-    }
-
-    fun getCroppedFile(originalFile: File): File {
-        val nameWithoutExtension = originalFile.nameWithoutExtension
-        val extension = originalFile.extension
-        val parent = originalFile.parentFile
-        return File(parent, "${nameWithoutExtension}_cropped.$extension")
     }
 }
 

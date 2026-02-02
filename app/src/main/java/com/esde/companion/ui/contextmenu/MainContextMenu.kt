@@ -34,19 +34,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.esde.companion.AnimationSettings
 import com.esde.companion.AppState
 import com.esde.companion.MediaFileLocator
 import com.esde.companion.OverlayWidget.MediaSlot
 import com.esde.companion.PageEditorItem
 import com.esde.companion.WidgetPage
 import com.esde.companion.art.ArtRepository
-import com.esde.companion.art.MediaOverride
-import com.esde.companion.art.MediaOverrideRepository
 import com.esde.companion.art.LaunchBox.LaunchBoxDao
+import com.esde.companion.art.mediaoverride.MediaOverride
+import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.getCurrentSystemName
 import com.esde.companion.isInGameBrowsingMode
 import com.esde.companion.isInSystemBrowsingMode
+import com.esde.companion.ost.MusicRepository
 import com.esde.companion.ost.YoutubeMediaService
+import com.esde.companion.ost.khinsider.KhSong
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.contextmenu.scraper.ScraperMenuContent
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -64,8 +67,6 @@ fun MainContextMenu(
     onDismiss: () -> Unit,
     widgetActions: WidgetActions,
     artRepository: ArtRepository,
-    musicResults: List<StreamInfoItem>,
-    isSearchingMusic: Boolean,
     onMusicSearch: (String) -> Unit,
     onMusicSelect: (StreamInfoItem, (Float) -> Unit) -> Unit,
     onSave: (String, ContentType, Int) -> Unit,
@@ -79,7 +80,12 @@ fun MainContextMenu(
     onRenamePage: (String) -> Unit,
     swapMedia: (String, ContentType, String, MediaSlot, MediaSlot) -> Unit,
     deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
-    launchBoxDao: LaunchBoxDao
+    launchBoxDao: LaunchBoxDao,
+    animationSettings: AnimationSettings,
+    musicRepository: MusicRepository,
+    onKhMusicSelect: (KhSong, String, (Float) -> Unit) -> Unit,
+    isSearchingMusic: Boolean,
+    musicResults: List<StreamInfoItem>
     ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var fileName = ""
@@ -150,7 +156,8 @@ fun MainContextMenu(
                             currentPage = currentPage,
                             pages = pages,
                             onSavePages = onSavePages,
-                            onRenamePage = onRenamePage
+                            onRenamePage = onRenamePage,
+                            animationSettings = animationSettings
                         )
 
                         "Game Media" -> GameMediaContent(
@@ -169,15 +176,17 @@ fun MainContextMenu(
                         "Music" -> {
                             val s = state as AppState.GameBrowsing
                             MusicMenuContent(
-                                initialQuery = "\"${s.gameName} ${YoutubeMediaService.searchString}\"",
-                                results = musicResults,
-                                isLoading = isSearchingMusic,
-                                onSearch = onMusicSearch,
-                                onVideoSelected = onMusicSelect,
-                                mediaService = mediaService
+                                musicRepository = musicRepository,
+                                youtubeMediaService = mediaService,
+                                initialKhSearchQuery = s.gameName!!,
+                                initialYtSearchQuery = "\"${s.gameName} ${YoutubeMediaService.searchString}\"",
+                                onMusicSearch = onMusicSearch,
+                                onSaveYoutube = onMusicSelect,
+                                onSaveKh = onKhMusicSelect,
+                                musicResults = musicResults,
+                                isSearchingMusic = isSearchingMusic
                             )
                         }
-
                         "Scraper" -> {
                             val s = state as AppState.GameBrowsing
                             ScraperMenuContent(

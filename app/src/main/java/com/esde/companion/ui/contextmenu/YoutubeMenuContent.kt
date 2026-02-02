@@ -58,7 +58,7 @@ import kotlinx.coroutines.delay
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 @Composable
-fun MusicMenuContent(
+fun YoutubeMenuContent(
     initialQuery: String,
     results: List<StreamInfoItem>,
     isLoading: Boolean,

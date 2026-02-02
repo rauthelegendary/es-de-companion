@@ -10,19 +10,14 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.res.ColorStateList
-import android.database.ContentObserver
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.PictureDrawable
 import android.hardware.display.DisplayManager
-import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Build.VERSION.SDK_INT
@@ -33,9 +28,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
-import android.text.Layout
-import android.text.StaticLayout
-import android.text.TextPaint
 import android.text.TextWatcher
 import android.util.Log
 import android.view.GestureDetector
@@ -86,15 +78,20 @@ import com.esde.companion.MediaFileHelper.sanitizeGameFilename
 import com.esde.companion.OverlayWidget.MediaSlot
 import com.esde.companion.art.ArtRepository
 import com.esde.companion.art.LaunchBox.LaunchBoxScraper
-import com.esde.companion.art.MediaOverride
-import com.esde.companion.art.MediaOverrideRepository
 import com.esde.companion.art.MediaService
+import com.esde.companion.art.SystemColorMapper
 import com.esde.companion.art.igdb.IgdbArtScraper
 import com.esde.companion.art.igdb.TwitchAuth
+import com.esde.companion.art.mediaoverride.MediaOverride
+import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.art.steamgrid.SGDBScraper
+import com.esde.companion.metadata.GameListSyncManager
+import com.esde.companion.metadata.GameRepository
 import com.esde.companion.ost.MusicPlayer
 import com.esde.companion.ost.MusicRepository
 import com.esde.companion.ost.YoutubeMediaService
+import com.esde.companion.ost.khinsider.KhRepository
+import com.esde.companion.ost.khinsider.KhSong
 import com.esde.companion.ost.loudness.LoudnessService
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
@@ -162,11 +159,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var appLaunchPrefs: AppLaunchPreferences
     private lateinit var mediaService: MediaService
     private lateinit var mediaFileLocator: MediaFileLocator
-
-    // ========== MUSIC INTEGRATION START ==========
-
-    // ========== MUSIC INTEGRATION END ==========
-
     private lateinit var blackOverlay: View
     private var isBlackOverlayShown = false
 
@@ -187,7 +179,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var showGrid by mutableStateOf(false)
     private var isInteractingWithWidget = false
     private var previousWidgetContext: WidgetContext? = null
-
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
     private var longPressTriggered = false
@@ -209,9 +200,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             Log.d("MainActivity", "FROM: $oldState")
             Log.d("MainActivity", "TO:   $value")
             Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━")
-
-            // ========== MUSIC ==========
-            // ===========================
         }
 
     private var fileObserver: FileObserver? = null
@@ -286,8 +274,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private lateinit var musicRepository: MusicRepository
     private lateinit var musicPlayer: MusicPlayer
-
     private lateinit var volumeFader: VolumeFader
+
+    private lateinit var animationSettings: AnimationSettings
 
     private val menuState = ContextMenuStateHolder()
 
@@ -452,9 +441,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         val launchBoxDao = database.launchBoxDao()
         mediaOverrideRepository = MediaOverrideRepository(mediaOverrideDao)
 
-        /**lifecycleScope.launch(Dispatchers.IO) {
-        loudnessDao.clearAllLoudnessData()
-        }**/
+        //lifecycleScope.launch(Dispatchers.IO) {
+        // loudnessDao.clearAllLoudnessData()
+        //}
 
         ////SCRAPING STUFF////
         val steamGrid = SGDBScraper(BuildConfig.STEAM_GRID_API_KEY)
@@ -472,8 +461,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 }
         }
         val youtubeService = YoutubeMediaService(NetworkClientManager.baseClient)
+        val khRepository = KhRepository()
 
-        musicRepository = MusicRepository(youtubeService, LoudnessService(loudnessDao))
+        musicRepository = MusicRepository(youtubeService, LoudnessService(loudnessDao), khRepository)
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -483,19 +473,16 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             audioAttributes,
             true
         )
+        val gameDao = database.gameDao()
+        val gameRepository = GameRepository(gameDao)
 
         musicPlayer = MusicPlayer(musicRepository, musicExoPlayer)
-        volumeFader = VolumeFader(musicExoPlayer)
-
+        volumeFader = VolumeFader(musicPlayer)
 
         prefs = getSharedPreferences("ESDESecondScreenPrefs", MODE_PRIVATE)
         appLaunchPrefs = AppLaunchPreferences(this)
         mediaFileLocator = MediaFileLocator(prefs)
         mediaService = MediaService(mediaOverrideRepository, mediaFileLocator)
-
-        // ========== MUSIC INTEGRATION START ==========
-
-        // ========== MUSIC INTEGRATION END ==========
 
         // Check if we should show widget tutorial for updating users
         checkAndShowWidgetTutorialForUpdate()
@@ -509,9 +496,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         settingsButton = findViewById(R.id.settingsButton)
         androidSettingsButton = findViewById(R.id.androidSettingsButton)
         blackOverlay = findViewById(R.id.blackOverlay)
-        // ========== MUSIC INTEGRATION START ==========
-
-        // ========== MUSIC INTEGRATION END ==========
 
         // Load snap to grid state
         snapToGrid = prefs.getBoolean("snap_to_grid", true)
@@ -522,8 +506,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         widgetContainer = findViewById(R.id.widgetContainer)
         gameWidgetManager = WidgetManager(this, WidgetContext.GAME)
         systemWidgetManager = WidgetManager(this, WidgetContext.SYSTEM)
-        widgetPathResolver = WidgetPathResolver(mediaFileLocator, prefs, mediaOverrideRepository)
+        widgetPathResolver = WidgetPathResolver(mediaFileLocator, prefs, mediaOverrideRepository, gameRepository)
         widgetViewBinder = WidgetViewBinder()
+
+        //TODO: not hardcode this
+        lifecycleScope.launch {
+            GameListSyncManager.syncAll(this@MainActivity, File("/storage/emulated/0/ES-DE/gamelists"))
+        }
 
         // Set initial position off-screen (above the top)
         val displayHeight = resources.displayMetrics.heightPixels.toFloat()
@@ -540,6 +529,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         setupAndroidSettingsButton()
         gameWidgetManager.load()
         systemWidgetManager.load()
+        animationSettings = AnimationSettings(this)
 
         // Apply drawer transparency
         updateDrawerTransparency()
@@ -615,10 +605,28 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                              removeCrop = { file -> removeCrop(file) },
                              pages = pages,
                              onSavePages = { pageItems -> onSaveNewPageOrder(pageItems) },
-                             onRenamePage = { name -> onRenamePage(name)},
-                             swapMedia = { game, type, system, originalSlot, targetSlot -> onSwapMedia(game, type, system, originalSlot, targetSlot)},
-                             deleteMedia = { game, type, system, originalSlot -> onDeleteMedia(game, type, system, originalSlot)},
-                             launchBoxDao = launchBoxDao
+                             onRenamePage = { name -> onRenamePage(name) },
+                             swapMedia = { game, type, system, originalSlot, targetSlot ->
+                                 onSwapMedia(
+                                     game,
+                                     type,
+                                     system,
+                                     originalSlot,
+                                     targetSlot
+                                 )
+                             },
+                             deleteMedia = { game, type, system, originalSlot ->
+                                 onDeleteMedia(
+                                     game,
+                                     type,
+                                     system,
+                                     originalSlot
+                                 )
+                             },
+                             launchBoxDao = launchBoxDao,
+                             animationSettings = animationSettings,
+                             musicRepository = musicRepository,
+                             onKhMusicSelect = { song, url, onProgress -> onMusicResultSelectedKh(song, url, onProgress)}
                          )
                      }
 
@@ -628,14 +636,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                              currentPageIndex = currentWidgetManager().currentPageIndex,
                              onDismiss = {
                                  menuState.widgetToEditState = null
+                                 widgetMenuShowing = false
                              },
                              onUpdate = { updated ->
                                  onWidgetUpdated(updated)
-                                 menuState.widgetToEditState = null
                              },
                              onDelete = {
                                  deleted -> onWidgetDeleted(deleted)
                                  menuState.widgetToEditState = null
+                                 widgetMenuShowing = false
                              },
                              onReorder = { widget, forward ->
                                  onWidgetReordered(
@@ -662,23 +671,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             pathResolver = widgetPathResolver,
             widgetContainer = widgetContainer,
             rootContainer = rootLayout,
-            menuView = menuComposeView
+            menuView = menuComposeView,
+            animationSettings = animationSettings
         )
 
         val logsDir = File(mediaFileLocator.getLogsPath())
-        Log.d("MainActivity", "Logs directory: ${logsDir.absolutePath}")
-        Log.d("MainActivity", "Logs directory exists: ${logsDir.exists()}")
-
         val systemScrollFile = File(logsDir, "esde_system_name.txt")
         val gameScrollFile = File(logsDir, "esde_game_filename.txt")
-
-        Log.d("MainActivity", "System scroll file: ${systemScrollFile.absolutePath}")
-        Log.d(
-            "MainActivity",
-            "System scroll file exists: ${systemScrollFile.exists()}"
-        )
-        Log.d("MainActivity", "Game scroll file: ${gameScrollFile.absolutePath}")
-        Log.d("MainActivity", "Game scroll file exists: ${gameScrollFile.exists()}")
 
         // Check which file was modified most recently to determine which mode to use
         val systemScrollExists = systemScrollFile.exists()
@@ -711,10 +710,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         // Auto-launch setup wizard if needed
         checkAndLaunchSetupWizard()
-
-        // Register volume change listener for real-time updates
-        registerVolumeListener()
-        registerSecondaryVolumeObserver()
 
         lifecycleScope.launch {
             AudioReferee.currentPriority
@@ -756,22 +751,30 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     }
 
     fun onRemoveMediaOverride(mediaOverride: MediaOverride) {
-        lifecycleScope.launch {
-            try{
-            mediaOverrideRepository.removeOverride(mediaOverride)
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Failed to delete override", Toast.LENGTH_SHORT).show()
+        if(state as? AppState.GameBrowsing != null) {
+            lifecycleScope.launch {
+                try {
+                    mediaOverrideRepository.removeOverride(mediaOverride)
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Failed to delete override",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         }
     }
 
 
     fun onMediaOverride(mediaOverride: MediaOverride) {
-        lifecycleScope.launch {
-            try {
-                mediaOverrideRepository.updateOverride(mediaOverride)
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Failed to save override", Toast.LENGTH_SHORT)
+        if(state as? AppState.GameBrowsing != null) {
+            lifecycleScope.launch {
+                try {
+                    mediaOverrideRepository.updateOverride(mediaOverride)
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Failed to save override", Toast.LENGTH_SHORT)
+                }
             }
         }
     }
@@ -785,7 +788,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     fun handleCropSave(originalFile: File, bitmap: Bitmap) {
         val croppedFile = File(
             originalFile.parent,
-            "${originalFile.nameWithoutExtension}_cropped.${originalFile.extension}"
+            "${originalFile.nameWithoutExtension}_cropped.png"
         )
 
         lifecycleScope.launch(Dispatchers.IO) {
@@ -813,7 +816,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                     startMusicPlayer()
                 }
             } else if (musicPlayer.isPlaying()) {
-                volumeFader.fadeTo(0f, 100) {
+                volumeFader.fadeTo(0f, 300) {
                     musicPlayer.pause()
                 }
             }
@@ -1347,10 +1350,6 @@ Access this help anytime from the widget menu!
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
 
-        // Update video volume based on current system volume
-        updateVideoVolume()
-        updateMusicPlayerVolume()
-
         // Clear search bar
         if (::appSearchBar.isInitialized) {
             appSearchBar.text.clear()
@@ -1557,7 +1556,6 @@ Access this help anytime from the widget menu!
                     longPressHandler?.removeCallbacks(it)
                 }
 
-                // Allow long press in system view too
                 if (!widgetMenuShowing && drawerState == BottomSheetBehavior.STATE_HIDDEN) {
                     if (longPressHandler == null) {
                         longPressHandler = Handler(Looper.getMainLooper())
@@ -2397,8 +2395,6 @@ Access this help anytime from the widget menu!
         currentErrorDialog?.dismiss()
         fileObserver?.stopWatching()
         unregisterReceiver(appChangeReceiver)
-        unregisterVolumeListener()
-        unregisterSecondaryVolumeObserver()
         // Cancel any pending image loads
         imageLoadRunnable?.let { imageLoadHandler.removeCallbacks(it) }
         // Release video player
@@ -2503,7 +2499,9 @@ Access this help anytime from the widget menu!
         if(state is AppState.GamePlaying) { wrapperPage = createWidgetPageForBehaviour(gameLaunchBehaviour)}
         if(state is AppState.Screensaver) { wrapperPage = createWidgetPageForBehaviour(screensaverBehavior)}
         var currentPage: WidgetPage = currentWidgetManager().getCurrentPage()
+        setSolidColorForPage(currentPage)
 
+        lifecycleScope.launch {
         if(!pagePreValidated && !isPageValid(currentPage)) {
             currentWidgetManager().currentPageIndex = 0
             currentPage = currentWidgetManager().getCurrentPage()
@@ -2517,42 +2515,49 @@ Access this help anytime from the widget menu!
             processPage = currentPage
         }
 
-
         val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
         backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked)
 
         //TODO: do we need a method callback that releases everything?
+            if (processPage.displayWidgets) {
+                val resolved = widgetPathResolver.resolve(
+                    processPage.widgets,
+                    state.getCurrentSystemName(),
+                    state.getCurrentGameFilename(),
+                    resources.displayMetrics
+                )
 
-        if(processPage.displayWidgets) {
-            val resolved = widgetPathResolver.resolve(
-                processPage.widgets,
-                state.getCurrentSystemName(),
-                state.getCurrentGameFilename(),
-                resources.displayMetrics
-            )
-
-            widgetViewBinder.sync(
-                container = widgetContainer,
-                lifecycleOwner = this,
-                dataList = resolved,
-                page = currentPage,
-                locked = widgetsLocked,
-                snapToGrid = snapToGrid,
-                gridSize = gridSize,
-                pageSwap = pageSwap,
-                onUpdate = ::onWidgetUpdated,
-                onEditRequested = ::openWidgetSettings
-            )
-        } else {
-            hideWidgets()
+                widgetViewBinder.sync(
+                    container = widgetContainer,
+                    lifecycleOwner = this@MainActivity,
+                    dataList = resolved,
+                    page = currentPage,
+                    locked = widgetsLocked,
+                    snapToGrid = snapToGrid,
+                    gridSize = gridSize,
+                    pageSwap = pageSwap,
+                    onUpdate = ::onWidgetUpdated,
+                    onEditRequested = ::openWidgetSettings,
+                    animationSettings = animationSettings
+                )
+            } else {
+                hideWidgets()
+            }
         }
     }
 
     private fun startMusicPlayer() {
         if (AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC && !musicPlayer.isPlaying() && !AudioReferee.getMenuState() && state.toWidgetContext() == WidgetContext.GAME) {
-            musicPlayer.setVolume(0f)
+            musicPlayer.setMasterVolume(0f)
             musicPlayer.play()
-            volumeFader.fadeTo(musicPlayer.targetVolume, 750)
+            volumeFader.fadeTo(0.7f, 1000)
+        }
+    }
+
+    private fun setSolidColorForPage(page: WidgetPage)
+    {
+        if(page.backgroundType == PageContentType.SOLID_COLOR && state.toWidgetContext() == WidgetContext.SYSTEM) {
+            page.solidColor = SystemColorMapper.getColorForSystem(state.getCurrentSystemName())
         }
     }
 
@@ -2569,7 +2574,6 @@ Access this help anytime from the widget menu!
                 wrapperPage.displayWidgets = true
             }
             "game_image" -> {
-                //get prefs for screenshot/fanart
                 wrapperPage.backgroundType = PageContentType.FANART
                 wrapperPage.displayWidgets = true
             }
@@ -2585,13 +2589,15 @@ Access this help anytime from the widget menu!
     private fun onWidgetUpdated(widget: OverlayWidget) {
         currentWidgetManager().updateWidget(widget, resources.displayMetrics)
         val page = currentWidgetManager().getCurrentPage()
-        val resolved = widgetPathResolver.resolveSingle(
-            widget,
-            state.getCurrentSystemName(),
-            state.getCurrentGameFilename(),
-            resources.displayMetrics
-        )
-        widgetViewBinder.syncSingleWidget(resolved.widget, widgetContainer, page)
+        lifecycleScope.launch {
+            val resolved = widgetPathResolver.resolveSingle(
+                widget,
+                state.getCurrentSystemName(),
+                state.getCurrentGameFilename(),
+                resources.displayMetrics
+            )
+            widgetViewBinder.syncSingleWidget(resolved.widget, widgetContainer, page)
+        }
     }
 
     private fun currentWidgetManager(): WidgetManager {
@@ -2637,24 +2643,25 @@ Access this help anytime from the widget menu!
         val allPages = currentManager.getAllPages()
         val direction = if(next) 1 else -1
 
-        for (i in 0 until totalPages) {
-            nextIndex = (nextIndex + direction + totalPages) % totalPages
-            val candidatePage = allPages[nextIndex]
+        lifecycleScope.launch {
+            for (i in 0 until totalPages) {
+                nextIndex = (nextIndex + direction + totalPages) % totalPages
+                val candidatePage = allPages[nextIndex]
 
-            if (isPageValid(candidatePage)) {
-                currentManager.currentPageIndex = nextIndex
-                foundValidPage = true
-                break
+                if (isPageValid(candidatePage)) {
+                    foundValidPage = true
+                    break
+                }
             }
-        }
 
-        if (foundValidPage) {
-            //screenTransition({})
-            refreshWidgets(pagePreValidated = true, pageSwap = true)
+            if (foundValidPage && currentManager.currentPageIndex != nextIndex) {
+                currentManager.currentPageIndex = nextIndex
+                refreshWidgets(pagePreValidated = true, pageSwap = true)
+            }
         }
     }
 
-    fun isPageValid(page: WidgetPage): Boolean {
+    suspend fun isPageValid(page: WidgetPage): Boolean {
         if(!widgetsLocked) return true
         val bgFile = widgetPathResolver.resolvePage(page, state)
         if (page.backgroundType != PageContentType.SOLID_COLOR && page.isRequired && (bgFile == null || !bgFile.exists())) {
@@ -2663,470 +2670,11 @@ Access this help anytime from the widget menu!
 
         val system = state.getCurrentSystemName()
         val game = state.getCurrentGameFilename()
-
         page.widgets.forEach { widget ->
             val result = widgetPathResolver.resolveSingle(widget, system, game, resources.displayMetrics)
             if (result.missingRequired) return false
         }
-
         return true
-    }
-
-    /**
-     * Load a built-in system logo SVG from assets folder
-     * Handles both regular systems and ES-DE auto-collections
-     * Returns drawable if found, null otherwise
-     */
-    fun loadSystemLogoFromAssets(
-        systemName: String,
-        width: Int = -1,
-        height: Int = -1
-    ): Drawable? {
-        return try {
-            // Handle ES-DE auto-collections
-            val baseFileName = when (systemName.lowercase()) {
-                "allgames" -> "auto-allgames"
-                "favorites" -> "auto-favorites"
-                "lastplayed" -> "auto-lastplayed"
-                else -> systemName.lowercase()
-            }
-
-            // First check user-provided system logos path with multiple format support
-            val userLogosDir = File(mediaFileLocator.getSystemLogosPath())
-            if (userLogosDir.exists() && userLogosDir.isDirectory) {
-                val extensions = listOf("svg", "png", "jpg", "jpeg", "webp")
-
-                for (ext in extensions) {
-                    val logoFile = File(userLogosDir, "$baseFileName.$ext")
-                    if (logoFile.exists()) {
-                        Log.d("MainActivity", "Loading logo from user path: $logoFile")
-
-                        return when (ext) {
-                            "svg" -> {
-                                val svg =
-                                    SVG.getFromInputStream(logoFile.inputStream())
-
-                                if (width > 0 && height > 0) {
-                                    // Create bitmap at target dimensions
-                                    val bitmap = Bitmap.createBitmap(
-                                        width,
-                                        height,
-                                        Bitmap.Config.ARGB_8888
-                                    )
-                                    val canvas = Canvas(bitmap)
-
-                                    val viewBox = svg.documentViewBox
-                                    if (viewBox != null) {
-                                        // SVG has viewBox - let AndroidSVG handle scaling
-                                        svg.setDocumentWidth(width.toFloat())
-                                        svg.setDocumentHeight(height.toFloat())
-                                        svg.renderToCanvas(canvas)
-                                        Log.d(
-                                            "MainActivity",
-                                            "User SVG ($baseFileName) with viewBox rendered at ${width}x${height}"
-                                        )
-                                    } else {
-                                        // No viewBox - manually scale using document dimensions
-                                        val docWidth = svg.documentWidth
-                                        val docHeight = svg.documentHeight
-
-                                        if (docWidth > 0 && docHeight > 0) {
-                                            val scaleX = width.toFloat() / docWidth
-                                            val scaleY = height.toFloat() / docHeight
-                                            val scale = minOf(scaleX, scaleY)
-
-                                            val scaledWidth = docWidth * scale
-                                            val scaledHeight = docHeight * scale
-                                            val translateX = (width - scaledWidth) / 2f
-                                            val translateY = (height - scaledHeight) / 2f
-
-                                            canvas.translate(translateX, translateY)
-                                            canvas.scale(scale, scale)
-                                            svg.renderToCanvas(canvas)
-                                            Log.d(
-                                                "MainActivity",
-                                                "User SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale"
-                                            )
-                                        }
-                                    }
-
-                                    // Return drawable with no intrinsic dimensions
-                                    object : BitmapDrawable(
-                                        resources,
-                                        bitmap
-                                    ) {
-                                        override fun getIntrinsicWidth(): Int = -1
-                                        override fun getIntrinsicHeight(): Int = -1
-                                    }
-                                } else {
-                                    PictureDrawable(svg.renderToPicture())
-                                }
-                            }
-
-                            else -> {
-                                // Load bitmap formats (PNG, JPG, WebP) with downscaling
-                                val bitmap = loadScaledBitmap(logoFile.absolutePath, 800, 1000)
-                                BitmapDrawable(resources, bitmap)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fall back to built-in SVG assets
-            val svgPath = "system_logos/$baseFileName.svg"
-            val svg = SVG.getFromAsset(assets, svgPath)
-
-            if (width > 0 && height > 0) {
-                // Create bitmap at target dimensions
-                val bitmap = Bitmap.createBitmap(
-                    width,
-                    height,
-                    Bitmap.Config.ARGB_8888
-                )
-                val canvas = Canvas(bitmap)
-
-                val viewBox = svg.documentViewBox
-                if (viewBox != null) {
-                    // SVG has viewBox - let AndroidSVG handle scaling
-                    svg.setDocumentWidth(width.toFloat())
-                    svg.setDocumentHeight(height.toFloat())
-                    svg.renderToCanvas(canvas)
-                    Log.d(
-                        "MainActivity",
-                        "Built-in SVG ($baseFileName) with viewBox rendered at ${width}x${height}"
-                    )
-                } else {
-                    // No viewBox - manually scale using document dimensions
-                    val docWidth = svg.documentWidth
-                    val docHeight = svg.documentHeight
-
-                    if (docWidth > 0 && docHeight > 0) {
-                        val scaleX = width.toFloat() / docWidth
-                        val scaleY = height.toFloat() / docHeight
-                        val scale = minOf(scaleX, scaleY)
-
-                        val scaledWidth = docWidth * scale
-                        val scaledHeight = docHeight * scale
-                        val translateX = (width - scaledWidth) / 2f
-                        val translateY = (height - scaledHeight) / 2f
-
-                        canvas.translate(translateX, translateY)
-                        canvas.scale(scale, scale)
-                        svg.renderToCanvas(canvas)
-                        Log.d(
-                            "MainActivity",
-                            "Built-in SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale"
-                        )
-                    }
-                }
-
-                // Return drawable with no intrinsic dimensions
-                object : BitmapDrawable(resources, bitmap) {
-                    override fun getIntrinsicWidth(): Int = -1
-                    override fun getIntrinsicHeight(): Int = -1
-                }
-            } else {
-                PictureDrawable(svg.renderToPicture())
-            }
-        } catch (e: Exception) {
-            Log.w("MainActivity", "Failed to load logo for $systemName", e)
-            // Return text-based drawable as fallback
-            createTextFallbackDrawable(systemName, width, height)
-        }
-    }
-
-    /**
-     * Create a text-based drawable as fallback for marquee images when no image is available
-     * @param gameName The game name to display
-     * @param width Target width in pixels (default 800 for marquees)
-     * @param height Target height in pixels (default 300 for marquees)
-     * @return A drawable with centered text on transparent background
-     */
-    fun createMarqueeTextFallback(
-        gameName: String,
-        width: Int = 800,
-        height: Int = 300
-    ): Drawable {
-        // Clean up game name for display
-        val displayName = gameName
-            .replaceFirst(Regex("\\.[^.]+$"), "") // Remove file extension
-            .replace(Regex("[_-]"), " ") // Replace underscores/hyphens with spaces
-            .replace(Regex("\\s+"), " ") // Normalize multiple spaces
-            .trim()
-            .split(" ")
-            .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-
-        val bitmap = Bitmap.createBitmap(
-            width,
-            height,
-            Bitmap.Config.ARGB_8888
-        )
-        val canvas = Canvas(bitmap)
-
-        // Leave background transparent (no background drawing)
-
-        // Configure text paint
-        val paint = Paint().apply {
-            color = Color.WHITE
-            textSize = height * 0.20f // Start with 20% of height
-            typeface = Typeface.DEFAULT_BOLD
-            isAntiAlias = true
-            textAlign = Paint.Align.CENTER
-        }
-
-        // Word wrap logic with line limit
-        val maxWidth = width * 1.0f
-        val lineHeight = paint.textSize * 1.2f
-        val maxLines =
-            (height * 0.9f / lineHeight).toInt().coerceAtLeast(1) // Calculate how many lines fit
-
-        val words = displayName.split(" ")
-        val lines = mutableListOf<String>()
-        var currentLine = ""
-
-        for (word in words) {
-            val testLine = if (currentLine.isEmpty()) word else "$currentLine $word"
-            if (paint.measureText(testLine) <= maxWidth) {
-                currentLine = testLine
-            } else {
-                if (currentLine.isNotEmpty()) {
-                    lines.add(currentLine)
-                    if (lines.size >= maxLines) break // Stop if we've reached max lines
-                }
-                currentLine = word
-            }
-        }
-
-        // Handle the last line with ellipsis if needed
-        if (currentLine.isNotEmpty()) {
-            if (lines.size >= maxLines) {
-                // Truncate last line with ellipsis
-                val lastLine = lines[maxLines - 1]
-                var truncated = lastLine
-                while (paint.measureText("$truncated...") > maxWidth && truncated.isNotEmpty()) {
-                    truncated = truncated.dropLast(1).trimEnd()
-                }
-                lines[maxLines - 1] = "$truncated..."
-            } else {
-                lines.add(currentLine)
-            }
-        }
-
-        // Draw lines centered vertically
-        val totalHeight = lines.size * lineHeight
-        var yPos = (height - totalHeight) / 2f + lineHeight * 0.8f
-
-        for (line in lines) {
-            canvas.drawText(line, width / 2f, yPos, paint)
-            yPos += lineHeight
-        }
-
-        return BitmapDrawable(resources, bitmap)
-    }
-
-    private fun createTextFallbackDrawable(
-        systemName: String,
-        width: Int = -1,
-        height: Int = -1
-    ): Drawable {
-        // Clean up system name for display
-        val displayName = systemName
-            .replace("auto-", "")
-            .replace("-", " ")
-            .split(" ")
-            .joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-
-        // Create a bitmap to draw text on
-        val targetWidth = if (width > 0) width else 400
-        val targetHeight = if (height > 0) height else 200
-
-        val bitmap = Bitmap.createBitmap(
-            targetWidth,
-            targetHeight,
-            Bitmap.Config.ARGB_8888
-        )
-        val canvas = Canvas(bitmap)
-
-        // Configure text paint
-        val paint = Paint().apply {
-            color = Color.WHITE
-            textSize = targetHeight * 0.35f // Scale text to ~35% of height
-            typeface = Typeface.DEFAULT_BOLD
-            isAntiAlias = true
-            textAlign = Paint.Align.CENTER
-        }
-
-        // Draw text centered
-        val xPos = targetWidth / 2f
-        val yPos = (targetHeight / 2f) - ((paint.descent() + paint.ascent()) / 2f)
-        canvas.drawText(displayName, xPos, yPos, paint)
-
-        return BitmapDrawable(resources, bitmap)
-    }
-
-    /**
-     * Load a scaled bitmap to prevent out-of-memory errors with large images
-     * @param imagePath Path to the image file
-     * @param maxWidth Maximum width in pixels
-     * @param maxHeight Maximum height in pixels
-     * @return Scaled bitmap
-     */
-    private fun loadScaledBitmap(
-        imagePath: String,
-        maxWidth: Int,
-        maxHeight: Int
-    ): Bitmap? {
-        try {
-            // First decode with inJustDecodeBounds=true to check dimensions
-            val options = BitmapFactory.Options()
-            options.inJustDecodeBounds = true
-            BitmapFactory.decodeFile(imagePath, options)
-
-            // Calculate inSampleSize
-            val imageHeight = options.outHeight
-            val imageWidth = options.outWidth
-            var inSampleSize = 1
-
-            if (imageHeight > maxHeight || imageWidth > maxWidth) {
-                val halfHeight = imageHeight / 2
-                val halfWidth = imageWidth / 2
-
-                // Calculate the largest inSampleSize value that is a power of 2 and keeps both
-                // height and width larger than the requested height and width.
-                while ((halfHeight / inSampleSize) >= maxHeight && (halfWidth / inSampleSize) >= maxWidth) {
-                    inSampleSize *= 2
-                }
-            }
-
-            Log.d("MainActivity", "Loading image: $imagePath")
-            Log.d("MainActivity", "  Original size: ${imageWidth}x${imageHeight}")
-            Log.d("MainActivity", "  Sample size: $inSampleSize")
-            Log.d(
-                "MainActivity",
-                "  Target size: ~${imageWidth / inSampleSize}x${imageHeight / inSampleSize}"
-            )
-
-            // Decode bitmap with inSampleSize set
-            options.inJustDecodeBounds = false
-            options.inSampleSize = inSampleSize
-            options.inPreferredConfig = Bitmap.Config.RGB_565 // Use less memory
-
-            return BitmapFactory.decodeFile(imagePath, options)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error loading scaled bitmap: $imagePath", e)
-            return null
-        }
-    }
-
-    /**
-     * Get a signature for an image file to invalidate cache when file changes
-     * Uses file's last modified time to detect changes
-     */
-    private fun getFileSignature(file: File): String {
-        return if (file.exists()) {
-            // Combine multiple signals for better cache invalidation
-            "${file.lastModified()}_${file.length()}"
-        } else {
-            "0"
-        }
-    }
-
-    /**
-     * Create a text drawable for system name when no logo exists
-     * Size is based on logo size setting
-     */
-    private fun createTextDrawable(
-        systemName: String,
-        logoSize: String
-    ): Drawable {
-        // Determine text size based on logo size setting
-        val textSizePx = when (logoSize) {
-            "small" -> 90f
-            "medium" -> 120f
-            "large" -> 150f
-            else -> 120f // default to medium
-        }
-
-        // Define max width wider than logo container sizes to reduce wrapping
-        val maxWidthDp = when (logoSize) {
-            "small" -> 400    // Back to original
-            "large" -> 600    // Back to original
-            else -> 500       // Back to original (medium)
-        }
-        val maxWidth = (maxWidthDp * resources.displayMetrics.density).toInt()
-
-        // Create paint for text
-        val textPaint = TextPaint().apply {
-            color = Color.WHITE
-            textSize = textSizePx
-            typeface = Typeface.create(
-                Typeface.DEFAULT,
-                Typeface.BOLD
-            )
-            isAntiAlias = true
-        }
-
-        // Format system name (capitalize, replace underscores)
-        val displayName = systemName
-            .replace("_", " ")
-            .split(" ")
-            .joinToString(" ") { word ->
-                word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
-            }
-
-        // Create StaticLayout for multi-line text support
-        val staticLayout =
-            if (SDK_INT >= Build.VERSION_CODES.M) {
-                StaticLayout.Builder.obtain(
-                    displayName,
-                    0,
-                    displayName.length,
-                    textPaint,
-                    maxWidth
-                )
-                    .setAlignment(Layout.Alignment.ALIGN_CENTER)
-                    .setLineSpacing(8f, 1.0f) // Add some line spacing (8px extra)
-                    .setIncludePad(true)
-                    .build()
-            } else {
-                @Suppress("DEPRECATION")
-                (StaticLayout(
-                    displayName,
-                    textPaint,
-                    maxWidth,
-                    Layout.Alignment.ALIGN_CENTER,
-                    1.0f,
-                    8f,
-                    true
-                ))
-            }
-
-        // Calculate bitmap dimensions with generous padding
-        val horizontalPadding = 100
-        val verticalPadding = 60
-        val width = staticLayout.width + (horizontalPadding * 2)
-        val height = staticLayout.height + (verticalPadding * 2)
-
-        // Create bitmap and draw text
-        val bitmap = Bitmap.createBitmap(
-            width,
-            height,
-            Bitmap.Config.ARGB_8888
-        )
-
-        val canvas = Canvas(bitmap)
-
-        // Center the text layout on the canvas
-        canvas.save()
-        canvas.translate(
-            horizontalPadding.toFloat(),
-            verticalPadding.toFloat()
-        )
-        staticLayout.draw(canvas)
-        canvas.restore()
-
-        return BitmapDrawable(resources, bitmap)
     }
 
 
@@ -3205,7 +2753,8 @@ Access this help anytime from the widget menu!
             musicLoadRunnable = Runnable {
                 loadGameMusic()
             }
-            musicLoadHandler.postDelayed(musicLoadRunnable!!, 500)
+            musicLoadHandler.removeCallbacks(musicLoadRunnable!!)
+            musicLoadHandler.postDelayed(musicLoadRunnable!!, 750)
             refreshWidgets()
         } catch (e: Exception) {
             // Don't clear images on exception - keep last valid images
@@ -3215,31 +2764,15 @@ Access this help anytime from the widget menu!
 
     private fun loadGameMusic() {
         try {
-            val logsDir = File(mediaFileLocator.getLogsPath())
-            val gameFile = File(logsDir, "esde_game_filename.txt")
-            if (!gameFile.exists()) return
-
-            val gameNameRaw = gameFile.readText().trim()  // Full path from script
-            val gameName = extractGameFilenameWithoutExtension(sanitizeGameFilename(gameNameRaw))
-
-            // read the display name from ES-DE if available
-            val gameDisplayNameFile = File(logsDir, "esde_game_name.txt")
-            val gameDisplayName = if (gameDisplayNameFile.exists()) {
-                gameDisplayNameFile.readText().trim()
-            } else {
-                gameName
-            }
-
-            val systemFile = File(logsDir, "esde_game_system.txt")
-            if (!systemFile.exists()) return
-            val systemName = systemFile.readText().trim()
+            val s = state as AppState.GameBrowsing
+            val gameFileNameName = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
 
             //ADDED FOR MUSIC
             musicSearchJob?.cancel()
             musicSearchJob = lifecycleScope.launch {
                 Log.d("MainActivity", "about to go to music player ")
-                if (gameName.isNotEmpty()) {
-                    val found = musicPlayer.onGameFocused(gameDisplayName, gameName, systemName)
+                if (s.gameName?.isNotEmpty() ?: false) {
+                    val found = musicPlayer.onGameFocused(s.gameName, gameFileNameName, s.systemName)
                     if(found) {
                         listeningToAudioRef = true
                         startMusicPlayer()
@@ -3394,6 +2927,153 @@ Access this help anytime from the widget menu!
                 bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
             }
         }
+    }
+
+    fun loadSystemLogoFromAssets(systemName: String, width: Int = -1, height: Int = -1): Drawable? {
+        return try {
+            // Handle ES-DE auto-collections
+            val baseFileName = when (systemName.lowercase()) {
+                "allgames" -> "auto-allgames"
+                "favorites" -> "auto-favorites"
+                "lastplayed" -> "auto-lastplayed"
+                else -> systemName.lowercase()
+            }
+
+            // First check user-provided system logos path with multiple format support
+            val userLogosDir: File = File(getSystemLogosPath())
+            if (userLogosDir.exists() && userLogosDir.isDirectory) {
+                val extensions = listOf("svg", "png", "jpg", "jpeg", "webp", "gif")
+
+                for (ext in extensions) {
+                    val logoFile: File = File(userLogosDir, "$baseFileName.$ext")
+                    if (logoFile.exists()) {
+                        Log.d("MainActivity", "Found custom logo: $logoFile (extension: $ext)")
+
+                        return when (ext) {
+                            "svg" -> {
+                                // Handle SVG files directly (as before)
+                                Log.d("MainActivity", "Loading SVG logo from user path")
+                                val svg = SVG.getFromInputStream(logoFile.inputStream())
+
+                                if (width > 0 && height > 0) {
+                                    // Create bitmap at target dimensions
+                                    val bitmap = Bitmap.createBitmap(
+                                        width,
+                                        height,
+                                        Bitmap.Config.ARGB_8888
+                                    )
+                                    val canvas = Canvas(bitmap)
+
+                                    val viewBox = svg.documentViewBox
+                                    if (viewBox != null) {
+                                        // SVG has viewBox - let AndroidSVG handle scaling
+                                        svg.setDocumentWidth(width.toFloat())
+                                        svg.setDocumentHeight(height.toFloat())
+                                        svg.renderToCanvas(canvas)
+                                        Log.d("MainActivity", "User SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
+                                    } else {
+                                        // No viewBox - manually scale using document dimensions
+                                        val docWidth = svg.documentWidth
+                                        val docHeight = svg.documentHeight
+
+                                        if (docWidth > 0 && docHeight > 0) {
+                                            val scaleX = width.toFloat() / docWidth
+                                            val scaleY = height.toFloat() / docHeight
+                                            val scale = minOf(scaleX, scaleY)
+
+                                            val scaledWidth = docWidth * scale
+                                            val scaledHeight = docHeight * scale
+                                            val translateX = (width - scaledWidth) / 2f
+                                            val translateY = (height - scaledHeight) / 2f
+
+                                            canvas.translate(translateX, translateY)
+                                            canvas.scale(scale, scale)
+                                            svg.renderToCanvas(canvas)
+                                            Log.d("MainActivity", "User SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
+                                        }
+                                    }
+
+                                    // Return drawable with no intrinsic dimensions
+                                    object : BitmapDrawable(resources, bitmap) {
+                                        override fun getIntrinsicWidth(): Int = -1
+                                        override fun getIntrinsicHeight(): Int = -1
+                                    }
+                                } else {
+                                    PictureDrawable(svg.renderToPicture())
+                                }
+                            }
+                            else -> {
+                                // For bitmap formats (PNG, JPG, WEBP, GIF), return null
+                                // Caller will use Glide to load them, which supports animation
+                                Log.d("MainActivity", "Bitmap-based custom logo detected - delegating to Glide for loading")
+                                return null  // Signal to caller to use Glide
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fall back to built-in SVG assets
+            val svgPath = "system_logos/$baseFileName.svg"
+            val svg = SVG.getFromAsset(assets, svgPath)
+
+            if (width > 0 && height > 0) {
+                // Create bitmap at target dimensions
+                val bitmap = Bitmap.createBitmap(
+                    width,
+                    height,
+                    Bitmap.Config.ARGB_8888
+                )
+                val canvas = Canvas(bitmap)
+
+                val viewBox = svg.documentViewBox
+                if (viewBox != null) {
+                    // SVG has viewBox - let AndroidSVG handle scaling
+                    svg.setDocumentWidth(width.toFloat())
+                    svg.setDocumentHeight(height.toFloat())
+                    svg.renderToCanvas(canvas)
+                    Log.d("MainActivity", "Built-in SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
+                } else {
+                    // No viewBox - manually scale using document dimensions
+                    val docWidth = svg.documentWidth
+                    val docHeight = svg.documentHeight
+
+                    if (docWidth > 0 && docHeight > 0) {
+                        val scaleX = width.toFloat() / docWidth
+                        val scaleY = height.toFloat() / docHeight
+                        val scale = minOf(scaleX, scaleY)
+
+                        val scaledWidth = docWidth * scale
+                        val scaledHeight = docHeight * scale
+                        val translateX = (width - scaledWidth) / 2f
+                        val translateY = (height - scaledHeight) / 2f
+
+                        canvas.translate(translateX, translateY)
+                        canvas.scale(scale, scale)
+                        svg.renderToCanvas(canvas)
+                        Log.d("MainActivity", "Built-in SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
+                    }
+                }
+
+                // Return drawable with no intrinsic dimensions
+                object : BitmapDrawable(resources, bitmap) {
+                    override fun getIntrinsicWidth(): Int = -1
+                    override fun getIntrinsicHeight(): Int = -1
+                }
+            } else {
+                PictureDrawable(svg.renderToPicture())
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to load logo for $systemName", e)
+            return null
+        }
+    }
+
+    private fun getSystemLogosPath(): String {
+        val customPath = prefs.getString("system_logos_path", null) ?: "/storage/emulated/0/ES-DE Companion/system_images"
+        val path = customPath ?: "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_logos"
+        Log.d("ESDESecondScreen", "System logos path: $path")
+        return path
     }
 
     /**
@@ -4077,197 +3757,6 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "═══ updateWidgetsForScreensaverGame END ═══")
     }
 
-    // ========== VIDEO PLAYBACK FUNCTIONS ==========
-
-    /**
-     * Check if video is enabled in settings
-     */
-    private fun isVideoEnabled(): Boolean {
-        return prefs.getBoolean("video_enabled", false)
-    }
-
-    /**
-     * Update video volume based on system volume for the current display
-     * This respects per-display volume controls on devices like Ayn Thor
-     *
-     * Ayn Thor uses:
-     * - Standard STREAM_MUSIC volume for top screen (display 0)
-     * - Settings.System "secondary_screen_volume_level" for bottom screen (display 1)
-     */
-    private fun updateVideoVolume() {
-        /**val player: ExoPlayer = backgroundBinder.player
-
-        val audioEnabled = prefs.getBoolean("video_audio_enabled", false)
-
-        if (!audioEnabled) {
-            // User has disabled video audio - mute completely
-            player.volume = 0f
-            android.util.Log.d("MainActivity", "Video audio disabled by user - volume: 0")
-            return
-        }
-        player.volume = getSystemVolume()*/
-    }
-
-    private fun getSystemVolume(): Float {
-        try {
-            val currentDisplayId = getCurrentDisplayId()
-            return getNormalizedAudioLevelForCurrentScreen()
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error updating video volume", e)
-            // Fallback to full volume if there's an error
-            return 1f
-        }
-    }
-
-    private fun updateMusicPlayerVolume() {
-        try {
-            //musicPlayer.setVolume(getNormalizedAudioLevelForCurrentScreen())
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error updating video volume", e)
-            // Fallback to full volume if there's an error
-            //backgroundBinder.player?.volume = 1f
-        }
-    }
-
-
-    private fun getNormalizedAudioLevelForCurrentScreen(): Float {
-        // Get the audio manager
-        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
-        // Determine which display we're on
-        val currentDisplayId = getCurrentDisplayId()
-        var currentVolume = 0
-        var maxVolume = 0
-
-        if (currentDisplayId == 0) {
-            // Primary display (top screen) - use standard STREAM_MUSIC volume
-            currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-            maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        } else {
-            currentVolume = Settings.System.getInt(
-                contentResolver,
-                "secondary_screen_volume_level"
-            )
-            maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-        }
-        val normalizedVolume: Float = if (maxVolume > 0) {
-            currentVolume.toFloat() / maxVolume.toFloat()
-        } else {
-            1f
-        }
-        return normalizedVolume
-    }
-
-    /**
-     * Register listener for system volume changes
-     * Listens for both standard volume and Ayn Thor's secondary screen volume
-     */
-    private fun registerVolumeListener() {
-        volumeChangeReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    "android.media.VOLUME_CHANGED_ACTION" -> {
-                        // Standard volume changed (top screen)
-                        Log.d(
-                            "MainActivity",
-                            "Volume change detected - updating video volume"
-                        )
-                        updateVideoVolume()
-                        updateMusicPlayerVolume()
-                    }
-
-                    Settings.ACTION_SOUND_SETTINGS -> {
-                        // Sound settings changed (might include secondary screen volume)
-                        Log.d(
-                            "MainActivity",
-                            "Sound settings changed - updating video volume"
-                        )
-                        updateVideoVolume()
-                        updateMusicPlayerVolume()
-                    }
-                }
-            }
-        }
-
-        val filter = IntentFilter().apply {
-            addAction("android.media.VOLUME_CHANGED_ACTION")
-            // Note: Settings.System changes don't broadcast reliably, so we also check in onResume
-        }
-        registerReceiver(volumeChangeReceiver, filter)
-        Log.d("MainActivity", "Volume change listener registered")
-    }
-
-    /**
-     * Unregister volume listener
-     */
-    private fun unregisterVolumeListener() {
-        volumeChangeReceiver?.let {
-            try {
-                unregisterReceiver(it)
-                Log.d("MainActivity", "Volume change listener unregistered")
-            } catch (e: Exception) {
-                Log.e("MainActivity", "Error unregistering volume listener", e)
-            }
-        }
-        volumeChangeReceiver = null
-    }
-
-    // Add this variable at the top of MainActivity class
-    private var secondaryVolumeObserver: ContentObserver? = null
-
-// Add this function near the volume functions
-    /**
-     * Register observer for secondary screen volume changes (Ayn Thor)
-     */
-    private fun registerSecondaryVolumeObserver() {
-        try {
-            secondaryVolumeObserver = object :
-                ContentObserver(Handler(Looper.getMainLooper())) {
-                override fun onChange(selfChange: Boolean) {
-                    Log.d(
-                        "MainActivity",
-                        "Secondary screen volume changed - updating video volume"
-                    )
-                    updateVideoVolume()
-                    updateMusicPlayerVolume()
-                }
-            }
-
-            // Observe the secondary_screen_volume_level setting
-            contentResolver.registerContentObserver(
-                Settings.System.getUriFor("secondary_screen_volume_level"),
-                false,
-                secondaryVolumeObserver!!
-            )
-
-            Log.d("MainActivity", "Secondary volume observer registered")
-        } catch (e: Exception) {
-            Log.w(
-                "MainActivity",
-                "Could not register secondary volume observer (not an Ayn Thor?)",
-                e
-            )
-        }
-    }
-
-    /**
-     * Unregister secondary volume observer
-     */
-    private fun unregisterSecondaryVolumeObserver() {
-        secondaryVolumeObserver?.let {
-            try {
-                contentResolver.unregisterContentObserver(it)
-                Log.d("MainActivity", "Secondary volume observer unregistered")
-            } catch (e: Exception) {
-                Log.e(
-                    "MainActivity",
-                    "Error unregistering secondary volume observer",
-                    e
-                )
-            }
-        }
-        secondaryVolumeObserver = null
-    }
-
     private fun hideWidgets() {
         widgetViewBinder.setAllVisibility(widgetContainer, false)
     }
@@ -4303,7 +3792,7 @@ Access this help anytime from the widget menu!
     private fun hideContextMenu() {
         menuState.showMenu = false
         widgetMenuShowing = false
-        menuState.widgetToEditState == null
+        menuState.widgetToEditState = null
         AudioReferee.updateMenuState(false)
         AudioReferee.forceUpdate()
         refreshWidgets()
@@ -4314,6 +3803,7 @@ Access this help anytime from the widget menu!
            // val menuView = findViewById<ComposeView>(R.id.menu_compose_view)
            // menuView.visibility = View.VISIBLE
             menuState.widgetToEditState = widget
+            widgetMenuShowing = true
         }
     }
 
@@ -4366,8 +3856,29 @@ Access this help anytime from the widget menu!
                     if(AudioReferee.getMenuState()) {
                         //musicPlayer.setVolume(0f)
                     } else {
-                        musicPlayer.play()
-                        musicPlayer.setVolume(musicPlayer.targetVolume)
+                        startMusicPlayer()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun onMusicResultSelectedKh(selected: KhSong, url: String, onProgress: (Float) -> Unit) {
+        val s = state as? AppState.GameBrowsing ?: return
+        val systemName = s.systemName
+        val gameFilenameSanitized = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
+
+        lifecycleScope.launch {
+            Log.d("CoroutineDebug", "Downloading selected: ${selected.title}")
+            musicRepository.manualKhSelection(gameFilenameSanitized, systemName, url, onProgress)
+            val found = musicPlayer.onGameFocused(s.gameName ?: "", gameFilenameSanitized, systemName)
+            if(found) {
+                Toast.makeText(this@MainActivity, "Saved music!", Toast.LENGTH_SHORT).show()
+                if(AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC) {
+                    if(AudioReferee.getMenuState()) {
+                        //musicPlayer.setVolume(0f)
+                    } else {
+                        startMusicPlayer()
                     }
                 }
             }

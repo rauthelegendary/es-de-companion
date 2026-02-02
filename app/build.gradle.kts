@@ -18,7 +18,7 @@ android {
         minSdk = 31
         targetSdk = 35
         versionCode = 20
-        versionName = "0.4.5"
+        versionName = "0.4.6.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -53,6 +53,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-DEBUG"
+        }
         release {
             isMinifyEnabled = false
             isShrinkResources = false
@@ -131,7 +135,7 @@ dependencies {
 
     implementation("androidx.compose.material:material-icons-extended:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.facebook.shimmer:shimmer:0.5.0")
+    implementation("org.jsoup:jsoup:1.16.1")
     implementation("be.tarsos.dsp:core:2.5")
     implementation("be.tarsos.dsp:jvm:2.5")
     implementation("com.squareup.retrofit2:retrofit:2.9.0")

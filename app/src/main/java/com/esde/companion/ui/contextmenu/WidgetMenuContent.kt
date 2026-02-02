@@ -48,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.esde.companion.AnimationSettings
 import com.esde.companion.PageEditorItem
 import com.esde.companion.WidgetPage
 import com.esde.companion.ui.ContentType
@@ -77,10 +79,14 @@ fun WidgetMenuContent(
     currentPageIndex: Int,
     pages: List<WidgetPage>,
     onSavePages: (List<PageEditorItem>) -> Unit,
-    onRenamePage: (String) -> Unit
+    onRenamePage: (String) -> Unit,
+    animationSettings: AnimationSettings
     ) {
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var draftPage by remember(currentPage.id) { mutableStateOf(currentPage.copy()) }
+    val animType by animationSettings.transitionTarget.collectAsState()
+    val animEnabled by animationSettings.animateWidgets.collectAsState()
+    val animDuration by animationSettings.duration.collectAsState()
 
     DisposableEffect(Unit) {
         onDispose {
@@ -162,15 +168,26 @@ fun WidgetMenuContent(
                         MenuToggle("Mute Video", draftPage.isVideoMuted) {
                             draftPage = draftPage.copy(isVideoMuted = it)
                         }
+                        MenuSlider(
+                            "Video volume",
+                            draftPage.videoVolume.toFloat() * 100,
+                            0f,
+                            100f,
+                            ""
+                        ) {
+                            draftPage = draftPage.copy(videoVolume = it / 100)
+                        }
                         MenuToggle("Show widgets over video", draftPage.displayWidgetsOverVideo) {
                             draftPage = draftPage.copy(displayWidgetsOverVideo = it)
                         }
                         MenuSlider("Start Delay", draftPage.videoDelay.toFloat(), 0f, 5f, "s") {
                             draftPage = draftPage.copy(videoDelay = it.toInt())
                         }
-                    }
-
-                    if (draftPage.backgroundType == PageContentType.SOLID_COLOR) {
+                    } else if(draftPage.backgroundType == PageContentType.FANART) {
+                        MenuToggle(
+                            "Pan & Zoom", draftPage.panZoomAnimation,
+                            { draftPage = draftPage.copy(panZoomAnimation = it) })
+                    } else if (draftPage.backgroundType == PageContentType.SOLID_COLOR) {
                         ColorPickerSection(draftPage.solidColor) { selectedColor ->
                             draftPage = draftPage.copy(solidColor = selectedColor.toArgb())
                         }
@@ -198,54 +215,19 @@ fun WidgetMenuContent(
 
             //Animations
             item {
-                MenuSection(title = "Animations") {
-                    Column {
-                        Text("Transition Target", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp))
-                        {
-                            PageAnimation.entries.forEach { animationType ->
-                                val isSelected = draftPage.animation == animationType
-
-                                Surface(
-                                    modifier = Modifier.weight(1f).clickable {
-                                        draftPage = draftPage.copy(animation = animationType)
-                                    },
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        text = animationType.name,
-                                        modifier = Modifier.padding(8.dp),
-                                        textAlign = TextAlign.Center,
-                                        color = if (isSelected) Color.White else Color.Gray
-                                    )
-                                }
-                            }
-                        }
+                AnimationSettingsSection(
+                    currentAnimation = animType,
+                    animateWidgets = animEnabled,
+                    duration = animDuration
+                ) { action ->
+                    when (action) {
+                        is AnimationAction.UpdateType -> animationSettings.updateAnimation(action.type)
+                        is AnimationAction.ToggleWidgets -> animationSettings.updateAnimateWidgets(action.enabled)
+                        is AnimationAction.UpdateDuration -> animationSettings.updateDuration(action.ms)
                     }
-
-                    MenuToggle("Animate widgets", draftPage.animateWidgets) {
-                        draftPage = draftPage.copy(animateWidgets = it)
-                    }
-
-                    if (draftPage.animation != PageAnimation.NONE) {
-                        MenuSlider(
-                            "Duration",
-                            draftPage.animationDuration.toFloat(),
-                            100f,
-                            1000f,
-                            "ms"
-                        ) {
-                            draftPage = draftPage.copy(animationDuration = it.toInt())
-                        }
-                    }
-                    MenuToggle(
-                        "Pan & Zoom (Ken Burns)", draftPage.panZoomAnimation,
-                        { draftPage = draftPage.copy(panZoomAnimation = it) })
                 }
             }
+
         }
 
         // Delete Confirmation Overlay (Keep your existing implementation here)
@@ -350,7 +332,7 @@ fun BackgroundTypeSelector(currentType: PageContentType, onTypeSelected: (PageCo
 @Composable
 fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType) -> Unit) {
     val options = if (isSystemView) {
-        listOf("System Logo" to ContentType.SYSTEM_LOGO)
+        listOf("System Logo" to ContentType.SYSTEM_LOGO, "System Image" to ContentType.SYSTEM_IMAGE)
     } else {
         listOf(
             "Marquee" to ContentType.MARQUEE,
@@ -358,8 +340,14 @@ fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType) -> Unit) {
             "3D Box" to ContentType.BOX_3D,
             "Mix Image" to ContentType.MIX_IMAGE,
             "Screenshot" to ContentType.SCREENSHOT,
+            "Fan art" to ContentType.FANART,
             "Video" to ContentType.VIDEO,
-            "Description" to ContentType.GAME_DESCRIPTION
+            "Title" to ContentType.TITLE,
+            "Developer" to ContentType.DEVELOPER,
+            "Publisher" to ContentType.PUBLISHER,
+            "Release date" to ContentType.RELEASE_DATE,
+            "Genre" to ContentType.GENRE,
+            "Description" to ContentType.GAME_DESCRIPTION,
         )
     }
 
@@ -620,11 +608,9 @@ fun PageHeaderSection(
                 decorFitsSystemWindows = false
             )
         ) {
-            // Your Manager Screen lives here
             PageManagerScreen(
-                currentPages = pages, // however you access the list currently
+                currentPages = pages,
                 onSave = { newPages ->
-                    // Call your save logic here
                     onSavePages(newPages)
                     showPageManager = false
                 },
@@ -633,14 +619,10 @@ fun PageHeaderSection(
         }
     }
 
-        // Page Management Buttons
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if(!locked) {
-                // Reusing your ActionButton from the previous snippet
                 ActionButton(label = "+ Page", onClick = actions.onAddPage)
 
-                // Delete button - only show if there's more than one page to delete?
-                // Or just keep it simple for now
                 ActionButton(
                     label = "Delete",
                     onClick = onDeleteClick,
@@ -664,4 +646,64 @@ fun ActionButton(
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@Composable
+fun AnimationSettingsSection(
+    currentAnimation: PageAnimation,
+    animateWidgets: Boolean,
+    duration: Int,
+    onUpdate: (AnimationAction) -> Unit // The single callback method
+) {
+    MenuSection(title = "Animations") {
+        Column {
+            Text("Transition Target", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                PageAnimation.entries.forEach { animationType ->
+                    val isSelected = currentAnimation == animationType
+
+                    Surface(
+                        modifier = Modifier.weight(1f).clickable {
+                            onUpdate(AnimationAction.UpdateType(animationType))
+                        },
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = animationType.name,
+                            modifier = Modifier.padding(8.dp),
+                            textAlign = TextAlign.Center,
+                            color = if (isSelected) Color.White else Color.Gray,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+
+        MenuToggle("Animate widgets", animateWidgets) {
+            onUpdate(AnimationAction.ToggleWidgets(it))
+        }
+
+        if (currentAnimation != PageAnimation.NONE) {
+            MenuSlider(
+                "Duration",
+                duration.toFloat(),
+                100f,
+                1000f,
+                "ms"
+            ) {
+                onUpdate(AnimationAction.UpdateDuration(it.toInt()))
+            }
+        }
+    }
+}
+
+sealed class AnimationAction {
+    data class UpdateType(val type: PageAnimation) : AnimationAction()
+    data class ToggleWidgets(val enabled: Boolean) : AnimationAction()
+    data class UpdateDuration(val ms: Int) : AnimationAction()
 }

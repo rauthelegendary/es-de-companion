@@ -31,7 +31,13 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
     private val systemAliases = mapOf(
         "gc" to setOf("gc", "gamecube", "nintendo gamecube", "game cube", "ngc"),
         "ps2" to setOf("ps2", "playstation 2", "playstation", "sony playstation 2"),
-        "snes" to setOf("snes", "super nintendo", "super nintendo entertainment system", "super famicom", "sfc"),
+        "snes" to setOf(
+            "snes",
+            "super nintendo",
+            "super nintendo entertainment system",
+            "super famicom",
+            "sfc"
+        ),
         "gba" to setOf("gba", "gameboy advance", "game boy advance"),
         "nds" to setOf("nds", "nintendo ds", "ds"),
         "wii" to setOf("wii", "nintendo wii"),
@@ -39,8 +45,28 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
         "switch" to setOf("switch", "nintendo switch"),
         "mastersystem" to setOf("master system", "sega master system", "mastersystem", "SMS"),
         "gamegear" to setOf("game gear", "gamegear", "sega game gear"),
-        "megadrive" to setOf("megadrive", "mega drive", "sega megadrive","sega mega drive", "genesis", "sega genesis", "32x", "sega32x", "sega 32x"),
-        "sega32x" to setOf("megadrive", "mega drive", "sega megadrive","sega mega drive", "genesis", "sega genesis", "32x", "sega32x", "sega 32x"),
+        "megadrive" to setOf(
+            "megadrive",
+            "mega drive",
+            "sega megadrive",
+            "sega mega drive",
+            "genesis",
+            "sega genesis",
+            "32x",
+            "sega32x",
+            "sega 32x"
+        ),
+        "sega32x" to setOf(
+            "megadrive",
+            "mega drive",
+            "sega megadrive",
+            "sega mega drive",
+            "genesis",
+            "sega genesis",
+            "32x",
+            "sega32x",
+            "sega 32x"
+        ),
         "dreamcast" to setOf("dreamcast", "sega dreamcast", "dream cast", "dc"),
         "psx" to setOf("psx", "playstation", "sony playstation", "ps1"),
         "psp" to setOf("psp", "playstation portable"),
@@ -54,20 +80,45 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
         "nes" to setOf("nes", "nintendo entertainment system", "nintendo", "famicon"),
         "gb" to setOf("gameboy", "gb", "game boy", "nintendo game boy", "nintendo gameboy"),
         "n64" to setOf("n64", "nintendo 64", "64"),
-        "gbc" to setOf("gameboy", "gbc", "game boy", "gameboy color", "nintendo game boy", "nintendo gameboy", "game boy color", "nintendo game boy color", "nintendo gameboy color"),
-        "gba" to setOf("gameboy", "gba", "game boy", "nintendo game boy", "nintendo gameboy", "gameboy advance", "game boy advance", "nintendo game boy advance", "nintendo gameboy advance")
+        "gbc" to setOf(
+            "gameboy",
+            "gbc",
+            "game boy",
+            "gameboy color",
+            "nintendo game boy",
+            "nintendo gameboy",
+            "game boy color",
+            "nintendo game boy color",
+            "nintendo gameboy color"
+        ),
+        "gba" to setOf(
+            "gameboy",
+            "gba",
+            "game boy",
+            "nintendo game boy",
+            "nintendo gameboy",
+            "gameboy advance",
+            "game boy advance",
+            "nintendo game boy advance",
+            "nintendo gameboy advance"
+        )
     )
 
     /**private val sharedClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()*/
+    .connectTimeout(15, TimeUnit.SECONDS)
+    .readTimeout(60, TimeUnit.SECONDS)
+    .build()*/
 
     private fun initNewPipe() {
         newPipe = NewPipe.init(NewPipeDownloader(httpClient))
     }
 
-    suspend fun downloadGameMusic(gameTitle: String, gameFileName: String, system: String, musicDir: File?): File? {
+    suspend fun downloadGameMusic(
+        gameTitle: String,
+        gameFileName: String,
+        system: String,
+        musicDir: File?
+    ): File? {
         val videoUrl = getFirstYoutubeSearchResult(gameTitle, system)
         Log.d("CoroutineDebug", "videourl: " + videoUrl)
         if (videoUrl != null) {
@@ -128,13 +179,24 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
         }
     }
 
-    public suspend fun getYoutubeSearchResultsFiltered(query: String, gameTitle: String, system: String, first: Boolean): List<StreamInfoItem> = withContext(Dispatchers.IO) {
+    public suspend fun getYoutubeSearchResultsFiltered(
+        query: String,
+        gameTitle: String,
+        system: String,
+        first: Boolean
+    ): List<StreamInfoItem> = withContext(Dispatchers.IO) {
         val uniqueResults = mutableMapOf<String, StreamInfoItem>()
 
         try {
             performParallelSearch(query, gameTitle, system, uniqueResults, first)
-            if(first && uniqueResults.isEmpty()) {
-                performParallelSearch(createSearchString(gameTitle,secondarySearchString), gameTitle, system, uniqueResults, true)
+            if (first && uniqueResults.isEmpty()) {
+                performParallelSearch(
+                    createSearchString(gameTitle, secondarySearchString),
+                    gameTitle,
+                    system,
+                    uniqueResults,
+                    true
+                )
             }
         } catch (e: Exception) {
             // This catches the "Permission Denied" and "SocketException" errors
@@ -156,12 +218,14 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
             try {
                 videoExtractor.fetchPage()
                 videoExtractor.initialPage
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                null
+            }
         }
         val videoPage = videoTask.await()
         videoPage?.let { getResultsFromExtractor(it, gameTitle, system, uniqueResults) }
 
-        if(!first) {
+        if (!first) {
             val playlistTask = async {
                 try {
                     val extractor =
@@ -194,7 +258,11 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
             .trim()
     }
 
-    private fun isPlaylistRelevant(playlistTitle: String, gameTitle: String, system: String): Boolean {
+    private fun isPlaylistRelevant(
+        playlistTitle: String,
+        gameTitle: String,
+        system: String
+    ): Boolean {
         val cleanPlaylist = normalize(playlistTitle)
         val cleanGame = normalize(gameTitle)
 
@@ -257,7 +325,12 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
         }
     }
 
-    private suspend fun getResultsFromExtractor(itemsPage: ListExtractor.InfoItemsPage<InfoItem>, gameTitle: String, system: String, results: MutableMap<String, StreamInfoItem>) = withContext(Dispatchers.IO){
+    private suspend fun getResultsFromExtractor(
+        itemsPage: ListExtractor.InfoItemsPage<InfoItem>,
+        gameTitle: String,
+        system: String,
+        results: MutableMap<String, StreamInfoItem>
+    ) = withContext(Dispatchers.IO) {
         try {
             for (item in itemsPage.items) {
                 when (item) {
@@ -267,7 +340,7 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
 
                     is org.schabi.newpipe.extractor.playlist.PlaylistInfoItem -> {
                         try {
-                            if(isPlaylistRelevant(item.name, gameTitle, system)) {
+                            if (isPlaylistRelevant(item.name, gameTitle, system)) {
                                 val playlistExtractor =
                                     ServiceList.YouTube.getPlaylistExtractor(item.url)
                                 playlistExtractor.fetchPage()
@@ -289,7 +362,7 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
                         }
                     }
                 }
-                if(results.size >= maxResults) {
+                if (results.size >= maxResults) {
                     break
                 }
             }
@@ -299,34 +372,46 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
         }
     }
 
-    private suspend fun getFirstYoutubeSearchResult(gameTitle: String, systemName: String): String? = withContext(Dispatchers.IO) {
-        return@withContext getYoutubeSearchResultsFiltered(createSearchString(gameTitle, searchString), gameTitle, systemName, true).firstOrNull()?.url
+    private suspend fun getFirstYoutubeSearchResult(
+        gameTitle: String,
+        systemName: String
+    ): String? = withContext(Dispatchers.IO) {
+        return@withContext getYoutubeSearchResultsFiltered(
+            createSearchString(
+                gameTitle,
+                searchString
+            ), gameTitle, systemName, true
+        ).firstOrNull()?.url
     }
 
     private fun createSearchString(gameTitle: String, chosenSearchString: String): String {
         return "\"$gameTitle $chosenSearchString\""
     }
 
-    private suspend fun getYoutubeAudioUrl(videoUrl: String): String? = withContext(Dispatchers.IO) search@ {
-        try {
-            val extractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
-            extractor.fetchPage()
+    private suspend fun getYoutubeAudioUrl(videoUrl: String): String? =
+        withContext(Dispatchers.IO) search@{
+            try {
+                val extractor = ServiceList.YouTube.getStreamExtractor(videoUrl)
+                extractor.fetchPage()
 
-            // Inside your getDirectAudioUrl function
-            val audioStreams = extractor.audioStreams
+                // Inside your getDirectAudioUrl function
+                val audioStreams = extractor.audioStreams
 
-            val bestAudio = getBestAudioStreamFor(audioStreams)
+                val bestAudio = getBestAudioStreamFor(audioStreams)
 
-            if (bestAudio != null) {
-                Log.d("CoroutineDebug", "Selected itag: ${bestAudio.itag} | Size should be small.")
-                return@search bestAudio.content
+                if (bestAudio != null) {
+                    Log.d(
+                        "CoroutineDebug",
+                        "Selected itag: ${bestAudio.itag} | Size should be small."
+                    )
+                    return@search bestAudio.content
+                }
+            } catch (e: Exception) {
+                Log.e("CoroutineDebug", "Extraction failed", e)
+                return@search ""
             }
-        } catch (e: Exception) {
-            Log.e("CoroutineDebug", "Extraction failed", e)
             return@search ""
         }
-        return@search ""
-    }
 
     private fun getBestAudioStreamFor(audioStreams: List<AudioStream>): AudioStream? {
         return audioStreams.find { it.itag == 140 } // M4A (preferred for Android)
@@ -335,7 +420,84 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
             ?: audioStreams.firstOrNull { it.averageBitrate < 200_000 } // Fallback to any low-bitrate stream
     }
 
-    private suspend fun downloadToLocal(url: String, gameTitle: String, musicDir: File?, onProgress: (Float) -> Unit = EMPTY_PROGRESS): File = withContext(Dispatchers.IO) {
+    suspend fun downloadToLocal(
+        url: String,
+        gameTitle: String,
+        musicDir: File?,
+        onProgress: (Float) -> Unit = EMPTY_PROGRESS,
+        sourceYt: Boolean = true
+    ): File = withContext(Dispatchers.IO) {
+        try {
+            val ext =
+                if (url.contains(".mp3")) "mp3" else if (url.contains(".m4a")) "m4a" else "mp3"
+            var fileName = "$gameTitle.$ext"
+            if (sourceYt) {
+                fileName = "${gameTitle}.m4a"
+            }
+
+            val file = File(musicDir, fileName)
+
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13) Mobile Safari/537.36")
+                .addHeader("Range", "bytes=0-")
+                .addHeader("Connection", "keep-alive")
+                .apply {
+                    if (url.contains("khinsider")) {
+                        addHeader("Referer", "https://downloads.khinsider.com/")
+                    } else {
+                        addHeader("Referer", "https://www.youtube.com/")
+                    }
+                }
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw Exception("Error: ${response.code}")
+
+                val totalBytes = response.body?.contentLength() ?: -1
+                val input = response.body?.byteStream() ?: throw Exception("Null body")
+
+                file.outputStream().use { output ->
+                    val buffer = ByteArray(32 * 1024)
+                    var totalDownloaded = 0L
+                    var lastReportedPercentage = -1
+
+                    while (true) {
+                        val bytesRead = input.read(buffer)
+                        if (bytesRead == -1) break
+
+                        output.write(buffer, 0, bytesRead)
+                        totalDownloaded += bytesRead
+
+                        if (totalBytes > 0 && onProgress !== EMPTY_PROGRESS) {
+                            val percent = (totalDownloaded * 100 / totalBytes).toInt()
+                            // 4. Update only every 2% to reduce overhead
+                            if (percent >= lastReportedPercentage + 2) {
+                                lastReportedPercentage = percent
+                                // Use withContext(NonCancellable) or stay on the same context
+                                // to avoid "fire and forget" bloat
+                                withContext(Dispatchers.Main) {
+                                    onProgress(totalDownloaded.toFloat() / totalBytes)
+                                }
+                            }
+                        }
+                    }
+                    output.flush()
+                    if (onProgress !== EMPTY_PROGRESS) {
+                        withContext(Dispatchers.Main) {
+                            onProgress(1.0f)
+                        }
+                    }
+                }
+            }
+            return@withContext file
+        } catch (e: Exception) {
+            File("")
+        }
+    }
+}
+
+ /**   private suspend fun downloadToLocal(url: String, gameTitle: String, musicDir: File?, onProgress: (Float) -> Unit = EMPTY_PROGRESS): File = withContext(Dispatchers.IO) {
         try {
             val fileName = "${gameTitle}.m4a"
             val file = File(musicDir, fileName)
@@ -394,4 +556,4 @@ class YoutubeMediaService(private var httpClient: OkHttpClient) {
             File("")
         }
     }
-}
+}*/

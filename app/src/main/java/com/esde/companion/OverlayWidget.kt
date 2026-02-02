@@ -1,14 +1,26 @@
 package com.esde.companion
 
 import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.PageContentType.FontType
 import com.esde.companion.ui.ScaleType
+import com.esde.companion.ui.TextAlignment
+import java.io.File
 import java.util.UUID
 
 data class OverlayWidget(
     val id: String = UUID.randomUUID().toString(),
     val contentType: ContentType,
-    var contentPath: String,
-    var description: String,
+    @Transient
+    var contentPath: String? = "",
+    var text: String = "",
+    var fontType: FontType = FontType.DEFAULT,
+    var fontSize: Float = 24f,
+    val isBold: Boolean = false,
+    val isItalic: Boolean = false,
+    val textPadding: Int = 20,
+    val shadowRadius: Float = 6f,
+    var scrollText: Boolean = false,
+    var textAlignment: TextAlignment = TextAlignment.LEFT,
     var x: Float,
     var y: Float,
     var width: Float,
@@ -22,7 +34,11 @@ data class OverlayWidget(
     var heightPercent: Float? = null,
     var slot: MediaSlot = MediaSlot.Default,
     var playAudio: Boolean = true,
-    var isRequired: Boolean = false
+    var videoVolume: Float = 0.5f,
+    var isRequired: Boolean = false,
+    var cycle: Boolean = false,
+    @Transient
+    var images: Map<MediaSlot, File?>? = emptyMap()
 ) {
     /**
      * Convert absolute pixels to percentages based on screen dimensions
