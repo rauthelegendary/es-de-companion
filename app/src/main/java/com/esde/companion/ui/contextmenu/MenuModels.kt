@@ -16,6 +16,6 @@ data class WidgetActions(
     val onHelp: () -> Unit,
     val onAddPage: () -> Unit,
     val onRemovePage: () -> Unit,
-    val onAddWidget: (ContentType) -> Unit,
+    val onAddWidget: (ContentType, String?) -> Unit,
     val onSavePageSettings: (WidgetPage) -> Unit
 )

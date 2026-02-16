@@ -11,9 +11,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -91,7 +94,7 @@ fun ImageCropperScreen(
                 val height = if (is169) 1080 else 1240
                 cropImageView?.croppedImageAsync(reqWidth = width, reqHeight = height, options = CropImageView.RequestSizeOptions.RESIZE_INSIDE)
             }) {
-                Text("Apply")
+                Icon(Icons.Filled.Save, "")
             }
         }
     }

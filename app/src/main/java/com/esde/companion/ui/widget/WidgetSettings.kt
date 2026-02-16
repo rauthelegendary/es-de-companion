@@ -33,7 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import com.esde.companion.OverlayWidget
+import com.esde.companion.data.Widget
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType.FontType
 import com.esde.companion.ui.ScaleType
@@ -46,12 +46,13 @@ import com.esde.companion.ui.contextmenu.MenuToggle
 
 @Composable
 fun WidgetSettingsOverlay(
-    widget: OverlayWidget,
+    widget: Widget,
     currentPageIndex: Int,
     onDismiss: () -> Unit,
-    onUpdate: (OverlayWidget) -> Unit,
-    onDelete: (OverlayWidget) -> Unit,
-    onReorder: (OverlayWidget, Boolean) -> Unit
+    onUpdate: (Widget) -> Unit,
+    onDelete: (Widget) -> Unit,
+    onReorder: (Widget, Boolean) -> Unit,
+    inSystemView: Boolean
 ) {
     var liveWidget by remember(widget.id) { mutableStateOf(widget) }
 
@@ -73,10 +74,20 @@ fun WidgetSettingsOverlay(
                 Text("Edit ${liveWidget.contentType.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White)
 
                 Spacer(Modifier.height(12.dp))
-
-                MediaSlotScreen(currentSlot = liveWidget.slot) { newSlot ->
-                    liveWidget = liveWidget.copy(slot = newSlot)
-                    onUpdate(liveWidget)
+                if (!liveWidget.contentType.isTextWidget()
+                    && liveWidget.contentType != ContentType.COLOR_BACKGROUND
+                    && liveWidget.contentType != ContentType.SYSTEM_IMAGE
+                    && liveWidget.contentType != ContentType.SYSTEM_LOGO
+                    && liveWidget.contentType != ContentType.CUSTOM_IMAGE
+                    && (!inSystemView
+                            || (liveWidget.contentType != ContentType.FANART
+                            || liveWidget.contentType != ContentType.SCREENSHOT)
+                            )
+                ) {
+                    MediaSlotScreen(currentSlot = liveWidget.slot) { newSlot ->
+                        liveWidget = liveWidget.copy(slot = newSlot)
+                        onUpdate(liveWidget)
+                    }
                 }
 
                 Spacer(Modifier.height(2.dp))
@@ -88,7 +99,17 @@ fun WidgetSettingsOverlay(
                     })
                 }
 
-                if (!liveWidget.contentType.isTextWidget() && liveWidget.contentType != ContentType.VIDEO) {
+                if (!liveWidget.contentType.isTextWidget()
+                    && liveWidget.contentType != ContentType.VIDEO
+                    && liveWidget.contentType != ContentType.COLOR_BACKGROUND
+                    && liveWidget.contentType != ContentType.SYSTEM_IMAGE
+                    && liveWidget.contentType != ContentType.SYSTEM_LOGO
+                    && liveWidget.contentType != ContentType.CUSTOM_IMAGE
+                    && (!inSystemView
+                            || (liveWidget.contentType != ContentType.FANART
+                            || liveWidget.contentType != ContentType.SCREENSHOT)
+                            )
+                    ) {
                     MenuChip("Cycle image slot on touch", liveWidget.cycle, {
                         liveWidget = liveWidget.copy(cycle = !liveWidget.cycle)
                         onUpdate(liveWidget)

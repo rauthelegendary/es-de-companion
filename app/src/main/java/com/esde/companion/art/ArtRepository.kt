@@ -3,9 +3,9 @@ package com.esde.companion.art
 import com.esde.companion.art.LaunchBox.LaunchBoxScraper
 
 class ArtRepository(
-    private val sgdbScraper: ArtScraper,
-    private val igdbScraper: ArtScraper,
-    private val launchBoxScraper: LaunchBoxScraper
+    private var sgdbScraper: ArtScraper?,
+    private var igdbScraper: ArtScraper?,
+    private var launchBoxScraper: LaunchBoxScraper?
 ) {
     fun getScraper(type: ScraperType): ArtScraper? {
         return when(type) {
@@ -16,7 +16,29 @@ class ArtRepository(
     }
 
     fun getAvailableScraperTypes(): List<ScraperType> {
-        return listOf(ScraperType.SGDB, ScraperType.IGDB, ScraperType.LaunchBox)
+        val typesAvailable = mutableListOf<ScraperType>()
+        if(sgdbScraper != null) {
+            typesAvailable.add(ScraperType.SGDB)
+        }
+        if(igdbScraper != null) {
+            typesAvailable.add(ScraperType.IGDB)
+        }
+        if(launchBoxScraper != null) {
+            typesAvailable.add(ScraperType.LaunchBox)
+        }
+        return typesAvailable
+    }
+
+    fun setScraper(newScraper: ArtScraper, type: ScraperType) {
+        when(type) {
+            ScraperType.SGDB -> sgdbScraper = newScraper
+            ScraperType.IGDB -> igdbScraper = newScraper
+            ScraperType.LaunchBox -> {
+                if(newScraper is LaunchBoxScraper) {
+                    launchBoxScraper = newScraper
+                }
+            }
+        }
     }
 }
 

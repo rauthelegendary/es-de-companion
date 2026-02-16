@@ -44,7 +44,9 @@ object GameListSyncManager {
                 XmlPullParser.START_TAG -> currentTag = parser.name
                 XmlPullParser.TEXT -> {
                     val text = parser.text.trim()
-                    if (text.isNotEmpty()) currentGameMap[currentTag ?: ""] = text
+                    if (text.isNotEmpty() && currentTag != null) {
+                        currentGameMap[currentTag] = decodeXmlEntities(text)
+                    }
                 }
                 XmlPullParser.END_TAG -> if (parser.name == "game") {
                     games.add(ESGameEntity(
@@ -63,5 +65,17 @@ object GameListSyncManager {
             eventType = parser.next()
         }
         return games
+    }
+
+    private fun decodeXmlEntities(text: String): String {
+        if (!text.contains('&')) return text
+        return text
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&#39;", "'")
+            .replace("&nbsp;", " ")
     }
 }

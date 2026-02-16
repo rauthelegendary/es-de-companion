@@ -4,7 +4,7 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android") version "2.0.21"
-    id("com.google.devtools.ksp") version "2.0.21-1.0.25" // Aligned to fix metadata error
+    id("com.google.devtools.ksp") version "2.0.21-1.0.25"
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
     id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
 }
@@ -31,6 +31,34 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        viewBinding = true
+    }
+
+    flavorDimensions += "recents"
+
+    productFlavors {
+        create("standard") {
+            dimension = "recents"
+            applicationIdSuffix = ""
+            versionNameSuffix = ""
+            // Standard version - shows in recents (default Android behavior)
+        }
+
+        create("persistent") {
+            dimension = "recents"
+            applicationIdSuffix = ""
+            versionNameSuffix = "h"
+            // Persistent version - hidden from recents
+        }
+    }
+
+    sourceSets {
+        getByName("persistent") {
+            manifest.srcFile("src/main/persistent/AndroidManifest.xml")
+        }
+        getByName("standard") {
+            manifest.srcFile("src/main/AndroidManifest.xml")
+        }
     }
 
     signingConfigs {
@@ -69,7 +97,7 @@ android {
         outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
             if (buildType.name == "release") {
-                output.outputFileName = "ES-DE-Companion-v${defaultConfig.versionName}.apk"
+                output.outputFileName = "ES-DE-Companion-v${versionName}.apk"
             }
         }
     }
@@ -120,6 +148,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0")
     implementation("io.coil-kt:coil-gif:2.6.0")
+    implementation("io.coil-kt:coil-svg:2.6.0")
 
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
@@ -128,7 +157,7 @@ dependencies {
 
 
     // NewPipe Extractor
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.1") {
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.25.2") {
         exclude(group = "com.google.protobuf")
     }
 
@@ -153,6 +182,10 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+
+    //secure store
+    implementation("com.google.crypto.tink:tink-android:1.20.0")
+    implementation("androidx.datastore:datastore-preferences:1.2.0")
 }
 
 secrets {

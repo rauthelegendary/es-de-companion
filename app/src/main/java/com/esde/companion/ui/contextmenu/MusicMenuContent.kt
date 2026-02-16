@@ -20,7 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.esde.companion.ost.MusicRepository
+import com.esde.companion.ost.GameMusicRepository
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ost.khinsider.KhAlbum
 import com.esde.companion.ost.khinsider.KhSong
@@ -34,7 +34,7 @@ enum class MusicScraperType {
 
 @Composable
 fun MusicMenuContent(
-    musicRepository: MusicRepository,
+    musicRepository: GameMusicRepository,
     youtubeMediaService: YoutubeMediaService,
     initialYtSearchQuery: String,
     initialKhSearchQuery: String,

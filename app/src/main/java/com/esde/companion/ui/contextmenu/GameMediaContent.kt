@@ -10,14 +10,17 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
@@ -62,8 +65,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.esde.companion.MediaFileLocator
-import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.managers.MediaManager
+import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideKey
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
@@ -75,7 +78,7 @@ import java.io.File
 fun GameMediaContent(
     game: String,
     system: String,
-    mediaFileLocator: MediaFileLocator,
+    mediaManager: MediaManager,
     mediaOverrideRepository: MediaOverrideRepository,
     onSaveOverride: (MediaOverride) -> Unit,
     onRemoveOverride: (MediaOverride) -> Unit,
@@ -91,6 +94,7 @@ fun GameMediaContent(
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
     var refreshKey by remember { mutableStateOf(0) }
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(game, selectedType, refreshKey) {
         activeOverride = mediaOverrideRepository.getOverride(game, system, selectedType)
@@ -98,14 +102,14 @@ fun GameMediaContent(
 
     val availableSlots = remember(game, system, selectedType, refreshKey) {
         MediaSlot.entries.map { slot ->
-            slot to (mediaFileLocator.findMediaFile(selectedType, system, game, slot)
+            slot to (mediaManager.findMediaFile(selectedType, system, game, slot)
                 ?.exists() == true)
         }
     }
 
     val visibleTypes = remember {
         ContentType.entries.filter {
-            !it.isTextWidget() && it != ContentType.SYSTEM_LOGO && it != ContentType.SYSTEM_IMAGE
+            !it.isTextWidget() && it != ContentType.SYSTEM_LOGO && it != ContentType.SYSTEM_IMAGE && it != ContentType.COLOR_BACKGROUND && it != ContentType.CUSTOM_IMAGE
         }
     }
 
@@ -129,7 +133,8 @@ fun GameMediaContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp)
+                .verticalScroll(scrollState)
+                .padding(0.dp)
         ) {
             ScrollableTabRow(
                 selectedTabIndex = selectedIndex,
@@ -145,15 +150,20 @@ fun GameMediaContent(
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(6.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(24.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top
             ) {
                 // --- LEFT COLUMN (CONTROLS) ---
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Select slot", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+                    Text(
+                        "Select slot",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.Gray
+                    )
 
                     FlowRow(
                         modifier = Modifier.padding(top = 8.dp),
@@ -178,57 +188,61 @@ fun GameMediaContent(
                             )
                         }
                     }
-
-                    Spacer(Modifier.height(16.dp))
-                    Divider(thickness = 1.dp, color = Color.Gray.copy(alpha = 0.2f))
-                    Spacer(Modifier.height(16.dp))
-
-                    SlotManagementActions(
-                        slot = selectedSlot,
-                        onDelete = {showDeleteConfirm = true},
-                        onMove = { targetSlot ->
-                            swapMedia(game, selectedType, system, selectedSlot, targetSlot)
-                            selectedSlot = targetSlot
-                            refreshKey++
-                        }
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    PreviewActions(
-                        game = game, system = system, type = selectedType,
-                        slot = selectedSlot, mediaFileLocator = mediaFileLocator,
-                        activeOverride = activeOverride,
-                        onSetDefault = { override ->
-                            activeOverride = override; onSaveOverride(
-                            override
-                        )
-                        },
-                        onRemoveOverride = { override ->
-                            activeOverride = null; onRemoveOverride(
-                            override
-                        )
-                        },
-                        onCrop = { file -> fileToCrop = file },
-                        removeCrop = removeCrop,
-                        refreshKey = refreshKey,
-                        onRefreshRequest = { refreshKey++ }
-                    )
                 }
 
                 Column(
-                    modifier = Modifier.width(350.dp),
+                    modifier = Modifier.fillMaxWidth(0.6f).fillMaxHeight(0.4f),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     CompactPreview(
                         game = game, system = system, type = selectedType,
-                        slot = selectedSlot, mediaFileLocator = mediaFileLocator,
+                        slot = selectedSlot, mediaManager = mediaManager,
                         refreshKey = refreshKey,
                         onRefreshRequest = { refreshKey++ }
                     )
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
+            Divider(thickness = 1.dp, color = Color.Gray.copy(alpha = 0.2f))
+            Spacer(Modifier.height(8.dp))
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                SlotManagementActions(
+                    slot = selectedSlot,
+                    onDelete = {showDeleteConfirm = true},
+                    onMove = { targetSlot ->
+                        swapMedia(game, selectedType, system, selectedSlot, targetSlot)
+                        selectedSlot = targetSlot
+                        refreshKey++
+                    }
+                )
+                PreviewActions(
+                    game = game, system = system, type = selectedType,
+                    slot = selectedSlot, mediaManager = mediaManager,
+                    activeOverride = activeOverride,
+                    onSetDefault = { override ->
+                        activeOverride = override; onSaveOverride(
+                        override
+                    )
+                    },
+                    onRemoveOverride = { override ->
+                        activeOverride = null; onRemoveOverride(
+                        override
+                    )
+                    },
+                    onCrop = { file -> fileToCrop = file },
+                    removeCrop = removeCrop,
+                    refreshKey = refreshKey,
+                    onRefreshRequest = { refreshKey++ }
+                )
+            }
         }
+        Spacer(Modifier.height(40.dp))
+
         if (showDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirm = false },
@@ -269,11 +283,11 @@ fun CompactPreview(
     system: String,
     type: ContentType,
     slot: MediaSlot,
-    mediaFileLocator: MediaFileLocator,
+    mediaManager: MediaManager,
     refreshKey: Int,
     onRefreshRequest: () -> Unit
 ) {
-    val file = remember(game, system, type, slot, refreshKey) { mediaFileLocator.findMediaFile(type, system, game, slot) }
+    val file = remember(game, system, type, slot, refreshKey) { mediaManager.findMediaFile(type, system, game, slot) }
     val isVideo = file?.path?.let { it.endsWith(".mp4") || it.endsWith(".mkv") } ?: false
 
     val context = LocalContext.current
@@ -353,7 +367,7 @@ fun PreviewActions(
     system: String,
     type: ContentType,
     slot: MediaSlot,
-    mediaFileLocator: MediaFileLocator,
+    mediaManager: MediaManager,
     activeOverride: MediaOverride?,
     onSetDefault: (MediaOverride) -> Unit,
     onRemoveOverride: (MediaOverride) -> Unit,
@@ -362,7 +376,7 @@ fun PreviewActions(
     refreshKey: Int,
     onRefreshRequest: () -> Unit
 ) {
-    val file = remember(game, type, slot, refreshKey) { mediaFileLocator.findMediaFileDefault(type, system, game, slot) }
+    val file = remember(game, type, slot, refreshKey) { mediaManager.findMediaFileDefault(type, system, game, slot) }
     val isVideo = file?.path?.let { it.endsWith(".mp4") || it.endsWith(".mkv") } ?: false
     val isCurrentDefault = activeOverride?.altSlot == slot
     val croppedFile = remember(file) {
@@ -432,7 +446,7 @@ fun SlotManagementActions(
     var showMoveMenu by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {

@@ -1,19 +1,18 @@
-package com.esde.companion
+package com.esde.companion.data
 
 import com.esde.companion.ui.ContentType
-import com.esde.companion.ui.PageContentType.FontType
+import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
 import com.esde.companion.ui.TextAlignment
 import java.io.File
 import java.util.UUID
 
-data class OverlayWidget(
+data class Widget(
     val id: String = UUID.randomUUID().toString(),
     val contentType: ContentType,
-    @Transient
     var contentPath: String? = "",
     var text: String = "",
-    var fontType: FontType = FontType.DEFAULT,
+    var fontType: PageContentType.FontType = PageContentType.FontType.DEFAULT,
     var fontSize: Float = 24f,
     val isBold: Boolean = false,
     val isItalic: Boolean = false,
@@ -37,6 +36,7 @@ data class OverlayWidget(
     var videoVolume: Float = 0.5f,
     var isRequired: Boolean = false,
     var cycle: Boolean = false,
+    var solidColor: Int? = null,
     @Transient
     var images: Map<MediaSlot, File?>? = emptyMap()
 ) {

@@ -4,6 +4,8 @@ import android.graphics.Rect
 import android.view.View
 import androidx.core.view.children
 import androidx.lifecycle.LifecycleOwner
+import com.esde.companion.data.Widget
+import com.esde.companion.managers.ImageManager
 
 class WidgetViewBinder {
     private val viewPool = mutableListOf<WidgetView>()
@@ -15,19 +17,22 @@ class WidgetViewBinder {
     fun sync(
         container: ResizableWidgetContainer,
         lifecycleOwner: LifecycleOwner,
-        dataList: List<OverlayWidget>,
+        dataList: List<Widget>,
         page: WidgetPage,
         locked: Boolean,
         snapToGrid: Boolean,
         gridSize: Float,
         pageSwap: Boolean,
-        onUpdate: (OverlayWidget) -> Unit,
+        onUpdate: (Widget) -> Unit,
         onSelect: (WidgetView) -> Unit = { selectedView: WidgetView ->
                 deselectAll(container)
                 selectedView.isWidgetSelected = true
         },
-        onEditRequested: (OverlayWidget) -> Unit,
-        animationSettings: AnimationSettings
+        onEditRequested: (Widget) -> Unit,
+        animationSettings: AnimationSettings,
+        imageManager: ImageManager,
+        game: String = "",
+        system: String
     ) {
 
 
@@ -57,19 +62,17 @@ class WidgetViewBinder {
                 if (viewPool.isNotEmpty()) {
                     view = viewPool.removeAt(0)
                     view.visibility = View.VISIBLE
-                    view.updateContent(data, page)
+                    view.updateContent(data, page, game, system)
                 } else {
-                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, onEditRequested, animationSettings)
+                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, onEditRequested, animationSettings, imageManager, game, system)
                 }
                 container.addView(view)
             } else {
-                view.updateContent(data, page)
+                view.updateContent(data, page, game, system)
             }
 
             view.setSnapToGrid(snapToGrid, gridSize)
             view.setLocked(locked)
-
-            //TODO: this will go wrong with z-index, no?
             view.bringToFront()
         }
 
@@ -145,9 +148,9 @@ class WidgetViewBinder {
         return findWidgetAt(container, x, y) != null
     }
 
-    fun syncSingleWidget(widget: OverlayWidget, widgetContainer: ResizableWidgetContainer, widgetPage: WidgetPage) {
+    fun syncSingleWidget(widget: Widget, widgetContainer: ResizableWidgetContainer, widgetPage: WidgetPage, game: String, system: String) {
         val existingViews = widgetContainer.children.filterIsInstance<WidgetView>().toList()
-        var view = existingViews.find { it.widget.id == widget.id }
-        view?.updateContent(widget, widgetPage)
+        val view = existingViews.find { it.widget.id == widget.id }
+        view?.updateContent(widget, widgetPage, game, system)
     }
 }

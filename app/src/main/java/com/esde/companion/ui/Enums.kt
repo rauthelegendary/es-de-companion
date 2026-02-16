@@ -16,10 +16,16 @@ enum class PageAnimation {
     NONE;
 
     fun toDisplayName(): String = when(this) {
-        PageAnimation.CONTEXT -> "Only on game/system switch"
-        PageAnimation.PAGE -> "Every page flip"
-        PageAnimation.NONE -> "No page animation"
+        PageAnimation.CONTEXT -> "On game/system switch"
+        PageAnimation.PAGE -> "On every page switch"
+        PageAnimation.NONE -> "Never"
     }
+}
+
+enum class AnimationStyle(val label: String) {
+    NONE("None"),
+    FADE("Fade"),
+    SCALE_FADE("Scale + Fade")
 }
 
 enum class ContentType {
@@ -40,7 +46,9 @@ enum class ContentType {
     DEVELOPER,
     PUBLISHER,
     GENRE,
-    RELEASE_DATE;
+    RELEASE_DATE,
+    COLOR_BACKGROUND,
+    CUSTOM_IMAGE;
 
     fun toDisplayName(): String = when(this) {
         ContentType.BOX_2D -> "2D Boxart"

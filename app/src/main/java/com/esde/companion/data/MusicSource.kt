@@ -1,4 +1,6 @@
-package com.esde.companion.music
+package com.esde.companion.data
+
+import com.esde.companion.ost.Song
 
 /**
  * ═══════════════════════════════════════════════════════════
@@ -14,7 +16,7 @@ package com.esde.companion.music
 sealed class MusicSource {
     /**
      * Generic/frontend music from the base music folder.
-     * Used for: System browsing (when system-specific is off), screensavers
+     * Used as fallback when system-specific folder doesn't exist, and for screensavers
      *
      * Path: /storage/emulated/0/ES-DE Companion/music/
      */
@@ -26,14 +28,18 @@ sealed class MusicSource {
 
     /**
      * System-specific music from a system subfolder.
-     * Used for: System/game browsing (when system-specific is on)
+     * Used for: System/game browsing (automatically falls back to Generic if folder doesn't exist)
      *
-     * Path: /storage/emulated/0/ES-DE Companion/music/{systemName}/
+     * Path: /storage/emulated/0/ES-DE Companion/music/systems/{systemName}/
      *
      * @param systemName The ES-DE system name (e.g., "snes", "arcade")
      */
     data class System(val systemName: String) : MusicSource() {
         override fun toString(): String = "System($systemName)"
+    }
+
+    data class Game(val systemName: String, val gameName: String, val gameFilename: String) : MusicSource() {
+        var song: Song? = null
     }
 
     /**
@@ -45,7 +51,8 @@ sealed class MusicSource {
     fun getPath(basePath: String): String {
         return when (this) {
             is Generic -> basePath
-            is System -> "$basePath/$systemName"
+            is System -> "$basePath/${AppConstants.Paths.MUSIC_SYSTEMS_SUBDIR}/$systemName"
+            is Game -> basePath
         }
     }
 }

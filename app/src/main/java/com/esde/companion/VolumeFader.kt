@@ -5,9 +5,8 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.view.animation.AccelerateDecelerateInterpolator
 import androidx.media3.exoplayer.ExoPlayer
-import com.esde.companion.ost.MusicPlayer
 
-class VolumeFader(private var player: Any?) { // Changed to Any
+class VolumeFader(private var player: Any?) {
     private var animator: ValueAnimator? = null
     private var defaultDuration: Long = 400
 
@@ -20,7 +19,6 @@ class VolumeFader(private var player: Any?) { // Changed to Any
 
     private fun getVolume(): Float {
         return when (val p = player) {
-            is MusicPlayer -> p.getMasterVolume()
             is ExoPlayer -> p.volume
             else -> 0f
         }
@@ -28,10 +26,6 @@ class VolumeFader(private var player: Any?) { // Changed to Any
 
     private fun setVolume(vol: Float) {
         when (val p = player) {
-            is MusicPlayer ->
-            {
-                p.setMasterVolume(vol)
-            }
             is ExoPlayer -> p.volume = vol
             else -> {}
         }

@@ -1,13 +1,14 @@
 package com.esde.companion
 
-import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.data.Widget
+import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.ui.PageContentType
 import java.util.UUID
 
 data class WidgetPage(
     val id: String = UUID.randomUUID().toString(),
     var name: String = "",
-    var widgets: MutableList<OverlayWidget> = mutableListOf(),
+    var widgets: MutableList<Widget> = mutableListOf(),
     var backgroundType: PageContentType = PageContentType.FANART,
     var backgroundPath: String? = null,
     var slot: MediaSlot = MediaSlot.Default,

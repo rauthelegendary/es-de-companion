@@ -35,19 +35,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.esde.companion.AnimationSettings
-import com.esde.companion.AppState
-import com.esde.companion.MediaFileLocator
-import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.data.AppState
+import com.esde.companion.managers.MediaManager
+import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.PageEditorItem
 import com.esde.companion.WidgetPage
 import com.esde.companion.art.ArtRepository
 import com.esde.companion.art.LaunchBox.LaunchBoxDao
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
-import com.esde.companion.getCurrentSystemName
-import com.esde.companion.isInGameBrowsingMode
-import com.esde.companion.isInSystemBrowsingMode
-import com.esde.companion.ost.MusicRepository
+import com.esde.companion.data.getCurrentSystemName
+import com.esde.companion.data.isInGameBrowsingMode
+import com.esde.companion.data.isInSystemBrowsingMode
+import com.esde.companion.ost.GameMusicRepository
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ost.khinsider.KhSong
 import com.esde.companion.ui.ContentType
@@ -71,7 +71,7 @@ fun MainContextMenu(
     onMusicSelect: (StreamInfoItem, (Float) -> Unit) -> Unit,
     onSave: (String, ContentType, Int) -> Unit,
     mediaService: YoutubeMediaService,
-    mediaFileLocator: MediaFileLocator,
+    mediaManager: MediaManager,
     mediaOverrideRepository: MediaOverrideRepository,
     onSaveOverride: (MediaOverride) -> Unit,
     onRemoveOverride: (MediaOverride) -> Unit,
@@ -82,10 +82,12 @@ fun MainContextMenu(
     deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
     launchBoxDao: LaunchBoxDao,
     animationSettings: AnimationSettings,
-    musicRepository: MusicRepository,
+    musicRepository: GameMusicRepository,
     onKhMusicSelect: (KhSong, String, (Float) -> Unit) -> Unit,
     isSearchingMusic: Boolean,
-    musicResults: List<StreamInfoItem>
+    musicResults: List<StreamInfoItem>,
+    currentGameVolume: Double,
+    onVolumeChanged: (Double) -> Unit
     ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var fileName = ""
@@ -93,9 +95,9 @@ fun MainContextMenu(
     val tabs: List<String> = remember(state) {
         if (state.isInGameBrowsingMode()) {
             fileName = (state as AppState.GameBrowsing).gameFilename!!
-            listOf("Widgets", "Game Media", "Music", "Scraper")
+            listOf("User Interface", "Game Media", "Music", "Scraper")
         } else {
-            listOf("Widgets")
+            listOf("User Interface")
         }
     }
 
@@ -146,9 +148,9 @@ fun MainContextMenu(
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp)
             ) {
-                Box(modifier = Modifier.weight(1f).padding(10.dp)) {
+                Box(modifier = Modifier.weight(1f).padding(10.dp, 2.dp, 10.dp, 2.dp)) {
                     when (tabs[selectedTab]) {
-                        "Widgets" -> WidgetMenuContent(
+                        "User Interface" -> WidgetMenuContent(
                             uiState = uiState,
                             isSystemView = state.isInSystemBrowsingMode(),
                             actions = widgetActions,
@@ -157,13 +159,15 @@ fun MainContextMenu(
                             pages = pages,
                             onSavePages = onSavePages,
                             onRenamePage = onRenamePage,
-                            animationSettings = animationSettings
+                            animationSettings = animationSettings,
+                            currentGameVolume = currentGameVolume,
+                            onVolumeChanged = onVolumeChanged,
                         )
 
                         "Game Media" -> GameMediaContent(
                             game = fileName,
                             system = system,
-                            mediaFileLocator = mediaFileLocator,
+                            mediaManager = mediaManager,
                             onSaveOverride = onSaveOverride,
                             onRemoveOverride = onRemoveOverride,
                             removeCrop = removeCrop,
@@ -194,7 +198,7 @@ fun MainContextMenu(
                                 initialSearchQuery = s.gameName!!,
                                 onSave = onSave,
                                 mediaService = mediaService,
-                                mediaFileLocator = mediaFileLocator,
+                                mediaManager = mediaManager,
                                 gameFileName = fileName,
                                 systemName = system,
                                 launchBoxDao = launchBoxDao

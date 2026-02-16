@@ -5,6 +5,7 @@ import android.util.DisplayMetrics
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.core.content.edit
+import com.esde.companion.data.Widget
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.WidgetContext
 import com.google.gson.Gson
@@ -59,7 +60,7 @@ class WidgetManager(
     }
 
     // Returns widgets for the current page
-    fun getWidgetsForCurrentPage(): List<OverlayWidget> {
+    fun getWidgetsForCurrentPage(): List<Widget> {
         return pages.getOrNull(currentPageIndex)?.widgets ?: emptyList()
     }
 
@@ -101,7 +102,7 @@ class WidgetManager(
 
     fun getPageCount(): Int = pages.size
 
-    fun updateWidget(updated: OverlayWidget, metrics: DisplayMetrics) {
+    fun updateWidget(updated: Widget, metrics: DisplayMetrics) {
         updated.toPercentages(metrics.widthPixels, metrics.heightPixels)
         val page = pages[currentPageIndex]
         val idx = page.widgets.indexOfFirst { it.id == updated.id }
@@ -123,10 +124,10 @@ class WidgetManager(
     fun addNewWidgetToCurrentPage(
         type: ContentType,
         displayMetrics: DisplayMetrics
-    ): OverlayWidget {
+    ): Widget {
         val centerX = displayMetrics.widthPixels / 2f
         val centerY = displayMetrics.heightPixels / 2f
-        val newWidget = OverlayWidget(
+        val newWidget = Widget(
             contentType = type,
             contentPath = "",
             text = "",

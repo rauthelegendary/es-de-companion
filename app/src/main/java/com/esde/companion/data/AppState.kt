@@ -1,4 +1,4 @@
-package com.esde.companion
+package com.esde.companion.data
 
 import com.esde.companion.ui.WidgetContext
 
@@ -121,7 +121,7 @@ fun AppState.isScreensaverActive(): Boolean = this is AppState.Screensaver
 fun AppState.shouldShowWidgets(): Boolean {
     return when (this) {
         is AppState.GameBrowsing -> true
-        is AppState.Screensaver -> true  // If screensaver behavior is "game_image"
+        is AppState.Screensaver -> true
         else -> false
     }
 }

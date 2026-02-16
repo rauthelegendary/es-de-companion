@@ -1,15 +1,14 @@
 package com.esde.companion
 
-import android.Manifest
 import android.app.ActivityOptions
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.res.ColorStateList
+import com.esde.companion.managers.ScriptManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -35,6 +34,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.webkit.MimeTypeMap
 import android.widget.CheckBox
 import android.widget.EditText
@@ -51,14 +52,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.core.content.ContextCompat
 import androidx.core.view.GestureDetectorCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.flowWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -70,12 +69,13 @@ import coil.ImageLoaderFactory
 import coil.annotation.ExperimentalCoilApi
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import coil.decode.SvgDecoder
 import coil.imageLoader
 import com.api.igdb.request.IGDBWrapper
 import com.caverock.androidsvg.SVG
 import com.esde.companion.MediaFileHelper.extractGameFilenameWithoutExtension
 import com.esde.companion.MediaFileHelper.sanitizeGameFilename
-import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.art.ArtRepository
 import com.esde.companion.art.LaunchBox.LaunchBoxScraper
 import com.esde.companion.art.MediaService
@@ -85,10 +85,20 @@ import com.esde.companion.art.igdb.TwitchAuth
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.art.steamgrid.SGDBScraper
+import com.esde.companion.data.AppConstants
+import com.esde.companion.data.AppState
+import com.esde.companion.data.SavedBrowsingState
+import com.esde.companion.data.ScreensaverGame
+import com.esde.companion.data.Widget
+import com.esde.companion.data.getCurrentGameFilename
+import com.esde.companion.data.getCurrentSystemName
+import com.esde.companion.data.toWidgetContext
+import com.esde.companion.managers.AppLaunchManager
+import com.esde.companion.managers.MusicManager
+import com.esde.companion.managers.PreferencesManager
 import com.esde.companion.metadata.GameListSyncManager
 import com.esde.companion.metadata.GameRepository
-import com.esde.companion.ost.MusicPlayer
-import com.esde.companion.ost.MusicRepository
+import com.esde.companion.ost.GameMusicRepository
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ost.khinsider.KhRepository
 import com.esde.companion.ost.khinsider.KhSong
@@ -114,6 +124,13 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import kotlin.math.abs
+import androidx.core.view.isVisible
+import coil.Coil
+import com.esde.companion.art.ApiKeyManager
+import com.esde.companion.data.MusicSource
+import com.esde.companion.managers.ImageManager
+import com.esde.companion.managers.MediaManager
+import kotlinx.coroutines.delay
 
 
 class ContextMenuStateHolder {
@@ -121,7 +138,7 @@ class ContextMenuStateHolder {
         return showMenu || widgetToEditState != null
     }
 
-    var widgetToEditState by mutableStateOf<OverlayWidget?>(null)
+    var widgetToEditState by mutableStateOf<Widget?>(null)
     var showMenu by mutableStateOf(false)
 }
 
@@ -129,11 +146,12 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            .crossfade(true)
+            .crossfade(false)
             .okHttpClient {
                 NetworkClientManager.baseClient
             }
             .components {
+                add(SvgDecoder.Factory())
                 if (SDK_INT >= 28) {
                     add(ImageDecoderDecoder.Factory())
                 } else {
@@ -144,6 +162,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     }
 
     private var listeningToAudioRef: Boolean = false
+
+    private lateinit var songTitleOverlay: LinearLayout
+    private lateinit var songTitleText: TextView
+    private lateinit var musicPlayPauseButton: ImageButton
+    private lateinit var musicNextButton: ImageButton
+    private var songTitleHandler: Handler? = null
+    private var songTitleRunnable: Runnable? = null
+    private lateinit var musicManager: MusicManager
+
     private lateinit var menuComposeView: ComposeView
     private lateinit var artRepository: ArtRepository
     private lateinit var mediaOverrideRepository: MediaOverrideRepository
@@ -155,10 +182,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var drawerBackButton: ImageButton
     private lateinit var settingsButton: ImageButton
     private lateinit var androidSettingsButton: ImageButton
-    private lateinit var prefs: SharedPreferences
+    private lateinit var prefsManager: PreferencesManager
     private lateinit var appLaunchPrefs: AppLaunchPreferences
     private lateinit var mediaService: MediaService
-    private lateinit var mediaFileLocator: MediaFileLocator
+    private lateinit var mediaManager: MediaManager
     private lateinit var blackOverlay: View
     private var isBlackOverlayShown = false
 
@@ -169,6 +196,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var widgetContainer: ResizableWidgetContainer
     private lateinit var gameWidgetManager: WidgetManager
     private lateinit var systemWidgetManager: WidgetManager
+    private lateinit var imageManager: ImageManager
     private lateinit var widgetPathResolver: WidgetPathResolver
     private lateinit var widgetViewBinder: WidgetViewBinder
     private lateinit var backgroundBinder: BackgroundBinder
@@ -189,6 +217,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     }
     private var widgetMenuShowing = false
 
+    var currentGameVolume by mutableDoubleStateOf(1.0)
+        private set
+
+
     // This tracks state alongside existing booleans during migration
     private var state: AppState = AppState.SystemBrowsing("")
         set(value) {
@@ -200,6 +232,10 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             Log.d("MainActivity", "FROM: $oldState")
             Log.d("MainActivity", "TO:   $value")
             Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━")
+
+
+            musicManager.onStateChanged(value)
+
         }
 
     private var fileObserver: FileObserver? = null
@@ -212,7 +248,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var screensaverInitialized = false  // Track if screensaver has loaded its first game
 
     // Video playback variables
-    private var volumeChangeReceiver: BroadcastReceiver? = null
     private var isActivityVisible = true  // Track onStart/onStop - most reliable signal
 
     // Flag to skip reload in onResume (used when returning from settings with no changes)
@@ -222,18 +257,21 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var tapCount = 0
     private var lastTapTime = 0L
 
+    private var twoFingerTapCount = 0
+    private var lastTwoFingerTapTime = 0L
+    private val TWO_FINGER_TAP_TIMEOUT by lazy {
+        ViewConfiguration.getDoubleTapTimeout().toLong()  // Standard Android double-tap timeout (~300ms)
+    }
     // Standard Android double-tap timeout (max time between taps)
     private val DOUBLE_TAP_TIMEOUT by lazy {
         ViewConfiguration.getDoubleTapTimeout().toLong() // Default: 300ms
     }
-
     // Custom minimum interval to prevent accidental activations (100ms)
     // This is intentionally higher than Android's internal 40ms hardware filter:
     // - 40ms filters touch controller artifacts (hardware-level)
     // - 100ms filters user errors like screen brushing (UX-level)
     // Still imperceptible to users while significantly reducing false positives
-    private val MIN_TAP_INTERVAL =
-        100L // 100ms minimum time between taps (prevents accidental fast touches)
+    private val MIN_TAP_INTERVAL = AppConstants.Timing.DOUBLE_TAP_MIN_INTERVAL
 
     // Scripts verification
     private var isWaitingForScriptVerification = false
@@ -253,28 +291,27 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var isSearchingMusic by mutableStateOf(false)
     private var lastSystemScrollTime = 0L
     private var lastGameScrollTime = 0L
+    private var gameInfoJob: Job? = null
+    private var musicJob: Job? = null
 
     // System scrolling: Enable debouncing to reduce rapid updates
-    private val SYSTEM_FAST_SCROLL_THRESHOLD =
-        250L // If scrolling faster than 250ms between changes, it's "fast"
-    private val SYSTEM_FAST_SCROLL_DELAY = 300L // 300ms delay for fast system scrolling
-    private val SYSTEM_SLOW_SCROLL_DELAY = 150L // 150ms delay for slow system scrolling
+    private val SYSTEM_FAST_SCROLL_THRESHOLD = AppConstants.Timing.SYSTEM_FAST_SCROLL_THRESHOLD
+    private val SYSTEM_FAST_SCROLL_DELAY = AppConstants.Timing.SYSTEM_FAST_SCROLL_DELAY
+    private val SYSTEM_SLOW_SCROLL_DELAY = AppConstants.Timing.SYSTEM_SLOW_SCROLL_DELAY
 
     // Game scrolling: No debouncing for instant response
-    private val GAME_FAST_SCROLL_THRESHOLD = 250L
-    private val GAME_FAST_SCROLL_DELAY = 0L // No delay for games
-    private val GAME_SLOW_SCROLL_DELAY = 0L // No delay for games
+    private val GAME_FAST_SCROLL_THRESHOLD = AppConstants.Timing.GAME_FAST_SCROLL_THRESHOLD
+    private val GAME_FAST_SCROLL_DELAY = AppConstants.Timing.GAME_FAST_SCROLL_DELAY
+    private val GAME_SLOW_SCROLL_DELAY = AppConstants.Timing.GAME_SLOW_SCROLL_DELAY
 
     // Filter out game-select on game-start and game-end
     private var lastGameStartTime = 0L
     private var lastGameEndTime = 0L
-    private val GAME_EVENT_DEBOUNCE = 2000L  // 2 seconds
+    private val GAME_EVENT_DEBOUNCE = AppConstants.Timing.GAME_EVENT_DEBOUNCE
 
-    private val scriptManager = ScriptManager(this)
-
-    private lateinit var musicRepository: MusicRepository
-    private lateinit var musicPlayer: MusicPlayer
-    private lateinit var volumeFader: VolumeFader
+    private lateinit var loudnessService : LoudnessService
+    private lateinit var gameMusicRepository: GameMusicRepository
+    private var isNavigatingInternally = false
 
     private lateinit var animationSettings: AnimationSettings
 
@@ -305,13 +342,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 // Delay slightly to let UI settle after settings closes
                 Handler(Looper.getMainLooper()).postDelayed({
                     showWidgetSystemTutorial(fromUpdate = false)
-                }, 500)
+                }, AppConstants.Timing.WIZARD_DELAY)
             }
             val needsRecreate = result.data?.getBooleanExtra("NEEDS_RECREATE", false) ?: false
             val appsHiddenChanged =
                 result.data?.getBooleanExtra("APPS_HIDDEN_CHANGED", false) ?: false
-            // ========== MUSIC ==========
-            // ===========================
+            val musicSettingsChanged = result.data?.getBooleanExtra("MUSIC_SETTINGS_CHANGED", false) ?: false
+            val musicMasterToggleChanged = result.data?.getBooleanExtra("MUSIC_MASTER_TOGGLE_CHANGED", false) ?: false
             val closeDrawer = result.data?.getBooleanExtra("CLOSE_DRAWER", false) ?: false
             val videoSettingsChanged =
                 result.data?.getBooleanExtra("VIDEO_SETTINGS_CHANGED", false) ?: false
@@ -356,26 +393,17 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 // Image preference changed - reload appropriate view
                 if (state is AppState.GamePlaying) {
                     // Game is playing - update game launch display
-                    Log.d(
-                        "MainActivity",
-                        "Image preference changed during gameplay - reloading display"
-                    )
+                    Log.d("MainActivity", "Image preference changed during gameplay - reloading display")
                     handleGameStart()
                     skipNextReload = true
                 } else if (state is AppState.SystemBrowsing) {
                     // In system view - reload system image with new preference
-                    Log.d(
-                        "MainActivity",
-                        "Image preference changed in system view - reloading system image"
-                    )
+                    Log.d("MainActivity", "Image preference changed in system view - reloading system image")
                     loadSystemImage()
                     skipNextReload = true
                 } else {
                     // In game browsing view - reload game image with new preference
-                    Log.d(
-                        "MainActivity",
-                        "Image preference changed in game view - reloading game image"
-                    )
+                    Log.d("MainActivity", "Image preference changed in game view - reloading game image")
                     loadGameInfo()
                     skipNextReload = true
                 }
@@ -401,18 +429,199 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                     // Game is playing - skip reload
                     skipNextReload = true
                 }
+            } else if (musicMasterToggleChanged) {
+                // Music MASTER TOGGLE changed - re-evaluate for both ON and OFF
+                val musicEnabled = prefsManager.musicEnabled
+
+                if (!musicEnabled) {
+                    // Music was turned OFF - stop it
+                    Log.d("MainActivity", "Music master toggle changed to OFF - stopping music")
+                    hideSongTitle()
+                    onStateChangedMusicHandler(state)
+                } else {
+                    // Music was turned ON - evaluate if it should play for current state
+                    Log.d("MainActivity", "Music master toggle changed to ON - evaluating music state")
+                    onStateChangedMusicHandler(state)
+                }
+
+                // CRITICAL FIX: If in GameBrowsing, reload to ensure UI is correct
+                // (video might be playing and needs to be stopped, widgets hidden, etc.)
+                if (state is AppState.GameBrowsing) {
+                    Log.d("MainActivity", "Music master toggle changed in GameBrowsing - reloading game display")
+                    loadGameInfo()
+                    skipNextReload = true
+                } else {
+                    skipNextReload = true
+                }
+            } else if (musicSettingsChanged) {
+                // Other music settings changed (not master toggle) - re-evaluate music for current state
+                Log.d("MainActivity", "Music settings changed (not master) - re-evaluating music state")
+                val songTitleEnabled = prefsManager.musicSongTitleEnabled
+
+                // Check if song title display was toggled off
+                if (!songTitleEnabled) {
+                    hideSongTitle()
+                }
+
+                // Re-evaluate music for current state with new settings
+                // This will start/stop music based on the new per-state toggles
+                onStateChangedMusicHandler(state)
+
+                // CRITICAL FIX: If in GameBrowsing, reload to ensure UI is correct
+                // (video might be playing and needs to be stopped, widgets hidden, etc.)
+                if (state is AppState.GameBrowsing) {
+                    Log.d("MainActivity", "Music settings changed in GameBrowsing - reloading game display")
+                    loadGameInfo()
+                    skipNextReload = true
+                } else {
+                    skipNextReload = true
+                }
             } else {
-                // No settings changed that require reload - skip the reload in onResume
-                skipNextReload = true
+                // No settings changed that require reload
+                // However, if we're in GameBrowsing state, we should still reload
+                // to ensure video plays properly when returning from Settings
+                if (state is AppState.GameBrowsing) {
+                    Log.d("MainActivity", "No settings changed but in GameBrowsing - allowing reload for video")
+                    skipNextReload = false
+                } else {
+                    Log.d("MainActivity", "No settings changed - skipping reload")
+                    skipNextReload = true
+                }
             }
+            // Note: Video audio changes are handled automatically in onResume
 
             // Start script verification if requested
             if (startVerification) {
                 // Delay slightly to let UI settle
                 Handler(Looper.getMainLooper()).postDelayed({
                     startScriptVerification()
-                }, 500)
+                }, AppConstants.Timing.WIZARD_DELAY)
             }
+        }
+    }
+
+    private fun onStateChangedMusicHandler(state: AppState) {
+        musicJob?.cancel()
+        musicJob = lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                musicManager.onStateChanged(state)
+            } catch (e: Exception) {
+
+            }
+        }
+    }
+
+    private fun setupMusicCallbacks() {
+        musicManager.setOnSongChangedListener { songName, source ->
+            showSongTitle(songName, source)
+        }
+
+        musicManager.setOnMusicStoppedListener {
+            hideSongTitle()
+            updateMusicControls()
+        }
+
+        musicManager.setOnPlaybackStateChangedListener { isPlaying ->
+            updateMusicControls()
+        }
+    }
+
+    /**
+     * Update music controls visibility and state based on MusicManager.
+     */
+    private fun updateMusicControls() {
+        val hasActiveMusic = musicManager.isPlaying() || musicManager.isPaused()
+
+        if (hasActiveMusic) {
+            musicPlayPauseButton.setImageResource(
+                if (musicManager.isPlaying()) R.drawable.ic_pause
+                else R.drawable.ic_play
+            )
+        }
+
+        Log.d("MainActivity", "Music controls updated: hasActiveMusic=$hasActiveMusic, isPlaying=${musicManager.isPlaying()}")
+    }
+
+    /**
+     * Show song title overlay with current settings.
+     */
+    private fun showSongTitle(songName: String, source: MusicSource) {
+        // Check if feature is enabled
+        if (!prefsManager.musicSongTitleEnabled || (prefsManager.musicSongTitleSystemOnlyEnabled && source is MusicSource.Game)) {
+            Log.d("MainActivity", "Song title display disabled in settings")
+            return
+        }
+
+        // Update text
+        songTitleText.text = songName
+
+        // Show overlay with timeout
+        showSongTitleOverlay()
+    }
+
+    /**
+     * Show the song title overlay with configured timeout.
+     */
+    private fun showSongTitleOverlay() {
+        // Cancel any pending hide
+        songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+
+        val songTitleSystemOnly = prefsManager.musicSongTitleSystemOnlyEnabled
+
+        if(!songTitleSystemOnly || (songTitleSystemOnly && state !is AppState.GameBrowsing)) {
+            // Apply background opacity setting
+            val opacity = prefsManager.musicSongTitleOpacity
+            val alpha = (opacity * 255 / 100).coerceIn(0, 255)
+            val hexAlpha = String.format("%02x", alpha)
+            val backgroundColor = Color.parseColor("#${hexAlpha}000000")
+            songTitleOverlay.setBackgroundColor(backgroundColor)
+
+            // Fade in
+            songTitleOverlay.visibility = View.VISIBLE
+            songTitleOverlay.animate()
+                .alpha(1.0f)
+                .setDuration(AppConstants.Timing.FADE_ANIMATION_DURATION)
+                .start()
+
+            // Get display duration
+            val durationSetting = prefsManager.musicSongTitleDuration
+
+            // If infinite (15), don't schedule fade out
+            if (durationSetting == 15) {
+                Log.d("MainActivity", "Song title set to infinite display")
+                return
+            }
+
+            // Calculate duration: 0->2s, 1->4s, 2->6s, ... 14->30s
+            val displayDuration =
+                ((durationSetting + 1) * AppConstants.Timing.SONG_TITLE_STEP_SECONDS) * 1000L
+
+            // Schedule fade out
+            songTitleRunnable = Runnable {
+                hideSongTitleOverlay()
+            }
+            songTitleHandler?.postDelayed(songTitleRunnable!!, displayDuration)
+
+            Log.d("MainActivity", "Song title will auto-hide after ${displayDuration}ms")
+        }
+    }
+
+    /**
+     * Hide the song title overlay with fade animation.
+     */
+    private fun hideSongTitleOverlay() {
+        songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
+
+        if(songTitleOverlay.visibility == View.VISIBLE) {
+            songTitleOverlay.animate()
+                .alpha(0.0f)
+                .setDuration(AppConstants.Timing.FADE_ANIMATION_DURATION)
+                .withEndAction {
+                    songTitleOverlay.visibility = View.GONE
+                }
+                .start()
+
+            Log.d("MainActivity", "Song title overlay hidden")
         }
     }
 
@@ -433,12 +642,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Coil.setImageLoader(newImageLoader())
         setContentView(R.layout.activity_main)
+        enableImmersiveMode()
 
         val database = AppDatabase.getDatabase(this)
         val loudnessDao = database.loudnessDao()
         val mediaOverrideDao = database.mediaOverrideDao()
         val launchBoxDao = database.launchBoxDao()
+        val apiKeyManager = ApiKeyManager.getInstance(this)
         mediaOverrideRepository = MediaOverrideRepository(mediaOverrideDao)
 
         //lifecycleScope.launch(Dispatchers.IO) {
@@ -446,24 +658,38 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         //}
 
         ////SCRAPING STUFF////
-        val steamGrid = SGDBScraper(BuildConfig.STEAM_GRID_API_KEY)
-        val launchBoxScraper = LaunchBoxScraper(launchBoxDao)
         lifecycleScope.launch(Dispatchers.IO) {
             mediaOverrideRepository.initialize()
-            val token = TwitchAuth.getTwitchAccessToken()
-                if(token != null) {
-                    IGDBWrapper.setCredentials(
-                        BuildConfig.IGDB_CLIENT_ID,
-                        token
-                    )
-                    var igdbScraper: IgdbArtScraper = IgdbArtScraper()
-                    artRepository = ArtRepository(steamGrid, igdbScraper, launchBoxScraper)
+
+            apiKeyManager.scraperCredentials.collect { creds ->
+                var steamGridScraper: SGDBScraper? = null
+                var igdbScraper: IgdbArtScraper? = null
+                if(creds.sgdbKey != null && creds.sgdbKey.isNotEmpty()) {
+                    steamGridScraper = SGDBScraper(creds.sgdbKey)
                 }
+                val launchBoxScraper = LaunchBoxScraper(launchBoxDao)
+
+                if(creds.igdbId != null && creds.igdbSecret != null && creds.igdbId.isNotEmpty() && creds.igdbSecret.isNotEmpty()) {
+                    val token = TwitchAuth.getTwitchAccessToken(creds.igdbId, creds.igdbSecret)
+                    if (token != null) {
+                        IGDBWrapper.setCredentials(creds.igdbId, token)
+                        igdbScraper = IgdbArtScraper()
+                    }
+                }
+                artRepository = ArtRepository(steamGridScraper, igdbScraper, launchBoxScraper)
+
+                if(steamGridScraper != null && igdbScraper != null) {
+                    Log.d("Scraper", "Scrapers re-initialized with latest credentials")
+                } else {
+                    Log.d("Scraper", "Scrapers couldn't be initialized")
+                }
+            }
         }
+
         val youtubeService = YoutubeMediaService(NetworkClientManager.baseClient)
         val khRepository = KhRepository()
-
-        musicRepository = MusicRepository(youtubeService, LoudnessService(loudnessDao), khRepository)
+        loudnessService = LoudnessService(loudnessDao)
+        gameMusicRepository = GameMusicRepository(youtubeService,loudnessService, khRepository)
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -476,16 +702,18 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         val gameDao = database.gameDao()
         val gameRepository = GameRepository(gameDao)
 
-        musicPlayer = MusicPlayer(musicRepository, musicExoPlayer)
-        volumeFader = VolumeFader(musicPlayer)
-
-        prefs = getSharedPreferences("ESDESecondScreenPrefs", MODE_PRIVATE)
+        prefsManager = PreferencesManager(this)
         appLaunchPrefs = AppLaunchPreferences(this)
-        mediaFileLocator = MediaFileLocator(prefs)
-        mediaService = MediaService(mediaOverrideRepository, mediaFileLocator)
+        mediaManager = MediaManager(prefsManager)
+        mediaService = MediaService(mediaOverrideRepository, mediaManager)
+
+        musicManager = MusicManager(this, gameMusicRepository, this, prefsManager)
+        setupMusicCallbacks()
 
         // Check if we should show widget tutorial for updating users
-        checkAndShowWidgetTutorialForUpdate()
+        if (prefsManager.setupCompleted) {
+            checkAndShowWidgetTutorialForUpdate()
+        }
 
         rootLayout = findViewById(R.id.rootLayout)
         appDrawer = findViewById(R.id.appDrawer)
@@ -497,16 +725,25 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         androidSettingsButton = findViewById(R.id.androidSettingsButton)
         blackOverlay = findViewById(R.id.blackOverlay)
 
+        songTitleText = findViewById(R.id.songTitleText)
+        songTitleOverlay = findViewById(R.id.songTitleOverlay)
+        musicPlayPauseButton = findViewById(R.id.musicPlayPauseButton)
+        musicNextButton = findViewById(R.id.musicNextButton)
+        songTitleHandler = Handler(Looper.getMainLooper())
+
         // Load snap to grid state
-        snapToGrid = prefs.getBoolean("snap_to_grid", true)
+        snapToGrid = prefsManager.snapToGrid
         // Load show grid state
-        showGrid = prefs.getBoolean("show_grid", false)
+        showGrid = prefsManager.showGrid
 
         // Initialize widget system
         widgetContainer = findViewById(R.id.widgetContainer)
         gameWidgetManager = WidgetManager(this, WidgetContext.GAME)
         systemWidgetManager = WidgetManager(this, WidgetContext.SYSTEM)
-        widgetPathResolver = WidgetPathResolver(mediaFileLocator, prefs, mediaOverrideRepository, gameRepository)
+
+        animationSettings = AnimationSettings(prefsManager)
+        imageManager = ImageManager(this, animationSettings, prefsManager)
+        widgetPathResolver = WidgetPathResolver(mediaManager, prefsManager, mediaOverrideRepository, gameRepository, prefsManager)
         widgetViewBinder = WidgetViewBinder()
 
         //TODO: not hardcode this
@@ -523,13 +760,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         setupAppDrawer()
         setupSearchBar()
-        setupGestureDetector()  // Must be after setupAppDrawer so bottomSheetBehavior is initialized
+        setupGestureDetector()
         setupDrawerBackButton()
         setupSettingsButton()
+        setupMusicControlButtons()
         setupAndroidSettingsButton()
         gameWidgetManager.load()
         systemWidgetManager.load()
-        animationSettings = AnimationSettings(this)
+
+
 
         // Apply drawer transparency
         updateDrawerTransparency()
@@ -563,9 +802,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                                      onRemovePageSelected()
                                      hideContextMenu()
                                  },
-                                 onAddWidget = { type ->
+                                 onAddWidget = { type, stringValue ->
                                      if (!widgetsLocked) {
-                                         addNewWidget(type)
+                                         addNewWidget(type, stringValue)
                                          hideContextMenu()
                                      }
                                  },
@@ -593,7 +832,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                              currentPageIndex = currentWidgetManager().currentPageIndex,
                              currentPage = currentWidgetManager().getCurrentPage(),
                              mediaService = youtubeService,
-                             mediaFileLocator = mediaFileLocator,
+                             mediaManager = mediaManager,
                              mediaOverrideRepository = mediaOverrideRepository,
                              onSaveOverride = { mediaOverride -> onMediaOverride(mediaOverride) },
                              onRemoveOverride = { mediaOverride ->
@@ -625,8 +864,16 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                              },
                              launchBoxDao = launchBoxDao,
                              animationSettings = animationSettings,
-                             musicRepository = musicRepository,
-                             onKhMusicSelect = { song, url, onProgress -> onMusicResultSelectedKh(song, url, onProgress)}
+                             musicRepository = gameMusicRepository,
+                             onKhMusicSelect = { song, url, onProgress ->
+                                 onMusicResultSelectedKh(
+                                     song,
+                                     url,
+                                     onProgress
+                                 )
+                             },
+                             currentGameVolume = currentGameVolume,
+                             onVolumeChanged = {volume -> onGameVolumeSaved(volume)}
                          )
                      }
 
@@ -641,8 +888,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                              onUpdate = { updated ->
                                  onWidgetUpdated(updated)
                              },
-                             onDelete = {
-                                 deleted -> onWidgetDeleted(deleted)
+                             onDelete = { deleted ->
+                                 onWidgetDeleted(deleted)
                                  menuState.widgetToEditState = null
                                  widgetMenuShowing = false
                              },
@@ -651,13 +898,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                                      widget,
                                      forward
                                  )
-                             }
+                             },
+                             inSystemView = state is AppState.SystemBrowsing
                          )
                      }
                  }
             }
         }
-
 
         backgroundBinder = BackgroundBinder(
             context = this,
@@ -672,10 +919,11 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             widgetContainer = widgetContainer,
             rootContainer = rootLayout,
             menuView = menuComposeView,
-            animationSettings = animationSettings
+            animationSettings = animationSettings,
+            imageManager = imageManager
         )
 
-        val logsDir = File(mediaFileLocator.getLogsPath())
+        val logsDir = File(mediaManager.getLogsPath())
         val systemScrollFile = File(logsDir, "esde_system_name.txt")
         val gameScrollFile = File(logsDir, "esde_game_filename.txt")
 
@@ -710,14 +958,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         // Auto-launch setup wizard if needed
         checkAndLaunchSetupWizard()
-
-        lifecycleScope.launch {
-            AudioReferee.currentPriority
-                .flowWithLifecycle(lifecycle, Lifecycle.State.STARTED)
-                .collect { priority ->
-                    onAudioPriorityChanged(priority)
-            }
-        }
     }
 
     private fun onDeleteMedia(
@@ -809,20 +1049,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         refreshWidgets(pageSwap = true)
     }
 
-    private fun onAudioPriorityChanged(priority: AudioReferee.AudioSource) {
-        if(listeningToAudioRef) {
-            if (priority == AudioReferee.AudioSource.MUSIC) {
-                if (!musicPlayer.isPlaying() && !AudioReferee.getMenuState() && state.toWidgetContext() == WidgetContext.GAME) {// && musicPlayer.hasBeenPlayed()) {
-                    startMusicPlayer()
-                }
-            } else if (musicPlayer.isPlaying()) {
-                volumeFader.fadeTo(0f, 300) {
-                    musicPlayer.pause()
-                }
-            }
-        }
-    }
-
     @OptIn(ExperimentalCoilApi::class)
      fun onScraperContentSave(
         url: String,
@@ -834,9 +1060,9 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 val s = state as AppState.GameBrowsing
                 val fileName = extractGameFilenameWithoutExtension(s.gameFilename)
                 val mediaSlot = MediaSlot.fromInt(slot)
-                val dir = mediaFileLocator.getDir(
+                val dir = mediaManager.getDir(
                     s.systemName,
-                    mediaFileLocator.getFolderName(contentType),
+                    mediaManager.getFolderName(contentType),
                     mediaSlot
                 )
 
@@ -845,7 +1071,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                 }
                 val newFile = File(dir, "${fileName}${mediaSlot.suffix}.$extension")
 
-                val existingFile = mediaFileLocator.findMediaFile(contentType, s.systemName, s.gameFilename, mediaSlot)
+                val existingFile = mediaManager.findMediaFile(contentType, s.systemName, s.gameFilename, mediaSlot)
                 if (existingFile != null && existingFile.exists() && existingFile.absolutePath != newFile.absolutePath) {
                     existingFile.delete()
                 }
@@ -903,45 +1129,37 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             val currentVersion = packageInfo.versionName ?: "0.4.3"
             Log.d("MainActivity", "Current version from package: $currentVersion")
 
-            val lastSeenVersion = prefs.getString("last_seen_app_version", "0.0.0") ?: "0.0.0"
+            val lastSeenVersion = prefsManager.tutorialVersionShown
             Log.d("MainActivity", "Last seen version from prefs: $lastSeenVersion")
 
-            val hasSeenWidgetTutorial = prefs.getBoolean("widget_tutorial_shown", false)
+            val hasSeenWidgetTutorial = prefsManager.widgetTutorialShown
             Log.d("MainActivity", "Has seen widget tutorial: $hasSeenWidgetTutorial")
 
             // Check if default widgets were created (indicates not a fresh install)
-            val hasCreatedDefaultWidgets = prefs.getBoolean("default_widgets_created", false)
-            Log.d(
-                "MainActivity",
-                "Has created default widgets: $hasCreatedDefaultWidgets"
-            )
+            val hasCreatedDefaultWidgets = prefsManager.defaultWidgetsCreated
+            Log.d("MainActivity", "Has created default widgets: $hasCreatedDefaultWidgets")
 
             // NEW LOGIC:
             // Show tutorial if:
             // 1. User hasn't seen it yet AND
             // 2. EITHER they're updating from an older version OR they have default widgets (not fresh install)
-            val isOlderVersion =
-                lastSeenVersion != "0.0.0" && isVersionLessThan(lastSeenVersion, currentVersion)
-            val shouldShowTutorial =
-                !hasSeenWidgetTutorial && (isOlderVersion || hasCreatedDefaultWidgets)
+            val isOlderVersion = lastSeenVersion != "0.0.0" && isVersionLessThan(lastSeenVersion, currentVersion)
+            val shouldShowTutorial = !hasSeenWidgetTutorial && (isOlderVersion || hasCreatedDefaultWidgets)
 
             Log.d("MainActivity", "Should show tutorial: $shouldShowTutorial")
             Log.d("MainActivity", "  - hasSeenWidgetTutorial: $hasSeenWidgetTutorial")
             Log.d("MainActivity", "  - isOlderVersion: $isOlderVersion")
-            Log.d(
-                "MainActivity",
-                "  - hasCreatedDefaultWidgets: $hasCreatedDefaultWidgets"
-            )
+            Log.d("MainActivity", "  - hasCreatedDefaultWidgets: $hasCreatedDefaultWidgets")
 
             if (shouldShowTutorial) {
                 Log.d("MainActivity", "✓ Showing widget tutorial")
                 Handler(Looper.getMainLooper()).postDelayed({
                     showWidgetSystemTutorial(fromUpdate = true)
-                }, 3000)
+                }, AppConstants.Timing.TUTORIAL_DELAY)
             }
 
             // Always update the version tracking
-            prefs.edit().putString("last_seen_app_version", currentVersion).apply()
+            prefsManager.tutorialVersionShown = currentVersion
             Log.d("MainActivity", "Saved current version to prefs: $currentVersion")
 
         } catch (e: Exception) {
@@ -977,36 +1195,21 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private fun checkAndLaunchSetupWizard() {
         // Check if setup has been completed
-        val hasCompletedSetup = prefs.getBoolean("setup_completed", false)
+        val hasCompletedSetup = prefsManager.setupCompleted
 
-        // Check if permissions are granted
-        val hasPermission = when {
-            SDK_INT >= Build.VERSION_CODES.R ->
-                Environment.isExternalStorageManager()
-
-            SDK_INT >= Build.VERSION_CODES.M -> {
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.WRITE_EXTERNAL_STORAGE
-                ) == PackageManager.PERMISSION_GRANTED
-            }
-
-            else -> true
-        }
+        // Check if permissions are granted (Android 13+ simplified)
+        val hasPermission = Environment.isExternalStorageManager()
 
         // Launch setup wizard immediately if:
         // 1. Setup not completed, OR
         // 2. Missing permissions
         if (!hasCompletedSetup || !hasPermission) {
-            Log.d(
-                "MainActivity",
-                "Setup incomplete or missing permissions - launching wizard immediately"
-            )
+            Log.d("MainActivity", "Setup incomplete or missing permissions - launching wizard immediately")
             Handler(Looper.getMainLooper()).postDelayed({
                 val intent = Intent(this, SettingsActivity::class.java)
                 intent.putExtra("AUTO_START_WIZARD", true)
                 settingsLauncher.launch(intent)
-            }, 1000)
+            }, AppConstants.Timing.SETTINGS_DELAY)
             return
         }
 
@@ -1130,11 +1333,11 @@ Access this help anytime from the widget menu!
             .setView(mainContainer)
             .setPositiveButton("Got It!") { _, _ ->
                 // Mark as shown
-                prefs.edit().putBoolean("widget_tutorial_shown", true).apply()
+                prefsManager.widgetTutorialShown = true
 
                 // If user checked "don't show again", mark preference
                 if (checkbox.isChecked) {
-                    prefs.edit().putBoolean("widget_tutorial_dont_show_auto", true).apply()
+                    prefsManager.widgetTutorialDontShowAuto = true
                 }
             }
             .setCancelable(true)
@@ -1153,32 +1356,30 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "Widget tutorial dialog shown (fromUpdate: $fromUpdate)")
     }
 
+
     /**
      * Check for scripts with retry logic to handle SD card mounting delays
      */
     private fun checkScriptsWithRetry(attempt: Int = 0, maxAttempts: Int = 5) {
-        val scriptsPath = prefs.getString("scripts_path", null)
+        val scriptsPath = prefsManager.scriptsPath.ifEmpty { null }
 
         // If no custom scripts path is set, scripts are likely on internal storage
         // Check immediately without retry
         if (scriptsPath == null || scriptsPath.startsWith("/storage/emulated/0")) {
             Log.d("MainActivity", "Scripts on internal storage - checking immediately")
-            val hasCorrectScripts = scriptManager.checkScriptValidity(scriptsPath)
+            val hasCorrectScripts = checkForCorrectScripts()
             if (!hasCorrectScripts) {
-                Log.d(
-                    "MainActivity",
-                    "Scripts missing/outdated on internal storage - showing dialog"
-                )
+                Log.d("MainActivity", "Scripts missing/outdated on internal storage - showing dialog")
 
                 // Check if scripts exist at all (missing vs outdated)
-                val scriptsDir = File(scriptsPath ?: "/storage/emulated/0/ES-DE/scripts")
+                val scriptsDir = File(scriptsPath ?: AppConstants.Paths.DEFAULT_SCRIPTS_PATH)
                 val gameSelectScript = File(scriptsDir, "game-select/esdecompanion-game-select.sh")
 
                 if (gameSelectScript.exists()) {
                     // Scripts exist but are outdated - show update dialog
                     Handler(Looper.getMainLooper()).postDelayed({
                         showScriptsUpdateAvailableDialog()
-                    }, 1000)
+                    }, AppConstants.Timing.SETTINGS_DELAY)
                 } else {
                     // Scripts missing - launch full wizard
                     launchSetupWizardForScripts()
@@ -1194,18 +1395,10 @@ Access this help anytime from the widget menu!
 
         if (!isAccessible && attempt < maxAttempts) {
             // SD card not mounted yet - wait and retry
-            val delayMs = when (attempt) {
-                0 -> 1000L  // 1 second
-                1 -> 2000L  // 2 seconds
-                2 -> 3000L  // 3 seconds
-                3 -> 4000L  // 4 seconds
-                else -> 5000L  // 5 seconds
-            }
+            val delayMs = ((attempt + 1) * AppConstants.Timing.SD_MOUNT_RETRY_BASE_DELAY)
+                .coerceAtMost(AppConstants.Timing.SD_MOUNT_RETRY_MAX_DELAY)
 
-            Log.d(
-                "MainActivity",
-                "Scripts path not accessible (attempt ${attempt + 1}/$maxAttempts) - waiting ${delayMs}ms for SD card mount: $scriptsPath"
-            )
+            Log.d("MainActivity", "Scripts path not accessible (attempt ${attempt + 1}/$maxAttempts) - waiting ${delayMs}ms for SD card mount: $scriptsPath")
 
             Handler(Looper.getMainLooper()).postDelayed({
                 checkScriptsWithRetry(attempt + 1, maxAttempts)
@@ -1214,7 +1407,7 @@ Access this help anytime from the widget menu!
         }
 
         // Either accessible now or max attempts reached - check scripts
-        val hasCorrectScripts = scriptManager.checkScriptValidity(scriptsPath)
+        val hasCorrectScripts = checkForCorrectScripts()
 
         if (!hasCorrectScripts) {
             if (isAccessible) {
@@ -1232,22 +1425,20 @@ Access this help anytime from the widget menu!
                         // Scripts missing - launch full wizard
                         launchSetupWizardForScripts()
                     }
-                }, 1000)
+                }, AppConstants.Timing.SETTINGS_DELAY)
             } else {
                 // Max attempts reached and still not accessible
                 // SD card might not be mounted - show a helpful message
-                Log.w(
-                    "MainActivity",
-                    "Scripts path not accessible after $maxAttempts attempts: $scriptsPath"
-                )
+                Log.w("MainActivity", "Scripts path not accessible after $maxAttempts attempts: $scriptsPath")
                 Handler(Looper.getMainLooper()).postDelayed({
                     showSdCardNotMountedDialog(scriptsPath)
-                }, 1000)
+                }, AppConstants.Timing.SETTINGS_DELAY)
             }
         } else {
             Log.d("MainActivity", "Scripts found and valid - no wizard needed")
         }
     }
+
 
     /**
      * Launch setup wizard specifically for script issues
@@ -1273,6 +1464,11 @@ Access this help anytime from the widget menu!
             .setNegativeButton("Dismiss", null)
             .setIcon(android.R.drawable.ic_dialog_alert)
             .show()
+    }
+
+    private fun checkForCorrectScripts(): Boolean {
+        val scriptsDir = File(prefsManager.scriptsPath)
+        return ScriptManager.areScriptsValid(scriptsDir)
     }
 
     /**
@@ -1305,32 +1501,16 @@ Access this help anytime from the widget menu!
     }
 
     private fun updateScriptsDirectly() {
-        try {
-            scriptManager.updateScriptsIfNeeded(
-                prefs.getString(
-                    "scripts_path",
-                    "/storage/emulated/0/ES-DE/scripts"
-                )
-            )
-            // Show success message
-            Toast.makeText(
-                this,
-                "Scripts updated successfully!",
-                Toast.LENGTH_LONG
-            ).show()
+        val scriptsPath = prefsManager.scriptsPath
 
-            // Start verification
-            Handler(Looper.getMainLooper()).postDelayed({
-                startScriptVerification()
-            }, 1000)
-        } catch (e: Exception) {
-            // Show error message
-            Toast.makeText(
-                this,
-                "Error updating scripts: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
-            Log.e("MainActivity", "Error updating scripts", e)
+        val result = ScriptManager.createAllScripts(File(scriptsPath))
+
+        Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+
+        if (result.success) {
+            Log.d("MainActivity", "Scripts updated successfully")
+        } else {
+            Log.e("MainActivity", result.message)
         }
     }
 
@@ -1350,13 +1530,15 @@ Access this help anytime from the widget menu!
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         }
 
+        updateMusicControls()
+
         // Clear search bar
         if (::appSearchBar.isInitialized) {
             appSearchBar.text.clear()
         }
 
         // Reload grid layout in case column count changed
-        val columnCount = prefs.getInt("column_count", 4)
+        val columnCount = prefsManager.columnCount
         appRecyclerView.layoutManager = GridLayoutManager(this, columnCount)
 
         // Reload images and videos based on current state (don't change modes)
@@ -1385,16 +1567,60 @@ Access this help anytime from the widget menu!
     override fun onStart() {
         super.onStart()
         isActivityVisible = true
+        isNavigatingInternally = false
+        musicManager.onActivityVisible()
     }
 
     override fun onStop() {
         super.onStop()
         isActivityVisible = false
-        releaseMusicPlayer(false)
+
+        if (!isNavigatingInternally) {
+            Log.d("MainActivity", "Going to background - pausing music")
+            musicManager.onActivityInvisible()
+            hideSongTitle()
+        } else {
+            Log.d("MainActivity", "Internal navigation detected - keeping music playing")
+        }
+    }
+
+    /**
+     * Set up click listeners for music control buttons.
+     */
+    private fun setupMusicControlButtons() {
+        musicPlayPauseButton.setOnClickListener {
+            toggleMusicPlayback()
+        }
+
+        musicNextButton.setOnClickListener {
+            playNextTrack()
+        }
+    }
+
+    /**
+     * Toggle music playback between play and pause.
+     */
+    private fun toggleMusicPlayback() {
+        if (musicManager.isPlaying()) {
+            musicManager.pauseMusic()
+            Log.d("MainActivity", "Music paused via button")
+        } else {
+            musicManager.resumeMusic()
+            Log.d("MainActivity", "Music resumed via button")
+        }
+        // UI update handled by MusicManager callback
+    }
+
+    /**
+     * Skip to next track in playlist.
+     */
+    private fun playNextTrack() {
+        musicManager.skipToNextTrack()
+        Log.d("MainActivity", "Skipped to next track via button")
     }
 
     private fun updateDrawerTransparency() {
-        val transparencyPercent = prefs.getInt("drawer_transparency", 70)
+        val transparencyPercent = prefsManager.drawerTransparency
         // Convert percentage (0-100) to hex alpha (00-FF)
         val alpha = (transparencyPercent * 255 / 100).coerceIn(0, 255)
         val hexAlpha = String.format("%02x", alpha)
@@ -1404,8 +1630,8 @@ Access this help anytime from the widget menu!
         appDrawer.setBackgroundColor(color)
     }
 
-    private fun handleVideoMuteToggle() {
-        backgroundBinder.toggleMute()
+    private fun handleVideoMuteToggle(): Boolean {
+        return backgroundBinder.toggleMute()
     }
 
     private fun setupGestureDetector() {
@@ -1440,14 +1666,11 @@ Access this help anytime from the widget menu!
                     return false
                 }
 
-                override fun onDoubleTap(e: MotionEvent): Boolean {
-                    if (!widgetMenuShowing && menuState.widgetToEditState == null && !menuState.showMenu) {
-                        handleVideoMuteToggle()
-                    }
-                    return true
-                }
-
                 override fun onSingleTapUp(event: MotionEvent): Boolean {
+                    if (widgetViewBinder.isWidgetOnLocation(widgetContainer, event.x, event.y)) {
+                        return true
+                    }
+
                     if (!widgetMenuShowing && menuState.widgetToEditState == null && !menuState.showMenu) {
                         val screenWidth = resources.displayMetrics.widthPixels
                         val touchX = event.x
@@ -1473,13 +1696,22 @@ Access this help anytime from the widget menu!
             })
     }
 
-    /**
-     * Cancel any pending long press - called by WidgetView when interaction starts
-     */
+    private fun startLongPressTimer() {
+        longPressRunnable?.let { longPressHandler?.removeCallbacks(it) }
+        if (longPressHandler == null) longPressHandler = Handler(Looper.getMainLooper())
+
+        longPressRunnable = Runnable {
+            if (!longPressTriggered && !widgetMenuShowing) {
+                longPressTriggered = true
+                showContextMenu()
+            }
+        }
+        longPressHandler?.postDelayed(longPressRunnable!!, LONG_PRESS_TIMEOUT)
+    }
+
     fun cancelLongPress() {
         longPressRunnable?.let {
             longPressHandler?.removeCallbacks(it)
-            longPressTriggered = false
         }
     }
 
@@ -1492,7 +1724,7 @@ Access this help anytime from the widget menu!
 
         // Stop video immediately
         backgroundBinder.releasePlayer()
-        releaseMusicPlayer(false)
+        musicManager.onBlackOverlayChanged(true)
 
         // Show overlay instantly without animation
         blackOverlay.visibility = View.VISIBLE
@@ -1506,11 +1738,15 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "Hiding black overlay")
         isBlackOverlayShown = false
 
+        musicManager.onBlackOverlayChanged(false)
+
         // Hide overlay instantly without animation
         blackOverlay.visibility = View.GONE
 
         val displayHeight = resources.displayMetrics.heightPixels.toFloat()
         blackOverlay.translationY = -displayHeight
+
+        onStateChangedMusicHandler(state)
 
         // Reload video if applicable (don't reload images)
         when (val s = state) {
@@ -1526,17 +1762,66 @@ Access this help anytime from the widget menu!
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // Check if black overlay feature is enabled
-        val doubleTapBehaviour = prefs.getString("double_tap_behavior", "off")
-
-        // Check drawer state first
+        val blackOverlayEnabled = prefsManager.blackOverlayEnabled
         val drawerState = bottomSheetBehavior.state
         val isDrawerOpen = drawerState == BottomSheetBehavior.STATE_EXPANDED ||
                 drawerState == BottomSheetBehavior.STATE_SETTLING
 
+        if (!isDrawerOpen) {
+            val musicEnabled = prefsManager.musicEnabled
+            val songTitleEnabled = prefsManager.musicSongTitleEnabled
+
+            Log.d("MainActivity", "Two-finger check: pointerCount=${ev.pointerCount}, action=${ev.action}, musicEnabled=$musicEnabled, songTitleEnabled=$songTitleEnabled, hasActiveMusic=${musicManager.isPlaying() || musicManager.isPaused()}")
+
+            // Only process two-finger gestures when music and song title are enabled
+            if (musicEnabled && songTitleEnabled && ev.pointerCount == 2 && ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+                val currentTime = System.currentTimeMillis()
+                val timeSinceLast = currentTime - lastTwoFingerTapTime
+
+                Log.d("MainActivity", "Two-finger tap detected: timeSinceLast=${timeSinceLast}ms")
+
+                // Reset if too much time passed
+                if (timeSinceLast > TWO_FINGER_TAP_TIMEOUT) {
+                    twoFingerTapCount = 0
+                }
+
+                twoFingerTapCount++
+                lastTwoFingerTapTime = currentTime
+
+                Log.d("MainActivity", "Two-finger tap count: $twoFingerTapCount")
+
+                // Trigger on first two-finger tap
+                if (twoFingerTapCount >= 1) {
+                    Log.d("MainActivity", "Two-finger tap confirmed - toggling song title")
+                    twoFingerTapCount = 0
+
+                    // Check if music is active (playing or paused, not completely stopped)
+                    if (musicManager.isPlaying() || musicManager.isPaused()) {
+                        // Toggle based on current visibility
+                        val isVisible = songTitleOverlay.visibility == View.VISIBLE
+                        Log.d("MainActivity", "Current overlay visibility: ${songTitleOverlay.visibility}, isVisible=$isVisible")
+
+                        if (isVisible) {
+                            // Currently visible - hide it
+                            Log.d("MainActivity", "Hiding visible song title")
+                            hideSongTitleOverlay()
+                        } else {
+                            // Currently hidden - show it with timeout
+                            Log.d("MainActivity", "Showing hidden song title with timeout")
+                            showSongTitleOverlay()
+                        }
+                    } else {
+                        Log.d("MainActivity", "Music not active - ignoring two-finger tap")
+                    }
+
+                    return true
+                }
+            }
+        }
+
         // Handle black overlay double-tap detection ONLY when drawer is closed and feature is enabled
-        if (!isDrawerOpen && doubleTapBehaviour.equals("black_overlay")) {
-            if (handleBlackOverlayTouchEvent(ev)) return true
+        if (!isDrawerOpen && (blackOverlayEnabled || prefsManager.doubleTapVideoEnabled)) {
+            if (handleDoubleTapTouchEvent(ev)) return true
         }
 
         // If overlay is shown, consume all touches
@@ -1547,87 +1832,59 @@ Access this help anytime from the widget menu!
         // Handle long press for widget menu (works anywhere, even on widgets)
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
+                val widgetOnLocation = widgetViewBinder.findWidgetAt(widgetContainer, ev.x, ev.y)
+                isInteractingWithWidget =
+                    widgetOnLocation != null && widgetOnLocation.isWidgetSelected
+
                 touchDownX = ev.x
                 touchDownY = ev.y
                 longPressTriggered = false
 
-                // Cancel any existing callbacks first
-                longPressRunnable?.let {
-                    longPressHandler?.removeCallbacks(it)
-                }
-
-                if (!widgetMenuShowing && drawerState == BottomSheetBehavior.STATE_HIDDEN) {
-                    if (longPressHandler == null) {
-                        longPressHandler = Handler(Looper.getMainLooper())
-                    }
-                    longPressRunnable = Runnable {
-                        if (!longPressTriggered && !widgetMenuShowing) {
-                            longPressTriggered = true
-                            showContextMenu()
-                        }
-                    }
-                    longPressHandler?.postDelayed(longPressRunnable!!, LONG_PRESS_TIMEOUT)
+                if (!isInteractingWithWidget && !widgetMenuShowing && drawerState != BottomSheetBehavior.STATE_EXPANDED) {
+                    startLongPressTimer()
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
-                // Cancel long press if finger moves beyond touch slop threshold
                 val deltaX = abs(ev.x - touchDownX)
                 val deltaY = abs(ev.y - touchDownY)
                 val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
 
                 if (deltaX > touchSlop || deltaY > touchSlop) {
-                    longPressRunnable?.let {
-                        longPressHandler?.removeCallbacks(it)
-                        longPressTriggered = false
-                    }
+                    cancelLongPress()
                 }
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // CHANGED: Always cancel the callback on finger lift
-                longPressRunnable?.let {
-                    longPressHandler?.removeCallbacks(it)
-                }
-
-                if (longPressTriggered) {
-                    // Long press was triggered, consume this event
-                    longPressTriggered = false  // ADDED: Reset immediately
-                    return true
-                }
-            }
         }
 
-        // Handle tapping outside widgets to deselect them
         if (ev.action == MotionEvent.ACTION_UP && !longPressTriggered) {
             if (!widgetViewBinder.isWidgetOnLocation(widgetContainer, ev.x, ev.y)) {
-                // Tapped outside any widget - deselect all
                 widgetViewBinder.deselectAll(widgetContainer)
             }
         }
 
-        // Track widget interaction state for gesture detector
-        when (ev.action) {
-            MotionEvent.ACTION_DOWN -> {
-                val widgetOnLocation = widgetViewBinder.findWidgetAt(widgetContainer, ev.x, ev.y)
-                isInteractingWithWidget =
-                    widgetOnLocation != null && widgetOnLocation.isWidgetSelected
-            }
+        if ((drawerState == BottomSheetBehavior.STATE_HIDDEN || drawerState == BottomSheetBehavior.STATE_COLLAPSED) && !isInteractingWithWidget) {
+            gestureDetector.onTouchEvent(ev)
+        }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isInteractingWithWidget = false
+        if (ev.action == MotionEvent.ACTION_UP || ev.action == MotionEvent.ACTION_CANCEL) {
+            cancelLongPress()
+            isInteractingWithWidget = false
+
+            if (longPressTriggered) {
+                longPressTriggered = false
+                return true
             }
         }
 
-        // Only use gesture detector if NOT actively interacting with a SELECTED widget AND drawer is hidden
-        if (drawerState == BottomSheetBehavior.STATE_HIDDEN && !isInteractingWithWidget) {
+        if ((drawerState == BottomSheetBehavior.STATE_HIDDEN || drawerState == BottomSheetBehavior.STATE_COLLAPSED) && !isInteractingWithWidget) {
             gestureDetector.onTouchEvent(ev)
         }
 
         return super.dispatchTouchEvent(ev)
     }
 
-    private fun handleBlackOverlayTouchEvent(ev: MotionEvent): Boolean {
+    private fun handleDoubleTapTouchEvent(ev: MotionEvent): Boolean {
         if (ev.action == MotionEvent.ACTION_DOWN) {
             val currentTime = System.currentTimeMillis()
             val timeSinceLastTap = currentTime - lastTapTime
@@ -1662,11 +1919,20 @@ Access this help anytime from the widget menu!
                     )
                     tapCount = 0 // Reset counter
 
-                    // Toggle black overlay
+                    //hiding black overlay is main priority
                     if (isBlackOverlayShown) {
                         hideBlackOverlay()
-                    } else {
-                        showBlackOverlay()
+                    }
+                    //only process the double tap if we're not in a menu
+                    else if(!widgetMenuShowing && menuState.widgetToEditState == null && !menuState.showMenu) {
+                        var toggledVideoVolume = false
+                        if(prefsManager.doubleTapVideoEnabled) {
+                            toggledVideoVolume = handleVideoMuteToggle()
+                        }
+                        //only show backscreenoverlay if we didn't toggle any video sound
+                        if(!toggledVideoVolume) {
+                            showBlackOverlay()
+                        }
                     }
                     return true
                 }
@@ -1681,32 +1947,14 @@ Access this help anytime from the widget menu!
         return false
     }
 
-    private fun checkForDoubleTap(): Boolean {
-        val currentTime = System.currentTimeMillis()
-
-        // Reset tap count if too much time has passed
-        if (currentTime - lastTapTime > DOUBLE_TAP_TIMEOUT) {
-            tapCount = 0
-        }
-
-        tapCount++
-        lastTapTime = currentTime
-        // Check for triple-tap
-        if (tapCount >= 2) {
-            tapCount = 0 // Reset counter
-            return true
-        }
-        return false
-    }
-
     private fun setupAppDrawer() {
         bottomSheetBehavior = BottomSheetBehavior.from(appDrawer)
+        bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
         bottomSheetBehavior.peekHeight = 0
         bottomSheetBehavior.isHideable = true
         bottomSheetBehavior.skipCollapsed = true
 
-        bottomSheetBehavior.addBottomSheetCallback(object :
-            BottomSheetBehavior.BottomSheetCallback() {
+        bottomSheetBehavior.addBottomSheetCallback(object : BottomSheetBehavior.BottomSheetCallback() {
             override fun onStateChanged(bottomSheet: View, newState: Int) {
                 if (newState == BottomSheetBehavior.STATE_EXPANDED) {
                     showSettingsPulseHint()
@@ -1718,19 +1966,16 @@ Access this help anytime from the widget menu!
 
         appDrawer.post {
             bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
-            Log.d(
-                "MainActivity",
-                "AppDrawer state set to HIDDEN: ${bottomSheetBehavior.state}"
-            )
+            Log.d("MainActivity", "AppDrawer state set to HIDDEN: ${bottomSheetBehavior.state}")
         }
 
-        val columnCount = prefs.getInt(COLUMN_COUNT_KEY, 4)
+        val columnCount = prefsManager.columnCount
         appRecyclerView.layoutManager = GridLayoutManager(this, columnCount)
 
         val mainIntent = Intent(Intent.ACTION_MAIN, null)
         mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
 
-        val hiddenApps = prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
+        val hiddenApps = prefsManager.hiddenApps
         allApps = packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
             .filter { !hiddenApps.contains(it.activityInfo?.packageName ?: "") }
             .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
@@ -1745,10 +1990,7 @@ Access this help anytime from the widget menu!
             hiddenApps = hiddenApps  // ADD THIS LINE
         )
 
-        Log.d(
-            "MainActivity",
-            "AppDrawer setup complete, initial state: ${bottomSheetBehavior.state}"
-        )
+        Log.d("MainActivity", "AppDrawer setup complete, initial state: ${bottomSheetBehavior.state}")
     }
 
     /**
@@ -1757,14 +1999,14 @@ Access this help anytime from the widget menu!
      */
     private fun showSettingsPulseHint() {
         // Only show if user has completed setup
-        if (!prefs.getBoolean("setup_completed", false)) return
+        if (!prefsManager.setupCompleted) return
 
         // Check how many times hint has been shown (max 3 times total)
-        val hintCount = prefs.getInt("settings_hint_count", 0)
+        val hintCount = prefsManager.settingsHintCount
         if (hintCount >= 3) return
 
         // Increment the hint counter
-        prefs.edit().putInt("settings_hint_count", hintCount + 1).apply()
+        prefsManager.settingsHintCount = hintCount + 1
 
         // Delay slightly so drawer animation completes first
         Handler(Looper.getMainLooper()).postDelayed({
@@ -1826,7 +2068,7 @@ Access this help anytime from the widget menu!
                 // Show/hide clear button based on whether there's text
                 searchClearButton.visibility = if (query.isEmpty()) View.GONE else View.VISIBLE
 
-                val hiddenApps = prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
+                val hiddenApps = prefsManager.hiddenApps
 
                 val filteredApps = if (query.isEmpty()) {
                     // No search query - show only visible apps (current behavior)
@@ -1905,12 +2147,13 @@ Access this help anytime from the widget menu!
     private fun setupAndroidSettingsButton() {
         androidSettingsButton.setOnClickListener {
             val intent = Intent(Settings.ACTION_SETTINGS)
+            isNavigatingInternally = false
             startActivity(intent)
         }
     }
 
     private fun startFileMonitoring() {
-        val watchDir = File(mediaFileLocator.getLogsPath())
+        val watchDir = File(mediaManager.getLogsPath())
         Log.d("MainActivity", "Starting file monitoring on: ${watchDir.absolutePath}")
         Log.d("MainActivity", "Watch directory exists: ${watchDir.exists()}")
 
@@ -1924,14 +2167,13 @@ Access this help anytime from the widget menu!
             private var lastEventTime = 0L
 
             override fun onEvent(event: Int, path: String?) {
-                if (path != null && (path == "esde_game_filename.txt" || path == "esde_system_name.txt" ||
-                            path == "esde_gamestart_filename.txt" || path == "esde_gameend_filename.txt" ||
-                            path == "esde_screensaver_start.txt" || path == "esde_screensaver_end.txt" ||
-                            path == "esde_screensavergameselect_filename.txt")
-                ) {
+                if (path != null && (path == AppConstants.Paths.GAME_FILENAME_LOG || path == AppConstants.Paths.SYSTEM_NAME_LOG ||
+                            path == AppConstants.Paths.GAME_START_FILENAME_LOG || path == AppConstants.Paths.GAME_END_FILENAME_LOG ||
+                            path == AppConstants.Paths.SCREENSAVER_START_LOG || path == AppConstants.Paths.SCREENSAVER_END_LOG ||
+                            path == AppConstants.Paths.SCREENSAVER_GAME_FILENAME_LOG)) {
                     // Debounce: ignore events that happen too quickly
                     val currentTime = System.currentTimeMillis()
-                    if (currentTime - lastEventTime < 100) {
+                    if (currentTime - lastEventTime < 50) {
                         return
                     }
                     lastEventTime = currentTime
@@ -1951,9 +2193,8 @@ Access this help anytime from the widget menu!
                             }
 
                             if (!menuState.showMenu && menuState.widgetToEditState == null) {
-                                //TODO: we should probably have a more elaborate and less crashy way of handling events fired while we're in state sensitive menu
                                 when (path) {
-                                    "esde_system_name.txt" -> {
+                                    AppConstants.Paths.SYSTEM_NAME_LOG -> {
                                         // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
                                         if (isLaunchingFromScreensaver) {
                                             Log.d(
@@ -1975,7 +2216,7 @@ Access this help anytime from the widget menu!
                                         loadSystemImageDebounced()
                                     }
 
-                                    "esde_game_filename.txt" -> {
+                                    AppConstants.Paths.GAME_FILENAME_LOG -> {
                                         // Ignore if launching from screensaver (game-select event between screensaver-end and game-start)
                                         if (isLaunchingFromScreensaver) {
                                             Log.d(
@@ -2030,25 +2271,25 @@ Access this help anytime from the widget menu!
                                         loadGameInfoDebounced()
                                     }
 
-                                    "esde_gamestart_filename.txt" -> {
+                                    AppConstants.Paths.GAME_START_FILENAME_LOG -> {
                                         Log.d("MainActivity", "Game start detected")
                                         handleGameStart()
                                     }
 
-                                    "esde_gameend_filename.txt" -> {
+                                    AppConstants.Paths.GAME_END_FILENAME_LOG -> {
                                         Log.d("MainActivity", "Game end detected")
                                         handleGameEnd()
                                     }
 
-                                    "esde_screensaver_start.txt" -> {
+                                    AppConstants.Paths.SCREENSAVER_START_LOG -> {
                                         Log.d("MainActivity", "Screensaver start detected")
                                         handleScreensaverStart()
                                     }
 
-                                    "esde_screensaver_end.txt" -> {
+                                    AppConstants.Paths.SCREENSAVER_END_LOG -> {
                                         // Read the screensaver end reason
                                         val screensaverEndFile =
-                                            File(watchDir, "esde_screensaver_end.txt")
+                                            File(watchDir, AppConstants.Paths.SCREENSAVER_END_LOG)
                                         val endReason = if (screensaverEndFile.exists()) {
                                             screensaverEndFile.readText().trim()
                                         } else {
@@ -2062,7 +2303,7 @@ Access this help anytime from the widget menu!
                                         handleScreensaverEnd(endReason)
                                     }
 
-                                    "esde_screensavergameselect_filename.txt" -> {
+                                    AppConstants.Paths.SCREENSAVER_GAME_FILENAME_LOG -> {
                                         // DEFENSIVE FIX: Auto-initialize screensaver state if screensaver-start event was missed
                                         if (state !is AppState.Screensaver) {
                                             Log.w(
@@ -2104,26 +2345,8 @@ Access this help anytime from the widget menu!
                                                 }
                                             }
 
-                                            // Update state to Screensaver
-                                            updateState(
-                                                AppState.Screensaver(
-                                                    currentGame = null,
-                                                    previousState = savedState
-                                                )
-                                            )
-
-                                            Log.d(
-                                                "MainActivity",
-                                                "Saved state for screensaver: $savedState"
-                                            )
-
                                             // Apply screensaver behavior preferences
-                                            val screensaverBehavior =
-                                                prefs.getString(
-                                                    "screensaver_behavior",
-                                                    "game_image"
-                                                )
-                                                    ?: "game_image"
+                                            val screensaverBehavior = prefsManager.screensaverBehavior
                                             Log.d(
                                                 "MainActivity",
                                                 "Applying screensaver behavior: $screensaverBehavior"
@@ -2146,18 +2369,25 @@ Access this help anytime from the widget menu!
                                                 "MainActivity",
                                                 "Fallback initialization complete - widgets cleared"
                                             )
+
+                                            // Update state to Screensaver
+                                            updateState(
+                                                AppState.Screensaver(
+                                                    currentGame = null,
+                                                    previousState = savedState
+                                                )
+                                            )
+
+                                            Log.d(
+                                                "MainActivity",
+                                                "Saved state for screensaver: $savedState"
+                                            )
                                         }
 
                                         // Read screensaver game info and update state
-                                        val filenameFile =
-                                            File(
-                                                watchDir,
-                                                "esde_screensavergameselect_filename.txt"
-                                            )
-                                        val nameFile =
-                                            File(watchDir, "esde_screensavergameselect_name.txt")
-                                        val systemFile =
-                                            File(watchDir, "esde_screensavergameselect_system.txt")
+                                        val filenameFile = File(watchDir, AppConstants.Paths.SCREENSAVER_GAME_FILENAME_LOG)
+                                        val nameFile = File(watchDir, AppConstants.Paths.SCREENSAVER_GAME_NAME_LOG)
+                                        val systemFile = File(watchDir, AppConstants.Paths.SCREENSAVER_GAME_SYSTEM_LOG)
 
                                         var gameFilename: String? = null
                                         var gameName: String? = null
@@ -2173,8 +2403,12 @@ Access this help anytime from the widget menu!
                                             systemName = systemFile.readText().trim()
                                         }
 
-                                        // Update screensaver state with current game
-                                        if (state is AppState.Screensaver && gameFilename != null && systemName != null) {
+                                        if (gameFilename.isNullOrBlank() || systemName.isNullOrBlank()) {
+                                            android.util.Log.w("MainActivity", "⚠️ Incomplete screensaver game data - skipping update")
+                                            return@postDelayed
+                                        }
+
+                                        if (state is AppState.Screensaver) {
                                             val screensaverState = state as AppState.Screensaver
                                             updateState(
                                                 screensaverState.copy(
@@ -2186,16 +2420,11 @@ Access this help anytime from the widget menu!
                                                 )
                                             )
                                         }
-
-                                        Log.d(
-                                            "MainActivity",
-                                            "Screensaver game: $gameName ($gameFilename) - $systemName"
-                                        )
                                         handleScreensaverGameSelect()
                                     }
                                 }
                             }
-                        }, 50) // 50ms delay to ensure file is written
+                        }, 50) //delay to ensure file is written
                     }
                 }
             }
@@ -2300,18 +2529,15 @@ Access this help anytime from the widget menu!
             ).show()
 
             // Check if this is first time seeing widget tutorial after setup
-            val hasSeenWidgetTutorial = prefs.getBoolean("widget_tutorial_shown", false)
-            val hasCompletedSetup = prefs.getBoolean("setup_completed", false)
+            val hasSeenWidgetTutorial = prefsManager.widgetTutorialShown
+            val hasCompletedSetup = prefsManager.setupCompleted
 
             if (!hasSeenWidgetTutorial && hasCompletedSetup) {
                 // Show widget tutorial after successful verification following setup
-                Log.d(
-                    "MainActivity",
-                    "Showing widget tutorial after setup verification"
-                )
+                Log.d("MainActivity", "Showing widget tutorial after setup verification")
                 Handler(Looper.getMainLooper()).postDelayed({
                     showWidgetSystemTutorial(fromUpdate = false)
-                }, 1000)  // 1 second after verification success
+                }, AppConstants.Timing.SETTINGS_DELAY)  // 1 second after verification success
             }
         }
     }
@@ -2388,6 +2614,8 @@ Access this help anytime from the widget menu!
     }
 
     override fun onDestroy() {
+        musicManager.cleanup()
+
         super.onDestroy()
         // Stop script verification
         scriptVerificationRunnable?.let { scriptVerificationHandler?.removeCallbacks(it) }
@@ -2410,15 +2638,46 @@ Access this help anytime from the widget menu!
             Log.d("MainActivity", "Window focus gained")
             backgroundBinder.onWindowFocusChanged(hasFocus)
             listeningToAudioRef = true
-            startMusicPlayer()
             refreshWidgets()
+            enableImmersiveMode()
         } else {
             Log.d("MainActivity", "Window focus lost (ignoring for video blocking)")
             // Stop videos when we lose focus (game launched on same screen)
             backgroundBinder.onPause(this)
-            musicPlayer.pause()
             listeningToAudioRef = false
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun enableImmersiveMode() {
+        if (SDK_INT >= Build.VERSION_CODES.R) {
+            // Modern approach for Android 11+ (API 30+)
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controller ->
+                // Hide both status bar and navigation bar
+                controller.hide(
+                    WindowInsets.Type.statusBars() or
+                            WindowInsets.Type.navigationBars()
+                )
+                // Set behavior to show bars temporarily on swipe, then auto-hide
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            // Fallback for Android 10 (API 29)
+            window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            or View.SYSTEM_UI_FLAG_FULLSCREEN
+                            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    )
+        }
+    }
+
+    private fun hideSongTitle() {
+        hideSongTitleOverlay()
     }
 
     /**
@@ -2482,6 +2741,7 @@ Access this help anytime from the widget menu!
     }
 
     private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false) {
+        Log.d("TEMP_DEBUG", "Widget Refreshing for: ${state.getCurrentGameFilename()}")
         val currentWidgetContext = state.toWidgetContext()
         if(previousWidgetContext != null && previousWidgetContext != currentWidgetContext) {
             AudioReferee.updateBackgroundState(false)
@@ -2493,32 +2753,30 @@ Access this help anytime from the widget menu!
 
         var processPage: WidgetPage?
         var wrapperPage: WidgetPage? = null
-        val gameLaunchBehaviour = prefs.getString("game_launch_behavior", "game_image") ?: "game_image"
-        val screensaverBehavior =
-            prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
-        if(state is AppState.GamePlaying) { wrapperPage = createWidgetPageForBehaviour(gameLaunchBehaviour)}
-        if(state is AppState.Screensaver) { wrapperPage = createWidgetPageForBehaviour(screensaverBehavior)}
+        val gameLaunchBehaviour = prefsManager.gameLaunchBehavior
+        val screensaverBehavior = prefsManager.screensaverBehavior
+        //if(state is AppState.GamePlaying) { wrapperPage = createWidgetPageForBehaviour(gameLaunchBehaviour)}
+        //if(state is AppState.Screensaver) { wrapperPage = createWidgetPageForBehaviour(screensaverBehavior)}
         var currentPage: WidgetPage = currentWidgetManager().getCurrentPage()
-        setSolidColorForPage(currentPage)
+        //setSolidColorForPage(currentPage)
 
         lifecycleScope.launch {
-        if(!pagePreValidated && !isPageValid(currentPage)) {
-            currentWidgetManager().currentPageIndex = 0
-            currentPage = currentWidgetManager().getCurrentPage()
-        }
+            if(!pagePreValidated && !isPageValid(currentPage)) {
+                currentWidgetManager().currentPageIndex = 0
+                currentPage = currentWidgetManager().getCurrentPage()
+            }
 
-        //TODO: what happens when we change settings/widgets on a wrapper page?
-        if(wrapperPage != null) {
-            wrapperPage.widgets = currentPage.widgets
-            processPage = wrapperPage
-        } else {
-            processPage = currentPage
-        }
+            //TODO: what happens when we change settings/widgets on a wrapper page?
+            if(wrapperPage != null) {
+                wrapperPage.widgets = currentPage.widgets
+                processPage = wrapperPage
+            } else {
+                processPage = currentPage
+            }
 
-        val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
-        backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked)
+            val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
+            backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked)
 
-        //TODO: do we need a method callback that releases everything?
             if (processPage.displayWidgets) {
                 val resolved = widgetPathResolver.resolve(
                     processPage.widgets,
@@ -2527,30 +2785,31 @@ Access this help anytime from the widget menu!
                     resources.displayMetrics
                 )
 
+                var gameName = ""
+                val system = state.getCurrentSystemName() ?: ""
+                if(state is AppState.GameBrowsing) {
+                    gameName = (state as AppState.GameBrowsing).gameName ?: ""
+                }
+
                 widgetViewBinder.sync(
                     container = widgetContainer,
                     lifecycleOwner = this@MainActivity,
                     dataList = resolved,
-                    page = currentPage,
+                    page = processPage,
                     locked = widgetsLocked,
                     snapToGrid = snapToGrid,
                     gridSize = gridSize,
                     pageSwap = pageSwap,
                     onUpdate = ::onWidgetUpdated,
                     onEditRequested = ::openWidgetSettings,
-                    animationSettings = animationSettings
+                    animationSettings = animationSettings,
+                    imageManager = imageManager,
+                    game = gameName,
+                    system = system
                 )
             } else {
                 hideWidgets()
             }
-        }
-    }
-
-    private fun startMusicPlayer() {
-        if (AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC && !musicPlayer.isPlaying() && !AudioReferee.getMenuState() && state.toWidgetContext() == WidgetContext.GAME) {
-            musicPlayer.setMasterVolume(0f)
-            musicPlayer.play()
-            volumeFader.fadeTo(0.7f, 1000)
         }
     }
 
@@ -2570,23 +2829,19 @@ Access this help anytime from the widget menu!
                 wrapperPage.displayWidgets = false
             }
             "default_image" -> {
-                wrapperPage.backgroundType = PageContentType.SYSTEM_IMAGE
+                wrapperPage.backgroundType = PageContentType.CUSTOM_IMAGE
+                wrapperPage.customPath = ""
                 wrapperPage.displayWidgets = true
             }
             "game_image" -> {
                 wrapperPage.backgroundType = PageContentType.FANART
                 wrapperPage.displayWidgets = true
             }
-            else -> {
-                wrapperPage.backgroundType = PageContentType.CUSTOM_IMAGE
-                wrapperPage.customPath = ""
-                wrapperPage.displayWidgets = true
-            }
         }
         return wrapperPage
     }
 
-    private fun onWidgetUpdated(widget: OverlayWidget) {
+    private fun onWidgetUpdated(widget: Widget) {
         currentWidgetManager().updateWidget(widget, resources.displayMetrics)
         val page = currentWidgetManager().getCurrentPage()
         lifecycleScope.launch {
@@ -2596,7 +2851,14 @@ Access this help anytime from the widget menu!
                 state.getCurrentGameFilename(),
                 resources.displayMetrics
             )
-            widgetViewBinder.syncSingleWidget(resolved.widget, widgetContainer, page)
+
+            var gameName = ""
+            val system = state.getCurrentSystemName() ?: ""
+            if(state is AppState.GameBrowsing) {
+                gameName = (state as AppState.GameBrowsing).gameName ?: ""
+            }
+
+            widgetViewBinder.syncSingleWidget(resolved.widget, widgetContainer, page, gameName, system)
         }
     }
 
@@ -2607,22 +2869,37 @@ Access this help anytime from the widget menu!
         return systemWidgetManager
     }
 
-    private fun onWidgetDeleted(widget: OverlayWidget) {
+    private fun onWidgetDeleted(widget: Widget) {
         currentWidgetManager().deleteWidget(widget.id)
         Toast.makeText(this, "Widget has been deleted", Toast.LENGTH_SHORT).show()
         refreshWidgets()
     }
 
-    private fun onWidgetReordered(widget: OverlayWidget, forward: Boolean) {
+    private fun onWidgetReordered(widget: Widget, forward: Boolean) {
         currentWidgetManager().moveWidgetZOrder(widget.id, forward)
         refreshWidgets()
     }
 
-    fun addNewWidget(type: ContentType) {
-        currentWidgetManager().addNewWidgetToCurrentPage(
+    fun addNewWidget(type: ContentType, configData: String? = null) {
+        val newWidget = currentWidgetManager().addNewWidgetToCurrentPage(
             type,
             resources.displayMetrics
         )
+
+        if (configData != null) {
+            when (type) {
+                ContentType.CUSTOM_IMAGE -> {
+                    newWidget.contentPath = configData
+                }
+                ContentType.COLOR_BACKGROUND -> {
+                    newWidget.solidColor = Color.parseColor(configData)
+                }
+                else -> {}
+            }
+
+            currentWidgetManager().updateWidget(newWidget, resources.displayMetrics)
+        }
+
         refreshWidgets()
         val newView = widgetContainer.getChildAt(widgetContainer.childCount - 1) as? WidgetView
         newView?.let {
@@ -2691,7 +2968,7 @@ Access this help anytime from the widget menu!
         try {
             releaseMusicPlayer(true)
 
-            val logsDir = File(mediaFileLocator.getLogsPath())
+            val logsDir = File(mediaManager.getLogsPath())
             val systemFile = File(logsDir, "esde_system_name.txt")
             if (!systemFile.exists()) return
 
@@ -2706,9 +2983,9 @@ Access this help anytime from the widget menu!
 
     }
 
-    private fun loadGameInfo() {
+    private fun loadGameInfo(switchingFromPlaying: Boolean = false) {
         // Don't reload images if game is currently playing - respect game launch behavior
-        if (state is AppState.GamePlaying) {
+        if (state is AppState.GamePlaying && !switchingFromPlaying) {
             Log.d(
                 "MainActivity",
                 "loadGameInfo blocked - game is playing, maintaining game launch display"
@@ -2716,53 +2993,62 @@ Access this help anytime from the widget menu!
             return
         }
 
-        try {
-
+        gameInfoJob?.cancel()
+        gameInfoJob = lifecycleScope.launch {
             Log.d("MainActivity", "Releasing music player ")
             releaseMusicPlayer(true)
 
-            val logsDir = File(mediaFileLocator.getLogsPath())
+            val logsDir = File(mediaManager.getLogsPath())
             val gameFile = File(logsDir, "esde_game_filename.txt")
-            if (!gameFile.exists()) return
+            if (!gameFile.exists()) return@launch
 
             val gameNameRaw = gameFile.readText().trim()  // Full path from script
             val gameName = extractGameFilenameWithoutExtension(sanitizeGameFilename(gameNameRaw))
 
-            // Read the display name from ES-DE if available
             val gameDisplayNameFile = File(logsDir, "esde_game_name.txt")
-            val gameDisplayName = if (gameDisplayNameFile.exists()) {
-                gameDisplayNameFile.readText().trim()
-            } else {
-                gameName  // Fallback to filename-based name
-            }
+            val gameDisplayName = readNonBlankTextAsync(gameDisplayNameFile) ?: gameName
 
             val systemFile = File(logsDir, "esde_game_system.txt")
-            if (!systemFile.exists()) return
-            val systemName = systemFile.readText().trim()
+            val systemName = readNonBlankTextAsync(systemFile)
 
-            // Update state tracking
-            updateState(
-                AppState.GameBrowsing(
-                    systemName = systemName,
-                    gameFilename = gameNameRaw,
-                    gameName = gameDisplayName
-                )
-            )
-
-            musicResults = emptyList()
-            musicLoadRunnable = Runnable {
-                loadGameMusic()
+            if (systemName == null) {
+                Log.w("MainActivity", "System name not available after retries - skipping game load")
+                return@launch
             }
-            musicLoadHandler.removeCallbacks(musicLoadRunnable!!)
-            musicLoadHandler.postDelayed(musicLoadRunnable!!, 750)
-            refreshWidgets()
-        } catch (e: Exception) {
-            // Don't clear images on exception - keep last valid images
-            Log.e("MainActivity", "Error loading game info", e)
+
+            if(systemName != state.getCurrentSystemName() || gameNameRaw != state.getCurrentGameFilename() || switchingFromPlaying) {
+                withContext(Dispatchers.Main) {
+                    updateState(
+                        AppState.GameBrowsing(
+                            systemName = systemName,
+                            gameFilename = gameNameRaw,
+                            gameName = gameDisplayName
+                        )
+                    )
+
+                    if(prefsManager.musicSongTitleSystemOnlyEnabled) {
+                        hideSongTitleOverlay()
+                    }
+
+                    updateCurrentGameVolume()
+                    refreshWidgets()
+                }
+            }
         }
     }
 
-    private fun loadGameMusic() {
+    private suspend fun readNonBlankTextAsync(file: File, retries: Int = 5, delayMs: Long = 50): String? {
+        repeat(retries) {
+            if (file.exists()) {
+                val text = file.readText().trim()
+                if (text.isNotBlank()) return text
+            }
+            delay(delayMs)
+        }
+        return null
+    }
+
+   /** private fun loadGameMusic() {
         try {
             val s = state as AppState.GameBrowsing
             val gameFileNameName = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
@@ -2775,14 +3061,14 @@ Access this help anytime from the widget menu!
                     val found = musicPlayer.onGameFocused(s.gameName, gameFileNameName, s.systemName)
                     if(found) {
                         listeningToAudioRef = true
-                        startMusicPlayer()
+                        musicManager.sta
                     }
                 }
             }
         } catch (e: Exception) {
             Log.e("MainActivity", "Error loading game music", e)
         }
-    }
+    }*/
 
     /**
      * Get the display ID that this activity is currently running on
@@ -3070,7 +3356,7 @@ Access this help anytime from the widget menu!
     }
 
     private fun getSystemLogosPath(): String {
-        val customPath = prefs.getString("system_logos_path", null) ?: "/storage/emulated/0/ES-DE Companion/system_images"
+        val customPath = if (prefsManager.systemLogosPath.isEmpty()) null else prefsManager.systemLogosPath
         val path = customPath ?: "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_logos"
         Log.d("ESDESecondScreen", "System logos path: $path")
         return path
@@ -3149,8 +3435,7 @@ Access this help anytime from the widget menu!
         dialogAppName.text = appName
 
         // Check if app is currently hidden and update button
-        val hiddenApps =
-            prefs.getStringSet("hidden_apps", setOf())?.toMutableSet() ?: mutableSetOf()
+        val hiddenApps = prefsManager.hiddenApps.toMutableSet()
         val isHidden = hiddenApps.contains(packageName)
 
         if (isHidden) {
@@ -3167,7 +3452,7 @@ Access this help anytime from the widget menu!
 
         // Set initial chip state
         val currentPosition = appLaunchPrefs.getLaunchPosition(packageName)
-        if (currentPosition == AppLaunchPreferences.POSITION_TOP) {
+        if (currentPosition == AppLaunchManager.POSITION_TOP) {
             chipLaunchTop.isChecked = true
         } else {
             chipLaunchBottom.isChecked = true
@@ -3185,19 +3470,18 @@ Access this help anytime from the widget menu!
 
         // Hide/Unhide App button
         btnHideApp.setOnClickListener {
-            val currentHiddenApps =
-                prefs.getStringSet("hidden_apps", setOf())?.toMutableSet() ?: mutableSetOf()
+            val currentHiddenApps = prefsManager.hiddenApps.toMutableSet()
             val currentlyHidden = currentHiddenApps.contains(packageName)
 
             if (currentlyHidden) {
                 // Unhide - no confirmation
                 currentHiddenApps.remove(packageName)
-                prefs.edit().putStringSet("hidden_apps", currentHiddenApps).apply()
+                prefsManager.hiddenApps = currentHiddenApps
                 dialog.dismiss()
 
                 val mainIntent = Intent(Intent.ACTION_MAIN, null)
                 mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
-                val updatedHiddenApps = prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
+                val updatedHiddenApps = prefsManager.hiddenApps
                 allApps = packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
                     .filter { !updatedHiddenApps.contains(it.activityInfo?.packageName ?: "") }
                     .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
@@ -3211,30 +3495,18 @@ Access this help anytime from the widget menu!
                     .setMessage("Hide \"$appName\" from the app drawer?\n\nYou can unhide it later from Settings → App Drawer → Manage Apps, or by searching for it.")
                     .setPositiveButton("Hide") { _, _ ->
                         currentHiddenApps.add(packageName)
-                        prefs.edit().putStringSet("hidden_apps", currentHiddenApps).apply()
+                        prefsManager.hiddenApps = currentHiddenApps
                         dialog.dismiss()
 
                         val mainIntent = Intent(Intent.ACTION_MAIN, null)
                         mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
-                        val updatedHiddenApps =
-                            prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
-                        allApps = packageManager.queryIntentActivities(
-                            mainIntent,
-                            PackageManager.MATCH_ALL
-                        )
-                            .filter {
-                                !updatedHiddenApps.contains(
-                                    it.activityInfo?.packageName ?: ""
-                                )
-                            }
+                        val updatedHiddenApps = prefsManager.hiddenApps
+                        allApps = packageManager.queryIntentActivities(mainIntent, PackageManager.MATCH_ALL)
+                            .filter { !updatedHiddenApps.contains(it.activityInfo?.packageName ?: "") }
                             .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
 
                         (appRecyclerView.adapter as? AppAdapter)?.updateApps(allApps)
-                        Toast.makeText(
-                            this,
-                            "\"$appName\" hidden from app drawer",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, "\"$appName\" hidden from app drawer", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Cancel", null)
                     .setIcon(android.R.drawable.ic_menu_delete)
@@ -3249,7 +3521,7 @@ Access this help anytime from the widget menu!
             when {
                 checkedIds.contains(R.id.chipLaunchTop) -> {
                     // Save preference
-                    appLaunchPrefs.setLaunchPosition(packageName, AppLaunchPreferences.POSITION_TOP)
+                    appLaunchPrefs.setLaunchPosition(packageName, AppLaunchManager.POSITION_TOP)
                     Log.d("MainActivity", "Set $appName to launch on THIS screen")
 
                     // Launch the app
@@ -3262,13 +3534,9 @@ Access this help anytime from the widget menu!
                     // Refresh indicators
                     (appRecyclerView.adapter as? AppAdapter)?.refreshIndicators()
                 }
-
                 checkedIds.contains(R.id.chipLaunchBottom) -> {
                     // Save preference
-                    appLaunchPrefs.setLaunchPosition(
-                        packageName,
-                        AppLaunchPreferences.POSITION_BOTTOM
-                    )
+                    appLaunchPrefs.setLaunchPosition(packageName, AppLaunchManager.POSITION_BOTTOM)
                     Log.d("MainActivity", "Set $appName to launch on OTHER screen")
 
                     // Launch the app
@@ -3287,11 +3555,13 @@ Access this help anytime from the widget menu!
         dialog.show()
     }
 
+
     /**
      * Open system app info screen
      */
     private fun openAppInfo(packageName: String) {
         try {
+            isNavigatingInternally = false
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
             intent.data = Uri.parse("package:$packageName")
             startActivity(intent)
@@ -3310,8 +3580,7 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "Current state: $state")
 
         // Get the game launch behavior
-        val gameLaunchBehavior =
-            prefs.getString("game_launch_behavior", "game_image") ?: "game_image"
+        val gameLaunchBehavior = prefsManager.gameLaunchBehavior
         Log.d("MainActivity", "Game launch behavior: $gameLaunchBehavior")
 
         // Extract game info from current state
@@ -3365,7 +3634,7 @@ Access this help anytime from the widget menu!
      * @return Pair of (systemName, gameFilename) or null if unavailable
      */
     private fun tryReadGameInfoFromLogs(): Pair<String, String>? {
-        val logsDir = File(mediaFileLocator.getLogsPath())
+        val logsDir = File(mediaManager.getLogsPath())
         val gameFile = File(logsDir, "esde_game_filename.txt")
         val systemFile = File(logsDir, "esde_game_system.txt")
 
@@ -3396,15 +3665,7 @@ Access this help anytime from the widget menu!
         // Update state - transition from GamePlaying to GameBrowsing
         // Return to browsing the game that was just playing
         if (state is AppState.GamePlaying) {
-            val playingState = state as AppState.GamePlaying
-            updateState(
-                AppState.GameBrowsing(
-                    systemName = playingState.systemName,
-                    gameFilename = playingState.gameFilename,
-                    gameName = null  // Will be loaded by loadGameInfo if needed
-                )
-            )
-            loadGameInfo()
+            loadGameInfo(true)
         } else {
             Log.w("MainActivity", "Game end but not in GamePlaying state: $state")
         }
@@ -3457,7 +3718,7 @@ Access this help anytime from the widget menu!
     }
 
     private fun updateGridOverlay() {
-        if (showGrid && widgetContainer.visibility == View.VISIBLE) {
+        if (showGrid && widgetContainer.isVisible) {
             // Always recreate grid overlay to ensure it's properly attached
             if (gridOverlayView != null && gridOverlayView?.parent != null) {
                 // Remove existing grid if it exists
@@ -3681,8 +3942,7 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "SCREENSAVER GAME SELECT EVENT")
         Log.d("MainActivity", "Current state: $state")
 
-        val screensaverBehavior =
-            prefs.getString("screensaver_behavior", "game_image") ?: "game_image"
+        val screensaverBehavior = prefsManager.screensaverBehavior
         Log.d("MainActivity", "Screensaver behavior: $screensaverBehavior")
 
         // Get current screensaver game from state
@@ -3713,19 +3973,7 @@ Access this help anytime from the widget menu!
         }
 
         if (screensaverGame != null) {
-            val gameName = extractGameFilenameWithoutExtension(screensaverGame.gameFilename)
-
-            when (screensaverBehavior) {
-                "game_image" -> {
-                    refreshWidgets()
-                }
-
-                "default_image" -> {
-                    Log.d("MainActivity", "Processing default_image behavior")
-                    //TODO: find a better solution for all of this repeated behaviour
-                    refreshWidgets()
-                }
-            }
+            refreshWidgets()
         } else {
             Log.w("MainActivity", "No screensaver game info available")
         }
@@ -3734,51 +3982,31 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
-    private fun updateWidgetsForScreensaverGame() {
-        Log.d("MainActivity", "═══ updateWidgetsForScreensaverGame START ═══")
-
-        val systemName = if (state is AppState.Screensaver) {
-            (state as AppState.Screensaver).currentGame?.systemName
-        } else {
-            null
-        }
-        val gameFilename = if (state is AppState.Screensaver) {
-            (state as AppState.Screensaver).currentGame?.gameFilename
-        } else {
-            null
-        }
-
-        if (systemName != null && gameFilename != null) {
-            // Load saved widgets and update with screensaver game images
-            refreshWidgets()
-        }
-        // Make sure container is visible
-        widgetContainer.visibility = View.VISIBLE
-        Log.d("MainActivity", "═══ updateWidgetsForScreensaverGame END ═══")
-    }
-
     private fun hideWidgets() {
         widgetViewBinder.setAllVisibility(widgetContainer, false)
     }
 
     private fun releaseMusicPlayer(transition: Boolean = true) {
-        musicSearchJob?.cancel()
-        musicLoadRunnable?.let { musicLoadHandler.removeCallbacks(it) }
-        if(transition && musicPlayer.isPlaying()) {
-            volumeFader.fadeTo(0f, 300, {musicPlayer.stopPlaying()})
-        } else {
-            musicPlayer.stopPlaying()
-        }
+        //musicManager.pauseMusic()
         listeningToAudioRef = false
     }
 
     private fun showContextMenu() {
         if(this::artRepository.isInitialized) {
-            runOnUiThread {
-                widgetMenuShowing = true
-                menuState.showMenu = true
-                AudioReferee.updateMenuState(true)
-                musicPlayer.pause()
+            if(state !is AppState.GamePlaying && state !is AppState.Screensaver)
+            {
+                runOnUiThread {
+                    widgetMenuShowing = true
+                    menuState.showMenu = true
+                    AudioReferee.updateMenuState(true)
+                    AudioReferee.forceUpdate()
+                }
+            } else {
+                Toast.makeText(
+                    this,
+                    "Can't open the menu while playing a game or during screensavers",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         } else {
             Toast.makeText(
@@ -3798,7 +4026,7 @@ Access this help anytime from the widget menu!
         refreshWidgets()
     }
 
-    private fun openWidgetSettings(widget: OverlayWidget) {
+    private fun openWidgetSettings(widget: Widget) {
         runOnUiThread {
            // val menuView = findViewById<ComposeView>(R.id.menu_compose_view)
            // menuView.visibility = View.VISIBLE
@@ -3833,7 +4061,7 @@ Access this help anytime from the widget menu!
             musicResults = emptyList()
 
             val results = withContext(Dispatchers.IO) {
-                musicRepository.getAllPotentialResults(query, gameName, systemName)
+                gameMusicRepository.getAllPotentialResults(query, gameName, systemName)
             }
 
             musicResults = results
@@ -3848,17 +4076,10 @@ Access this help anytime from the widget menu!
 
         lifecycleScope.launch {
             Log.d("CoroutineDebug", "Downloading selected: ${selected.name}")
-            musicRepository.manualSelection(gameFilenameSanitized, systemName, selected.url, onProgress)
-            val found = musicPlayer.onGameFocused(s.gameName ?: "", gameFilenameSanitized, systemName)
+            gameMusicRepository.manualSelection(gameFilenameSanitized, systemName, selected.url, onProgress)
+            val found = musicManager.onManualSelect(s.gameName ?: "", gameFilenameSanitized, systemName, state)
             if(found) {
                 Toast.makeText(this@MainActivity, "Saved music!", Toast.LENGTH_SHORT).show()
-                if(AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC) {
-                    if(AudioReferee.getMenuState()) {
-                        //musicPlayer.setVolume(0f)
-                    } else {
-                        startMusicPlayer()
-                    }
-                }
             }
         }
     }
@@ -3870,18 +4091,34 @@ Access this help anytime from the widget menu!
 
         lifecycleScope.launch {
             Log.d("CoroutineDebug", "Downloading selected: ${selected.title}")
-            musicRepository.manualKhSelection(gameFilenameSanitized, systemName, url, onProgress)
-            val found = musicPlayer.onGameFocused(s.gameName ?: "", gameFilenameSanitized, systemName)
+            gameMusicRepository.manualKhSelection(gameFilenameSanitized, systemName, url, onProgress)
+            val found = musicManager.onManualSelect(s.gameName ?: "", gameFilenameSanitized, systemName, state)
             if(found) {
                 Toast.makeText(this@MainActivity, "Saved music!", Toast.LENGTH_SHORT).show()
-                if(AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC) {
-                    if(AudioReferee.getMenuState()) {
-                        //musicPlayer.setVolume(0f)
-                    } else {
-                        startMusicPlayer()
-                    }
-                }
             }
+        }
+    }
+
+    private fun updateCurrentGameVolume() {
+        val s = state as? AppState.GameBrowsing ?: return
+        val systemName = s.systemName
+        val gameFilenameSanitized = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
+
+        lifecycleScope.launch {
+            val volume = loudnessService.getVolumeForGame(gameFilenameSanitized, systemName)
+            currentGameVolume = volume
+        }
+    }
+
+    private fun onGameVolumeSaved(value: Double) {
+        val s = state as? AppState.GameBrowsing ?: return
+        val systemName = s.systemName
+        val gameFilenameSanitized = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
+
+        lifecycleScope.launch {
+            loudnessService.saveVolumePreference(gameFilenameSanitized, systemName, value)
+            musicManager.setNormalizedVolume(value.toFloat())
+            currentGameVolume = value
         }
     }
 
@@ -3892,7 +4129,7 @@ Access this help anytime from the widget menu!
         widgetViewBinder.setAllSnapToGrid(widgetContainer, snapToGrid, gridSize)
 
         // Save snap state to preferences
-        prefs.edit().putBoolean("snap_to_grid", snapToGrid).apply()
+        prefsManager.snapToGrid = snapToGrid
     }
 
     private fun toggleShowGrid() {
@@ -3900,7 +4137,7 @@ Access this help anytime from the widget menu!
         updateGridOverlay()
 
         // Save show grid state to preferences
-        prefs.edit().putBoolean("show_grid", showGrid).apply()
+        prefsManager.showGrid = showGrid
 
         Log.d("MainActivity", "Show grid toggled: $showGrid")
     }
@@ -3924,11 +4161,11 @@ Access this help anytime from the widget menu!
             // Locked (edit mode OFF) - videos can resume if other conditions allow
             Log.d("MainActivity", "Widget edit mode OFF - allowing videos")
             // Reload current state to potentially start videos
-            if (state is AppState.SystemBrowsing) {
+            /**if (state is AppState.SystemBrowsing) {
                 loadSystemImage()
             } else if (state !is AppState.GamePlaying) {
                 loadGameInfo()
-            }
+            }*/
         } else {
             // Unlocked (edit mode ON) - stop videos and reload widgets
             Log.d(
@@ -3938,7 +4175,7 @@ Access this help anytime from the widget menu!
             backgroundBinder.releasePlayer()
 
             // Reload widgets with current images so they're visible during editing
-            refreshWidgets()
+            //refreshWidgets()
         }
     }
 

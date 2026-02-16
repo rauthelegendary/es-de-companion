@@ -14,6 +14,7 @@ import com.esde.companion.art.LaunchBox.LaunchBoxGame
 import com.esde.companion.art.LaunchBox.LaunchBoxImage
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideDao
+import com.esde.companion.data.Widget
 import com.esde.companion.metadata.ESGameEntity
 import com.esde.companion.metadata.GameDao
 import com.esde.companion.metadata.SyncDao
@@ -114,8 +115,8 @@ class AppConverters {
     fun toContentType(value: String) = enumValueOf<ContentType>(value)
 
     @TypeConverter
-    fun fromMediaSlot(slot: OverlayWidget.MediaSlot) = slot.index
+    fun fromMediaSlot(slot: Widget.MediaSlot) = slot.index
 
     @TypeConverter
-    fun toMediaSlot(value: Int) = OverlayWidget.MediaSlot.fromInt(value)
+    fun toMediaSlot(value: Int) = Widget.MediaSlot.fromInt(value)
 }

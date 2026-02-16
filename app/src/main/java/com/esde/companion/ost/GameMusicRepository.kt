@@ -1,6 +1,7 @@
 package com.esde.companion.ost
 
 import android.os.Environment
+import com.esde.companion.MediaFileHelper
 import com.esde.companion.ost.khinsider.KhAlbum
 import com.esde.companion.ost.khinsider.KhRepository
 import com.esde.companion.ost.khinsider.KhSong
@@ -8,7 +9,7 @@ import com.esde.companion.ost.loudness.LoudnessService
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
 
-class MusicRepository(
+class GameMusicRepository(
     private val downloader: YoutubeMediaService,
     private val loudnessService: LoudnessService,
     private val khRepository: KhRepository
@@ -22,8 +23,9 @@ class MusicRepository(
         }
     }
     private fun findExistingMusicFile(gameTitle: String, musicDirectory: File?): File? {
+        val title = MediaFileHelper.extractGameFilenameWithoutExtension(MediaFileHelper.sanitizeGameFilename(gameTitle))
         for (ext in supportedExtensions) {
-            val file = File(musicDirectory, "$gameTitle.$ext")
+            val file = File(musicDirectory, "$title.$ext")
             if (file.exists()) return file
         }
         return null
@@ -38,16 +40,17 @@ class MusicRepository(
         return systemDir
     }
 
-    suspend fun getMusicFile(gameTitle: String, gameFileName: String, system: String): Song? {
+    suspend fun getMusicFile(gameTitle: String, gameFileName: String, system: String, autoScrape: Boolean = true, onScrapeStarting: () -> Unit = {}): Song? {
         val systemDir: File? = getSystemFolder(system)
         var file = findExistingMusicFile(gameFileName, systemDir)
 
-        if (file == null || !file.exists()) {
-            file = downloader.downloadGameMusic(gameTitle, gameFileName, system, systemDir)
+        if (file == null || !file.exists() && autoScrape) {
+            onScrapeStarting()
+            file = downloader.downloadGameMusic(gameTitle, MediaFileHelper.extractGameFilenameWithoutExtension(MediaFileHelper.sanitizeGameFilename(gameFileName)), system, systemDir)
         }
 
         if(file != null) {
-            return Song(file, loudnessService.getOrComputeLoudness(file, system))
+            return Song(file, loudnessService.getVolumeForGame(file.nameWithoutExtension, system))
         }
         return null
     }

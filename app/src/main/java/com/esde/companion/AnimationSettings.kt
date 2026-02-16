@@ -1,30 +1,41 @@
 package com.esde.companion
 
+import android.R.attr.enabled
+import android.R.attr.type
 import android.content.Context
+import com.esde.companion.managers.PreferencesManager
+import com.esde.companion.ui.AnimationStyle
 import com.esde.companion.ui.PageAnimation
 import kotlinx.coroutines.flow.MutableStateFlow
 
-class AnimationSettings(context: Context) {
-    private val prefs = context.getSharedPreferences("animation_settings", Context.MODE_PRIVATE)
-
+class AnimationSettings(val preferencesManager: PreferencesManager) {
     val transitionTarget = MutableStateFlow(
-        PageAnimation.valueOf(prefs.getString("transition_target", PageAnimation.CONTEXT.name) ?: PageAnimation.PAGE.name)
+        PageAnimation.entries[preferencesManager.pageTransitionTarget]
     )
-    val animateWidgets = MutableStateFlow(prefs.getBoolean("animate_widgets", true))
-    val duration = MutableStateFlow(prefs.getInt("duration", 400))
 
-    fun updateAnimation(type: PageAnimation) {
+    val animationStyle = MutableStateFlow(
+        AnimationStyle.entries[preferencesManager.animate]
+    )
+    val animateWidgets = MutableStateFlow(preferencesManager.animateWidgets)
+    val duration = MutableStateFlow(preferencesManager.animationDuration)
+
+    fun updateTarget(type: PageAnimation) {
         transitionTarget.value = type
-        prefs.edit().putString("transition_target", type.name).apply()
+        preferencesManager.pageTransitionTarget = type.ordinal
+    }
+
+    fun updateAnimation(type: AnimationStyle) {
+        animationStyle.value = type
+        preferencesManager.animate = type.ordinal
     }
 
     fun updateAnimateWidgets(enabled: Boolean) {
         animateWidgets.value = enabled
-        prefs.edit().putBoolean("animate_widgets", enabled).apply()
+        preferencesManager.animateWidgets = enabled
     }
 
     fun updateDuration(ms: Int) {
         duration.value = ms
-        prefs.edit().putInt("duration", ms).apply()
+        preferencesManager.animationDuration = ms
     }
 }

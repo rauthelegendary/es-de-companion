@@ -1,11 +1,16 @@
 package com.esde.companion
 
+import android.R
+import android.R.attr.height
+import android.R.attr.path
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -13,12 +18,17 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.View.TEXT_ALIGNMENT_CENTER
+import android.view.View.TEXT_ALIGNMENT_TEXT_END
+import android.view.View.TEXT_ALIGNMENT_TEXT_START
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.os.HandlerCompat.postDelayed
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -28,11 +38,19 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import be.tarsos.dsp.beatroot.Peaks.post
+import coil.Coil.imageLoader
+import coil.ImageLoader
 import coil.dispose
 import coil.imageLoader
+import coil.request.CachePolicy
 import coil.request.ImageRequest
-import com.esde.companion.OverlayWidget.MediaSlot
+import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.animators.GlintDrawable
+import com.esde.companion.data.Widget
+import com.esde.companion.managers.ImageManager
+import com.esde.companion.ui.AnimationHelper
+import com.esde.companion.ui.AnimationStyle
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
@@ -41,6 +59,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.InputStream
+import java.net.URI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -62,12 +82,15 @@ class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) 
 class WidgetView(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
-    var widget: OverlayWidget,
+    var widget: Widget,
     var page: WidgetPage,
-    private val onUpdate: (OverlayWidget) -> Unit,
+    private val onUpdate: (Widget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
-    private val onEditRequested: (OverlayWidget) -> Unit,
-    private val animationSettings: AnimationSettings
+    private val onEditRequested: (Widget) -> Unit,
+    private val animationSettings: AnimationSettings,
+    private val imageManager: ImageManager,
+    private var system: String,
+    private var game: String
 ) : RelativeLayout(context) {
 
     private var imageList: List<File?> = emptyList()
@@ -80,13 +103,13 @@ class WidgetView(
     private val playerView: PlayerView = PlayerView(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         useController = false
-        visibility = View.GONE
+        visibility = GONE
     }
 
     private val videoCover = View(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         setBackgroundColor(Color.BLACK)
-        visibility = View.GONE
+        visibility = GONE
     }
     private val scrollView: AutoScrollOnlyView
     private val settingsButton: ImageButton
@@ -257,7 +280,9 @@ class WidgetView(
         }
     }
 
-    fun updateContent(newWidget: OverlayWidget, page: WidgetPage) {
+    fun updateContent(newWidget: Widget, page: WidgetPage, game: String, system: String) {
+        this.game = game
+        this.system = system
         val isDifferentWidget = this.widget.id != newWidget.id
         if (isDifferentWidget) {
             prepareForReuse()
@@ -342,16 +367,15 @@ class WidgetView(
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    isDragging = false
+                    isResizing = false
+                    resizeCorner = ResizeCorner.NONE
                     dragStartX = event.rawX
                     dragStartY = event.rawY
                     initialX = widget.x
                     initialY = widget.y
                     initialWidth = widget.width
                     initialHeight = widget.height
-
-                    // Cancel any long press timer immediately when touching a widget
-                    val mainActivity = context as? MainActivity
-                    mainActivity?.cancelLongPress()
 
                     // Check if touching any resize handle
                     val touchX = event.x
@@ -361,11 +385,11 @@ class WidgetView(
                         if (resizeCorner != ResizeCorner.NONE) {
                             isResizing = true
                             parent.requestDisallowInterceptTouchEvent(true)
+                            val mainActivity = context as? MainActivity
+                            mainActivity?.cancelLongPress()
                             return true
                         }
                     }
-
-                    // Not touching handle - this is a drag
                     isDragging = true
                     return true
                 }
@@ -374,13 +398,13 @@ class WidgetView(
                     val deltaX = event.rawX - dragStartX
                     val deltaY = event.rawY - dragStartY
 
-                    // CHANGED: Request parent disallow immediately when resizing starts
+                    val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+
                     if (isResizing) {
                         parent.requestDisallowInterceptTouchEvent(true)
                     }
 
-                    // CHANGED: Lower threshold for detecting movement
-                    if (abs(deltaX) > 5 || abs(deltaY) > 5) {  // Reduced from 10 to 5
+                    if (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop) {
                         if (isResizing || (isWidgetSelected && isDragging)) {
                             parent.requestDisallowInterceptTouchEvent(true)
                         }
@@ -408,7 +432,8 @@ class WidgetView(
 
                     val deltaX = event.rawX - dragStartX
                     val deltaY = event.rawY - dragStartY
-                    val wasMoved = abs(deltaX) > 5 || abs(deltaY) > 5
+                    val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+                    val wasMoved = abs(deltaX) > touchSlop || abs(deltaY) > touchSlop
                     val wasResized = isResizing  // Track if we were resizing
 
                     // Check for tap (to select/deselect)
@@ -468,10 +493,15 @@ class WidgetView(
             val nextIndex = (currentActiveIndex + 1) % activeSlots.size
             val nextSlot = activeSlots[nextIndex]
 
-            currentImageIndex = nextSlot
-            val imageFile = widget.images!![nextSlot]
+            if(currentActiveIndex != nextIndex) {
+                currentImageIndex = nextSlot
 
-            imageFile?.let { loadImage(it, widget.contentType == ContentType.MARQUEE) }
+                val imageFile = widget.images!![nextSlot]
+
+                imageFile?.let {
+                    loadImage(it, true)
+                }
+            }
         }
     }
 
@@ -496,10 +526,9 @@ class WidgetView(
     }
 
    private fun loadWidgetContent() {
-       imageView.visibility = View.GONE
-       playerView.visibility = View.GONE
-       scrollView.visibility = View.GONE
-        val isMarquee = widget.contentType == ContentType.MARQUEE
+       imageView.visibility = GONE
+       playerView.visibility = GONE
+       scrollView.visibility = GONE
 
         if (widget.contentType.isTextWidget()) {
             handleTextWidget()
@@ -518,95 +547,40 @@ class WidgetView(
         }
 
         val path = widget.contentPath
-        val mainActivity = context as? MainActivity
 
-        when {
-            //path is empty or file missing, handle fallback or clear
-            path!!.isEmpty() || (path.startsWith("/") && !File(path).exists()) -> {
-                imageView.dispose()
-                imageView.setImageDrawable(null)
+        if(widget.contentType == ContentType.COLOR_BACKGROUND) {
+            loadImage(widget.solidColor!!)
+        } else if (widget.contentType == ContentType.CUSTOM_IMAGE) {
+            loadImage(path)
+         //else if (path!!.isEmpty() || (path.startsWith("/") && !File(path).exists())) {
+          //  imageView.dispose()
+           // imageView.setImageDrawable(null)        }
+        //else if (path != null && path.startsWith("builtin://")) {
+       //     val systemName = path.removePrefix("builtin://")
+        //    val drawable = mainActivity?.loadSystemLogoFromAssets(
+        //        systemName, widget.width.toInt(), widget.height.toInt()
+       //     )
+       //     loadImage(drawable)
+        } else {
+            var currentFile = if(path != null) File(path) else null
+            if(widget.cycle && widget.images != null) {
+                currentFile = widget.images!![currentImageIndex] ?: currentFile
             }
-            //using built in source
-            path.startsWith("builtin://") -> {
-                val systemName = path.removePrefix("builtin://")
-                val drawable = mainActivity?.loadSystemLogoFromAssets(
-                    systemName, widget.width.toInt(), widget.height.toInt()
-                )
-                if(drawable != null) showDrawableImage(drawable) else imageView.setImageDrawable(null)
-            }
-            //normal case
-            else -> {
-                var currentFile = File(path)
-                if(widget.cycle) {
-                    currentFile = widget.images!![currentImageIndex] ?: currentFile
-                }
-                loadImage(currentFile, isMarquee)
-            }
+            loadImage(currentFile)
         }
-       imageView.visibility = View.VISIBLE
+       imageView.visibility = VISIBLE
        AudioReferee.updateWidgetState(widget.id,false)
     }
 
-    private fun showDrawableImage(drawable: Drawable) {
-        imageView.animate().cancel()
-
-        if (animationSettings.animateWidgets.value) {
-            imageView.alpha = 0f
-            imageView.setImageDrawable(drawable)
-
-            imageView.animate()
-                .alpha(1f)
-                .setDuration(animationSettings.duration.value.toLong())
-                .withEndAction {
-                    imageView.alpha = 1f
-                }
-                .start()
-        } else {
-            imageView.alpha = 1f
-            imageView.setImageDrawable(drawable)
-        }
-    }
-
-    private fun loadImage(file: File, isMarquee: Boolean) {
-        if (isMarquee) {
-            imageView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-        } else {
-            imageView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        }
-        context.imageLoader.enqueue(
-            ImageRequest.Builder(context)
-                .data(file)
-                .size(widget.width.toInt(), widget.height.toInt())
-                .allowHardware(!isMarquee)
-                .target(
-                    onStart = { placeholder ->
-                        // Start the new request at 0 alpha if it's a new image
-                        imageView.alpha = if (animationSettings.animateWidgets.value) 0f else 1f
-                        imageView.setImageDrawable(placeholder)
-                    },
-                    onSuccess = { result ->
-                        val finalDrawable = if (isMarquee) {
-                            GlintDrawable(result).apply { start() }
-                        } else {
-                            result
-                        }
-                        imageView.animate().cancel()
-                        imageView.setImageDrawable(finalDrawable)
-                        if(animationSettings.animateWidgets.value) {
-                            imageView.animate()
-                                .alpha(1f)
-                                .setDuration(animationSettings.duration.value.toLong())
-                                .start()
-                        } else {
-                            imageView.alpha = 1f
-                        }
-                    },
-                    onError = { error ->
-                        imageView.setImageDrawable(error)
-                        imageView.alpha = 1f
-                    }
-                )
-                .build()
+    private fun loadImage(data: Any?, animate: Boolean = animationSettings.animateWidgets.value) {
+        imageManager.load(
+            imageView = imageView,
+            data = data,
+            playAnimation = animate,
+            isMarquee = widget.contentType == ContentType.MARQUEE,
+            system = system,
+            game = game,
+            textFallback = widget.contentType == ContentType.MARQUEE || widget.contentType == ContentType.SYSTEM_LOGO
         )
     }
 
@@ -716,19 +690,6 @@ class WidgetView(
             }
         } else {
             AudioReferee.updateWidgetState(widget.id,false)
-        }
-    }
-
-    private fun extractGameNameFromWidget(): String {
-        // Try to extract game name from widget ID or fallback to "Marquee"
-        return when {
-            widget.id.isNotEmpty() && widget.id != "widget_${widget.contentType}" -> {
-                // Widget ID might contain game name
-                widget.id.replace("widget_", "")
-                    .replace("_", " ")
-                    .trim()
-            }
-            else -> "Marquee"
         }
     }
 
@@ -885,181 +846,18 @@ class WidgetView(
         settingsButton.visibility = if (shouldShow) VISIBLE else GONE
     }
 
-
      fun setBackgroundOpacity(opacity: Float) {
-            if (!widget.contentType.isTextWidget()) {
-                return
-            }
-            widget.backgroundOpacity = opacity
-            val alpha = (opacity * 255).toInt().coerceIn(0, 255)
-            scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
-            textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            if (alpha == 0) {
-                this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            }
+        if (!widget.contentType.isTextWidget()) {
+            return
         }
-
-
-
-     /**     private fun showDeleteDialog() {
-     *         android.app.AlertDialog.Builder(context)
-     *             .setTitle("Delete Widget")
-     *             .setMessage("Remove this overlay widget?")
-     *             .setPositiveButton("Delete") { _, _ ->
-     *                 onDelete(this)
-     *             }
-     *             .setNegativeButton("Cancel", null)
-     *             .show()
-     *     }
-     *
-     *     private fun showLayerMenu() {
-     *         val widgetName = when (widget.contentType) {
-     *             OverlayWidget.ContentType.MARQUEE -> "Marquee"
-     *             OverlayWidget.ContentType.BOX_2D -> "2D Box"
-     *             OverlayWidget.ContentType.BOX_3D -> "3D Box"
-     *             OverlayWidget.ContentType.MIX_IMAGE -> "Mix Image"
-     *             OverlayWidget.ContentType.BACK_COVER -> "Back Cover"
-     *             OverlayWidget.ContentType.PHYSICAL_MEDIA -> "Physical Media"
-     *             OverlayWidget.ContentType.SCREENSHOT -> "Screenshot"
-     *             OverlayWidget.ContentType.FANART -> "Fanart"
-     *             OverlayWidget.ContentType.TITLE_SCREEN -> "Title Screen"
-     *             OverlayWidget.ContentType.GAME_DESCRIPTION -> "Game Description"
-     *             OverlayWidget.ContentType.SYSTEM_LOGO -> "System Logo"
-     *             OverlayWidget.ContentType.VIDEO -> "Video"
-     *         }
-     *
-     *         // Inflate the custom dialog view
-     *         val dialogView = android.view.LayoutInflater.from(context)
-     *             .inflate(R.layout.dialog_widget_settings, null)
-     *
-     *         // Get references to views
-     *         val dialogWidgetName = dialogView.findViewById<TextView>(R.id.dialogWidgetName)
-     *         val dialogWidgetZIndex = dialogView.findViewById<TextView>(R.id.dialogWidgetZIndex)
-     *         val btnMoveForward = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnMoveForward)
-     *         val btnMoveBackward = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnMoveBackward)
-     *         val btnDeleteWidget = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnDeleteWidget)
-     *
-     *         // Get opacity control references
-     *         val opacityControlSection = dialogView.findViewById<LinearLayout>(R.id.opacityControlSection)
-     *         val opacitySeekBar = dialogView.findViewById<android.widget.SeekBar>(R.id.opacitySeekBar)
-     *         val opacityText = dialogView.findViewById<TextView>(R.id.opacityText)
-     *
-     *         // Scale type control references
-     *         val scaleTypeControlSection = dialogView.findViewById<LinearLayout>(R.id.scaleTypeControlSection)
-     *         val scaleTypeDivider = dialogView.findViewById<android.view.View>(R.id.scaleTypeDivider)
-     *         val btnScaleFit = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnScaleFit)
-     *         val btnScaleCrop = dialogView.findViewById<com.google.android.material.button.MaterialButton>(R.id.btnScaleCrop)
-     *
-     *         // Set widget name (without zIndex)
-     *         dialogWidgetName.text = widgetName
-     *
-     *         // Set zIndex info below Layer Controls
-     *         val currentZIndex = widget.zIndex
-     *         dialogWidgetZIndex.text = "Current zIndex: $currentZIndex"
-     *
-     *         // Show scale type control for all image widgets (NOT for Game Description)
-     *         if (widget.contentType != OverlayWidget.ContentType.GAME_DESCRIPTION) {
-     *             scaleTypeControlSection.visibility = android.view.View.VISIBLE
-     *             scaleTypeDivider.visibility = android.view.View.VISIBLE
-     *
-     *             // Update button styles based on current scale type (handle null for migration)
-     *             fun updateScaleTypeButtons() {
-     *                 val currentScaleType = widget.scaleType ?: OverlayWidget.ScaleType.FIT
-     *                 if (currentScaleType == OverlayWidget.ScaleType.FIT) {
-     *                     btnScaleFit.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF03DAC6.toInt())
-     *                     btnScaleCrop.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF666666.toInt())
-     *                 } else {
-     *                     btnScaleFit.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF666666.toInt())
-     *                     btnScaleCrop.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF03DAC6.toInt())
-     *                 }
-     *             }
-     *
-     *             updateScaleTypeButtons()
-     *
-     *             // Scale type button listeners
-     *             btnScaleFit.setOnClickListener {
-     *                 widget.scaleType = OverlayWidget.ScaleType.FIT
-     *                 updateScaleTypeButtons()
-     *                 loadWidgetContent()  // Reload image with new scale type
-     *                 onUpdate(widget)   // Save the change
-     *             }
-     *
-     *             btnScaleCrop.setOnClickListener {
-     *                 widget.scaleType = OverlayWidget.ScaleType.CROP
-     *                 updateScaleTypeButtons()
-     *                 loadWidgetContent()  // Reload image with new scale type
-     *                 onUpdate(widget)   // Save the change
-     *             }
-     *         } else {
-     *             scaleTypeControlSection.visibility = android.view.View.GONE
-     *             scaleTypeDivider.visibility = android.view.View.GONE
-     *         }
-     *
-     *         // Show opacity control only for Game Description
-     *         if (widget.contentType == OverlayWidget.ContentType.GAME_DESCRIPTION) {
-     *             opacityControlSection.visibility = android.view.View.VISIBLE
-     *
-     *             // Set initial opacity value (convert from 0.0-1.0 to 0-20 steps)
-     *             val currentStep = (widget.backgroundOpacity * 20).toInt()
-     *             opacitySeekBar.progress = currentStep
-     *             val currentOpacity = currentStep * 5
-     *             opacityText.text = "$currentOpacity%"
-     *
-     *             // Opacity slider listener (5% increments)
-     *             opacitySeekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-     *                 override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
-     *                     val opacityPercent = progress * 5  // Convert step to percentage
-     *                     opacityText.text = "$opacityPercent%"
-     *                     val opacity = progress / 20f  // Convert step to 0.0-1.0 range
-     *                     setBackgroundOpacity(opacity)
-     *                 }
-     *
-     *                 override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
-     *                 override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
-     *             })
-     *         } else {
-     *             opacityControlSection.visibility = android.view.View.GONE
-     *         }
-     *
-     *         // Create the dialog
-     *         val dialog = android.app.AlertDialog.Builder(context)
-     *             .setView(dialogView)
-     *             .setCancelable(true)
-     *             .create()
-     *
-     *         // Button click listeners
-     *         btnMoveForward.setOnClickListener {
-     *             moveWidgetForward()
-     *             dialog.dismiss()
-     *             // Reopen the dialog after a short delay to show updated zIndex
-     *             postDelayed({ showLayerMenu() }, 100)
-     *         }
-     *
-     *         btnMoveBackward.setOnClickListener {
-     *             moveWidgetBackward()
-     *             dialog.dismiss()
-     *             // Reopen the dialog after a short delay to show updated zIndex
-     *             postDelayed({ showLayerMenu() }, 100)
-     *         }
-     *
-     *         btnDeleteWidget.setOnClickListener {
-     *             dialog.dismiss()
-     *             showDeleteDialog()
-     *         }
-     *
-     *         dialog.show()
-     *     }
-     *
-     *     private fun moveWidgetForward() {  // CHANGED name
-     *         onReorder(this, true)
-     *     }
-     *
-     *     private fun moveWidgetBackward() {  // CHANGED name
-     *         onReorder(this, false)
-     *     }
-     *
-     *
-     */
+        widget.backgroundOpacity = opacity
+        val alpha = (opacity * 255).toInt().coerceIn(0, 255)
+        scrollView.setBackgroundColor(android.graphics.Color.argb(alpha, 0, 0, 0))
+        textView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        if (alpha == 0) {
+            this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
+     }
 
      private fun startAutoScroll() {
          stopAutoScroll() // Clears the previous job
@@ -1137,20 +935,6 @@ class WidgetView(
         updateButtonVisibility()
 
         AudioReferee.updateWidgetState(widget.id, false)
-
-
-        /**player?.pause()
-        player?.release()
-        player = null
-        val currentDrawable = imageView.drawable
-        if (currentDrawable is GlintDrawable) {
-            currentDrawable.stop()
-        }
-        imageView.dispose()
-        imageView.setImageDrawable(null)
-        AudioReferee.updateWidgetState(widget.id, false)
-        audioRefereeListener?.cancel()
-        */
     }
 
     private fun addAudioRefereeListener() {

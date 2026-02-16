@@ -1,7 +1,7 @@
 package com.esde.companion.art.mediaoverride
 
 import com.esde.companion.MediaFileHelper
-import com.esde.companion.OverlayWidget
+import com.esde.companion.data.Widget
 import com.esde.companion.ui.ContentType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -40,7 +40,7 @@ class MediaOverrideRepository(private val mediaOverrideDao: MediaOverrideDao) {
         path: String,
         system: String,
         type: ContentType,
-        slot: OverlayWidget.MediaSlot
+        slot: Widget.MediaSlot
     ) = withContext(Dispatchers.IO) {
         val key = createKey(path, system, type)
         val override = MediaOverride(key, slot)

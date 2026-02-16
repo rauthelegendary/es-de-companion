@@ -47,8 +47,8 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
-import com.esde.companion.MediaFileLocator
-import com.esde.companion.OverlayWidget
+import com.esde.companion.managers.MediaManager
+import com.esde.companion.data.Widget
 import com.esde.companion.art.MediaSearchResult
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ui.ContentType
@@ -60,7 +60,7 @@ fun SaveMediaStep(
     onSave: (String, ContentType, Int) -> Unit,
     isVideo: Boolean,
     mediaService: YoutubeMediaService,
-    mediaFileLocator: MediaFileLocator,
+    mediaManager: MediaManager,
     gameName: String,
     systemName: String
     ) {
@@ -105,12 +105,12 @@ fun SaveMediaStep(
     val slotStatus = remember(selectedType, gameName, systemName) {
         (1..3).associateWith { slot ->
             val mediaSlot = when(slot) {
-                1 -> OverlayWidget.MediaSlot.Slot1
-                2 -> OverlayWidget.MediaSlot.Slot2
-                3 -> OverlayWidget.MediaSlot.Slot3
-                else -> OverlayWidget.MediaSlot.Default
+                1 -> Widget.MediaSlot.Slot1
+                2 -> Widget.MediaSlot.Slot2
+                3 -> Widget.MediaSlot.Slot3
+                else -> Widget.MediaSlot.Default
             }
-            mediaFileLocator.findMediaFileDefault(selectedType, systemName, gameName, mediaSlot)?.exists() == true
+            mediaManager.findMediaFileDefault(selectedType, systemName, gameName, mediaSlot)?.exists() == true
         }
     }
 

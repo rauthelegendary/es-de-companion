@@ -35,7 +35,7 @@ class IgdbArtScraper() : ArtScraper {
         } catch (e: Exception) {
             android.util.Log.e("IGDB_SCRAPE", "Search failed for query: $query", e)
             if (e is com.api.igdb.exceptions.RequestException) {
-                Log.e("IGDB_ERROR", "HTTP Status: ${e.statusCode}") // This is the gold mine
+                Log.e("IGDB_ERROR", "HTTP Status: ${e.statusCode}")
             }
             emptyList()
         }

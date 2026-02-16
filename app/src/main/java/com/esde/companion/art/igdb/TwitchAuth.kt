@@ -8,10 +8,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object TwitchAuth {
-    suspend fun getTwitchAccessToken(): String? = withContext(Dispatchers.IO) {
+    suspend fun getTwitchAccessToken(igdbId: String, igdbSecret: String): String? = withContext(Dispatchers.IO) {
         val url = "https://id.twitch.tv/oauth2/token" +
-                "?client_id=${BuildConfig.IGDB_CLIENT_ID}" +
-                "&client_secret=${BuildConfig.IGDB_CLIENT_SECRET}" +
+                "?client_id=${igdbId}" +
+                "&client_secret=${igdbSecret}" +
                 "&grant_type=client_credentials"
 
         val request = okhttp3.Request.Builder()

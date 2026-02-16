@@ -2,124 +2,51 @@ package com.esde.companion
 
 import android.app.Activity
 import android.content.Intent
-import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import android.view.GestureDetector
-import android.view.MotionEvent
-import android.widget.Button
 import android.widget.ImageButton
-import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.activity.OnBackPressedCallback
+import android.widget.LinearLayout
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import androidx.core.view.GestureDetectorCompat
-import com.google.android.material.chip.ChipGroup
 import java.io.File
 
-class SettingsActivity : AppCompatActivity() {
+import android.view.GestureDetector
+import android.view.MotionEvent
+import androidx.core.view.GestureDetectorCompat
+import androidx.lifecycle.lifecycleScope
+import com.esde.companion.art.ApiKeyManager
 
-    private lateinit var prefs: SharedPreferences
-    private lateinit var setupWizardButton: Button
-    private lateinit var mediaPathText: TextView
-    private lateinit var mediaStatusText: TextView
-    private lateinit var mediaStatusDescription: TextView
-    private lateinit var selectMediaPathButton: Button
-    private lateinit var systemPathText: TextView
-    private lateinit var systemLogosPathText: TextView
-    private lateinit var selectSystemPathButton: Button
-    private lateinit var selectSystemLogosPathButton: Button
-    private lateinit var customBackgroundPathText: TextView
-    private lateinit var customBackgroundStatusText: TextView
-    private lateinit var customBackgroundStatusDescription: TextView
-    private lateinit var selectCustomBackgroundButton: Button
-    private lateinit var clearCustomBackgroundButton: Button
-    private lateinit var scriptsPathText: TextView
-    private lateinit var selectScriptsPathButton: Button
-    private lateinit var createScriptsButton: Button
-    private lateinit var scriptsStatusText: TextView
-    private lateinit var scriptsStatusDescription: TextView
-    private lateinit var columnCountSeekBar: SeekBar
-    private lateinit var columnCountText: TextView
-    private lateinit var hideAppsButton: Button
-    private lateinit var dimmingSeekBar: SeekBar
-    private lateinit var dimmingText: TextView
-    private lateinit var blurSeekBar: SeekBar
-    private lateinit var blurText: TextView
-    private lateinit var drawerTransparencySeekBar: SeekBar
-    private lateinit var drawerTransparencyText: TextView
-    private lateinit var animationStyleChipGroup: ChipGroup
-    private lateinit var systemImagePreferenceChipGroup: ChipGroup
-    private lateinit var gameImagePreferenceChipGroup: ChipGroup
-    private lateinit var systemColorPickerLayout: LinearLayout
-    private lateinit var gameColorPickerLayout: LinearLayout
-    private lateinit var systemColorPickerButton: Button
-    private lateinit var gameColorPickerButton: Button
-    private lateinit var customAnimationSettings: LinearLayout
-    private lateinit var animationDurationSeekBar: SeekBar
-    private lateinit var animationDurationText: TextView
-    private lateinit var animationScaleSeekBar: SeekBar
-    private lateinit var animationScaleText: TextView
-    private lateinit var versionText: TextView
-    private lateinit var videoSupportChipGroup: ChipGroup
-    private lateinit var videoSettings: LinearLayout
-    private lateinit var videoDelaySeekBar: SeekBar
-    private lateinit var videoDelayText: TextView
-    private lateinit var videoAudioChipGroup: ChipGroup
-    private lateinit var gameLaunchBehaviorChipGroup: ChipGroup
-    private lateinit var screensaverBehaviorChipGroup: ChipGroup
-    private lateinit var doubleTapChipGroup: ChipGroup
+import com.esde.companion.data.AppConstants
+import com.esde.companion.databinding.ActivitySettingsBinding
+import com.esde.companion.managers.PreferencesManager
+import com.esde.companion.managers.ScriptManager
+import kotlinx.coroutines.launch
 
-    // ========== MUSIC INTEGRATION START ==========
-    // DELETE THESE PROPERTIES when removing music feature
-    private lateinit var musicMasterChipGroup: ChipGroup
-    private lateinit var musicSettings: LinearLayout
-    private lateinit var musicSystemChipGroup: ChipGroup
-    private lateinit var musicGameChipGroup: ChipGroup
-    private lateinit var musicScreensaverChipGroup: ChipGroup
-    private lateinit var musicVideoChipGroup: ChipGroup
-    private lateinit var musicSystemSpecificChipGroup: ChipGroup
-    private lateinit var musicSongTitleChipGroup: ChipGroup
-    private lateinit var musicSongTitleDurationSection: LinearLayout
-    private lateinit var musicSongTitleDurationSeekBar: SeekBar
-    private lateinit var musicSongTitleDurationText: TextView
-    private lateinit var musicSongTitleOpacitySeekBar: SeekBar
-    private lateinit var musicSongTitleOpacityText: TextView
-    // ========== MUSIC INTEGRATION END ==========
+class SettingsActivity() : AppCompatActivity() {
 
-    private var initialDimming: Int = 0
-    private var initialBlur: Int = 0
+    private lateinit var binding: ActivitySettingsBinding
+    private val apiKeyManager: ApiKeyManager = ApiKeyManager.getInstance(this)
+    private lateinit var prefsManager: PreferencesManager
     private var initialDrawerTransparency: Int = 0
-    private var videoSettingsChanged: Boolean = false
-    private var logoSizeChanged: Boolean = false
     private var mediaPathChanged: Boolean = false
-    private var imagePreferenceChanged: Boolean = false
-    private var logoTogglesChanged: Boolean = false
     private var gameLaunchBehaviorChanged: Boolean = false
     private var screensaverBehaviorChanged: Boolean = false
-    private var doubleTapFunctionalityChanged: Boolean = true
-
     private var customBackgroundChanged: Boolean = false
-    // ========== MUSIC INTEGRATION START ==========
     private var musicSettingsChanged: Boolean = false
-    private var musicMasterToggleChanged: Boolean = false // Track if master toggle specifically changed
-    // ========== MUSIC INTEGRATION END ==========
+    private var musicMasterToggleChanged: Boolean = false
 
     private var pathSelectionType = PathSelection.MEDIA
 
-    private var scriptManager : ScriptManager = ScriptManager(this)
-
     enum class PathSelection {
-        MEDIA, SYSTEM, SCRIPTS, SYSTEM_LOGOS, CUSTOM_BACKGROUND
+        MEDIA, SYSTEM, SCRIPTS, SYSTEM_LOGOS, CUSTOM_BACKGROUND, MUSIC
     }
 
     private var isInSetupWizard = false
@@ -144,7 +71,7 @@ class SettingsActivity : AppCompatActivity() {
 
             when (pathSelectionType) {
                 PathSelection.MEDIA -> {
-                    prefs.edit().putString(MEDIA_PATH_KEY, path).apply()
+                    prefsManager.mediaPath = path
                     updateMediaPathDisplay()
 
                     // Mark that media path changed (only if not in wizard)
@@ -153,7 +80,7 @@ class SettingsActivity : AppCompatActivity() {
                     }
 
                     // Warn if path doesn't look like ES-DE downloaded_media folder
-                    if (!path.contains("downloaded_media", ignoreCase = true)) {
+                    if (!path.contains(AppConstants.Paths.MEDIA_DIR, ignoreCase = true)) {
                         if (isInSetupWizard) {
                             showNonStandardMediaPathWarningForWizard(path)
                         } else {
@@ -167,7 +94,7 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 }
                 PathSelection.SYSTEM -> {
-                    prefs.edit().putString(SYSTEM_PATH_KEY, path).apply()
+                    prefsManager.systemPath = path
                     updateSystemPathDisplay()
 
                     // Continue wizard if active
@@ -176,11 +103,12 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 }
                 PathSelection.SCRIPTS -> {
-                    prefs.edit().putString(SCRIPTS_PATH_KEY, path).apply()
+                    prefsManager.scriptsPath = path
                     updateScriptsPathDisplay()
 
                     // Warn if path doesn't look like ES-DE scripts folder
-                    if (!path.contains("ES-DE", ignoreCase = true) || !path.contains("scripts", ignoreCase = true)) {
+                    if (!path.contains("ES-DE", ignoreCase = true) ||
+                        !path.contains(AppConstants.Paths.SCRIPTS_DIR.substringAfterLast('/'), ignoreCase = true)) {
                         if (isInSetupWizard) {
                             showNonStandardScriptsPathWarningForWizard(path)
                         } else {
@@ -199,14 +127,20 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 }
                 PathSelection.SYSTEM_LOGOS -> {
-                    prefs.edit().putString("system_logos_path", path).apply()
-                    systemLogosPathText.text = path
+                    prefsManager.systemLogosPath = path
+                    binding.systemLogosPathText.text = path
                     Toast.makeText(this, "System logos path updated", Toast.LENGTH_SHORT).show()
                 }
                 PathSelection.CUSTOM_BACKGROUND -> {
                     // This shouldn't be called since we use imagePicker instead
                     // But need to handle it for exhaustive when
                     android.util.Log.w("SettingsActivity", "directoryPicker called for CUSTOM_BACKGROUND - should use imagePicker instead")
+                }
+                PathSelection.MUSIC -> {
+                    prefsManager.musicPath = path
+                    binding.musicPathText.text = path
+                    Toast.makeText(this, "Music path updated", Toast.LENGTH_SHORT).show()
+                    android.util.Log.d("SettingsActivity", "Music path set to: $path")
                 }
             }
         }
@@ -248,7 +182,7 @@ class SettingsActivity : AppCompatActivity() {
 
                         if (file.exists() && file.canRead() && file.isFile) {
                             // File is accessible - save path
-                            prefs.edit().putString(CUSTOM_BACKGROUND_KEY, path).apply()
+                            prefsManager.customBackgroundPath = path
                             updateCustomBackgroundDisplay()
                             customBackgroundChanged = true
 
@@ -277,7 +211,7 @@ class SettingsActivity : AppCompatActivity() {
                                 "• Granting storage permissions in Android Settings")
                         .setPositiveButton("Try Again") { _, _ ->
                             // Let user try selecting again
-                            selectCustomBackgroundButton.performClick()
+                            binding.selectCustomBackgroundButton.performClick()
                         }
                         .setNegativeButton("Cancel", null)
                         .setIcon(android.R.drawable.ic_dialog_alert)
@@ -362,42 +296,26 @@ class SettingsActivity : AppCompatActivity() {
             .show()
     }
 
-    private val storagePermissionLauncher = registerForActivityResult(
+    // No longer needed for Android 13+ - MANAGE_EXTERNAL_STORAGE is granted via system settings
+    // Kept for potential notification permission requests
+    private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            if (isInSetupWizard) {
-                continueSetupWizard()
-            } else {
-                // Permission granted, create scripts
-                createScriptFiles()
-            }
-        } else {
-            // Permission denied, show explanation
-            showPermissionDeniedDialog()
-            if (isInSetupWizard) {
-                isInSetupWizard = false
-            }
-        }
+        android.util.Log.d("SettingsActivity", "Notification permission granted: $isGranted")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         try {
-            setContentView(R.layout.activity_settings)
+            binding = ActivitySettingsBinding.inflate(layoutInflater)
+            setContentView(binding.root)
             android.util.Log.d("SettingsActivity", "Layout inflated successfully")
 
-            prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            prefsManager = PreferencesManager(this)
             android.util.Log.d("SettingsActivity", "Prefs initialized")
 
             // Store initial values
-            initialDimming = prefs.getInt(DIMMING_KEY, 25)
-            initialBlur = prefs.getInt(BLUR_KEY, 0)
-            initialDrawerTransparency = prefs.getInt(DRAWER_TRANSPARENCY_KEY, 70)
-
-            // Initialize all views
-            initializeViews()
+            initialDrawerTransparency = prefsManager.drawerTransparency
 
             // Setup all UI components
             setupAllUIComponents()
@@ -411,6 +329,8 @@ class SettingsActivity : AppCompatActivity() {
             // Setup back button handler
             setupBackButtonHandler()
 
+            observeApiKeys()
+
             android.util.Log.d("SettingsActivity", "onCreate completed successfully")
         } catch (e: Exception) {
             android.util.Log.e("SettingsActivity", "Error in onCreate", e)
@@ -420,74 +340,40 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * Initialize all view references
-     */
-    private fun initializeViews() {
-        setupWizardButton = findViewById(R.id.setupWizardButton)
-        mediaPathText = findViewById(R.id.mediaPathText)
-        mediaStatusText = findViewById(R.id.mediaStatusText)
-        mediaStatusDescription = findViewById(R.id.mediaStatusDescription)
-        selectMediaPathButton = findViewById(R.id.selectMediaPathButton)
-        systemPathText = findViewById(R.id.systemPathText)
-        systemLogosPathText = findViewById(R.id.systemLogosPathText)
-        selectSystemPathButton = findViewById(R.id.selectSystemPathButton)
-        selectSystemLogosPathButton = findViewById(R.id.selectSystemLogosPathButton)
-        customBackgroundPathText = findViewById(R.id.customBackgroundPathText)
-        customBackgroundStatusText = findViewById(R.id.customBackgroundStatusText)
-        customBackgroundStatusDescription = findViewById(R.id.customBackgroundStatusDescription)
-        selectCustomBackgroundButton = findViewById(R.id.selectCustomBackgroundButton)
-        clearCustomBackgroundButton = findViewById(R.id.clearCustomBackgroundButton)
-        scriptsPathText = findViewById(R.id.scriptsPathText)
-        selectScriptsPathButton = findViewById(R.id.selectScriptsPathButton)
-        createScriptsButton = findViewById(R.id.createScriptsButton)
-        scriptsStatusText = findViewById(R.id.scriptsStatusText)
-        scriptsStatusDescription = findViewById(R.id.scriptsStatusDescription)
-        columnCountSeekBar = findViewById(R.id.columnCountSeekBar)
-        columnCountText = findViewById(R.id.columnCountText)
-        hideAppsButton = findViewById(R.id.hideAppsButton)
-        drawerTransparencySeekBar = findViewById(R.id.drawerTransparencySeekBar)
-        drawerTransparencyText = findViewById(R.id.drawerTransparencyText)
-        gameLaunchBehaviorChipGroup = findViewById(R.id.gameLaunchBehaviorChipGroup)
-        screensaverBehaviorChipGroup = findViewById(R.id.screensaverBehaviorChipGroup)
-        doubleTapChipGroup = findViewById(R.id.doubleTapChipGroup)
-        versionText = findViewById(R.id.versionText)
-    }
-
-    /**
      * Setup all UI components and listeners
      */
     private fun setupAllUIComponents() {
         android.util.Log.d("SettingsActivity", "Setting up UI components")
 
         setupSwipeGesture()
-        setupWizardButton.setOnClickListener { startSetupWizard() }
-        hideAppsButton.setOnClickListener { showHideAppsDialog() }
+        binding.setupWizardButton.setOnClickListener { startSetupWizard() }
+        binding.hideAppsButton.setOnClickListener { showHideAppsDialog() }
 
-        selectMediaPathButton.setOnClickListener {
+        binding.selectMediaPathButton.setOnClickListener {
             pathSelectionType = PathSelection.MEDIA
             directoryPicker.launch(null)
         }
 
-        selectSystemPathButton.setOnClickListener {
+        binding.selectSystemPathButton.setOnClickListener {
             pathSelectionType = PathSelection.SYSTEM
             directoryPicker.launch(null)
         }
 
-        selectSystemLogosPathButton.setOnClickListener {
+        binding.selectSystemLogosPathButton.setOnClickListener {
             pathSelectionType = PathSelection.SYSTEM_LOGOS
             directoryPicker.launch(null)
         }
 
-        selectScriptsPathButton.setOnClickListener {
+        binding.selectScriptsPathButton.setOnClickListener {
             pathSelectionType = PathSelection.SCRIPTS
             directoryPicker.launch(null)
         }
 
-        createScriptsButton.setOnClickListener {
+        binding.createScriptsButton.setOnClickListener {
             createScriptFiles()
         }
 
-        selectCustomBackgroundButton.setOnClickListener {
+        binding.selectCustomBackgroundButton.setOnClickListener {
             pathSelectionType = PathSelection.CUSTOM_BACKGROUND
             // Create intent for direct file picker (like directory picker UI)
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -499,9 +385,14 @@ class SettingsActivity : AppCompatActivity() {
             customBackgroundPicker.launch(intent)
         }
 
-        clearCustomBackgroundButton.setOnClickListener {
+        binding.selectMusicPathButton.setOnClickListener {
+            pathSelectionType = PathSelection.MUSIC
+            directoryPicker.launch(null)
+        }
+
+        binding.clearCustomBackgroundButton.setOnClickListener {
             // Clear the custom background using the correct key
-            prefs.edit().remove(CUSTOM_BACKGROUND_KEY).apply()
+            prefsManager.customBackgroundPath = ""  // or null if property is nullable
 
             // Update display immediately
             updateCustomBackgroundDisplay()
@@ -514,13 +405,39 @@ class SettingsActivity : AppCompatActivity() {
             android.util.Log.d("SettingsActivity", "Custom background cleared - key: $CUSTOM_BACKGROUND_KEY")
         }
 
+        binding.btnSaveApiKeys.setOnClickListener {
+            val sgdbKey = binding.etSteamGridKey.text.toString()
+            val igdbId = binding.etIgdbClientId.text.toString()
+            val igdbSecret = binding.etIgdbClientSecret.text.toString()
+
+            lifecycleScope.launch {
+                apiKeyManager.saveSteamGridDbKey(sgdbKey)
+                apiKeyManager.saveIgdbCredentials(igdbId, igdbSecret)
+                Toast.makeText(this@SettingsActivity, "Keys saved", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         setupColumnCountSlider()
         setupDrawerTransparencySlider()
         setupGameLaunchBehavior()
         setupScreensaverBehavior()
-        setupDoubleTapFunctionality()
+        setupBlackOverlay()
+        setupVideoDoubleTap()
+
+        // Set version text dynamically
+        try {
+            val packageInfo = packageManager.getPackageInfo(packageName, 0)
+            val versionName = packageInfo.versionName ?: "Unknown"
+            binding.versionText.text = "ES-DE Companion v$versionName"
+            android.util.Log.d("SettingsActivity", "Version text set to: $versionName")
+        } catch (e: Exception) {
+            binding.versionText.text = "ES-DE Companion"
+            android.util.Log.e("SettingsActivity", "Failed to get version name", e)
+        }
 
         android.util.Log.d("SettingsActivity", "All UI components setup complete")
+
+        setupMusicSettings()
     }
 
     /**
@@ -531,6 +448,7 @@ class SettingsActivity : AppCompatActivity() {
         updateSystemPathDisplay()
         updateScriptsPathDisplay()
         updateCustomBackgroundDisplay()
+        updateMusicPathDisplay()
     }
 
     /**
@@ -545,7 +463,7 @@ class SettingsActivity : AppCompatActivity() {
                 if (!isInSetupWizard) {
                     startSetupWizard()
                 }
-            }, 500)
+            }, AppConstants.Timing.WIZARD_DELAY)
         } else {
             // Normal auto-start check (for when settings opened directly)
             checkAndAutoStartWizard()
@@ -556,48 +474,27 @@ class SettingsActivity : AppCompatActivity() {
      * Setup back button handler with state change tracking
      */
     private fun setupBackButtonHandler() {
-        val initialHiddenApps = prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
+        val initialHiddenApps = prefsManager.hiddenApps
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 // Check all changed states
-                val currentDimming = prefs.getInt(DIMMING_KEY, 25)
-                val currentBlur = prefs.getInt(BLUR_KEY, 0)
-                val currentDrawerTransparency = prefs.getInt(DRAWER_TRANSPARENCY_KEY, 70)
-                val currentHiddenApps = prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
+                val currentDrawerTransparency = prefsManager.drawerTransparency
+                val currentHiddenApps = prefsManager.hiddenApps
 
                 val intent = Intent()
 
-                // Build intent with all state change flags
-                if (currentDimming != initialDimming || currentBlur != initialBlur ||
-                    currentDrawerTransparency != initialDrawerTransparency) {
-                    intent.putExtra("NEEDS_RECREATE", true)
-                }
                 if (currentHiddenApps != initialHiddenApps) {
                     intent.putExtra("APPS_HIDDEN_CHANGED", true)
                 }
-                // ========== MUSIC ==========
                 if (musicSettingsChanged) {
                     intent.putExtra("MUSIC_SETTINGS_CHANGED", true)
                 }
                 if (musicMasterToggleChanged) {
                     intent.putExtra("MUSIC_MASTER_TOGGLE_CHANGED", true)
                 }
-                // ===========================
-                if (videoSettingsChanged) {
-                    intent.putExtra("VIDEO_SETTINGS_CHANGED", true)
-                }
-                if (logoSizeChanged) {
-                    intent.putExtra("LOGO_SIZE_CHANGED", true)
-                }
                 if (mediaPathChanged) {
                     intent.putExtra("MEDIA_PATH_CHANGED", true)
-                }
-                if (imagePreferenceChanged) {
-                    intent.putExtra("IMAGE_PREFERENCE_CHANGED", true)
-                }
-                if (logoTogglesChanged) {
-                    intent.putExtra("LOGO_TOGGLES_CHANGED", true)
                 }
                 if (gameLaunchBehaviorChanged) {
                     intent.putExtra("GAME_LAUNCH_BEHAVIOR_CHANGED", true)
@@ -621,16 +518,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // If we're in quick setup at step 1, check if permission was just granted
         if (isInSetupWizard && setupStep == 1) {
-            val hasPermission = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                    ContextCompat.checkSelfPermission(
-                        this,
-                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                    ) == PackageManager.PERMISSION_GRANTED
-                }
-                else -> true
-            }
+            val hasPermission = Environment.isExternalStorageManager()
 
             if (hasPermission) {
                 // Permission granted, continue wizard automatically
@@ -640,39 +528,38 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupColumnCountSlider() {
-        val currentColumns = prefs.getInt(COLUMN_COUNT_KEY, 4)
-        columnCountSeekBar.min = 2
-        columnCountSeekBar.max = 8
-        columnCountSeekBar.progress = currentColumns
-        columnCountText.text = "$currentColumns"
+        val currentColumns = prefsManager.columnCount
+        binding.columnCountSeekBar.min = AppConstants.UI.MIN_COLUMN_COUNT
+        binding.columnCountSeekBar.max = AppConstants.UI.MAX_COLUMN_COUNT
+        binding.columnCountSeekBar.progress = currentColumns
+        binding.columnCountText.text = "$currentColumns"
 
-        columnCountSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        binding.columnCountSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                columnCountText.text = "$progress"
+                binding.columnCountText.text = "$progress"
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 seekBar?.let {
-                    prefs.edit().putInt(COLUMN_COUNT_KEY, it.progress).apply()
+                    prefsManager.columnCount = it.progress
                 }
             }
         })
     }
 
     private fun setupDrawerTransparencySlider() {
-        val currentTransparency = prefs.getInt(DRAWER_TRANSPARENCY_KEY, 70)
-        drawerTransparencySeekBar.min = 0
-        drawerTransparencySeekBar.max = 20  // 0-20 range = 0-100% in 5% increments
-        drawerTransparencySeekBar.progress = currentTransparency / 5
-        drawerTransparencyText.text = "$currentTransparency%"
+        val currentTransparency = prefsManager.drawerTransparency
+        binding.drawerTransparencySeekBar.min = 0
+        binding.drawerTransparencySeekBar.max = 20  // 0-20 range = 0-100% in 5% increments
+        binding.drawerTransparencySeekBar.progress = currentTransparency / 5
+        binding.drawerTransparencyText.text = "$currentTransparency%"
 
-        drawerTransparencySeekBar.setOnSeekBarChangeListener(object :
-            SeekBar.OnSeekBarChangeListener {
+        binding.drawerTransparencySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val percentage = progress * 5
-                drawerTransparencyText.text = "$percentage%"
+                binding.drawerTransparencyText.text = "$percentage%"
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -680,33 +567,266 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 seekBar?.let {
                     val percentage = it.progress * 5
-                    prefs.edit().putInt(DRAWER_TRANSPARENCY_KEY, percentage).commit()
+                    prefsManager.drawerTransparency = percentage
                 }
             }
         })
     }
 
+    private fun showColorPicker(currentColor: Int, title: String, onColorSelected: (Int) -> Unit) {
+        val colors = arrayOf(
+            "#000000", "#1A1A1A", "#2D2D2D", "#424242", "#616161", "#757575", "#9E9E9E",
+            "#B71C1C", "#C62828", "#D32F2F", "#E53935", "#F44336", "#EF5350", "#E57373",
+            "#880E4F", "#AD1457", "#C2185B", "#D81B60", "#E91E63", "#EC407A", "#F06292",
+            "#4A148C", "#6A1B9A", "#7B1FA2", "#8E24AA", "#9C27B0", "#AB47BC", "#BA68C8",
+            "#311B92", "#4527A0", "#512DA8", "#5E35B1", "#673AB7", "#7E57C2", "#9575CD",
+            "#1A237E", "#283593", "#303F9F", "#3949AB", "#3F51B5", "#5C6BC0", "#7986CB",
+            "#0D47A1", "#1565C0", "#1976D2", "#1E88E5", "#2196F3", "#42A5F5", "#64B5F6",
+            "#01579B", "#0277BD", "#0288D1", "#039BE5", "#03A9F4", "#29B6F6", "#4FC3F7",
+            "#006064", "#00838F", "#0097A7", "#00ACC1", "#00BCD4", "#26C6DA", "#4DD0E1",
+            "#004D40", "#00695C", "#00796B", "#00897B", "#009688", "#26A69A", "#4DB6AC",
+            "#1B5E20", "#2E7D32", "#388E3C", "#43A047", "#4CAF50", "#66BB6A", "#81C784",
+            "#33691E", "#558B2F", "#689F38", "#7CB342", "#8BC34A", "#9CCC65", "#AED581",
+            "#827717", "#9E9D24", "#AFB42B", "#C0CA33", "#CDDC39", "#D4E157", "#DCE775",
+            "#F57F17", "#F9A825", "#FBC02D", "#FDD835", "#FFEB3B", "#FFEE58", "#FFF176",
+            "#FF6F00", "#FF8F00", "#FFA000", "#FFB300", "#FFC107", "#FFCA28", "#FFD54F",
+            "#E65100", "#EF6C00", "#F57C00", "#FB8C00", "#FF9800", "#FFA726", "#FFB74D",
+            "#BF360C", "#D84315", "#E64A19", "#F4511E", "#FF5722", "#FF7043", "#FF8A65",
+            "#3E2723", "#4E342E", "#5D4037", "#6D4C41", "#795548", "#8D6E63", "#A1887F",
+            "#263238", "#37474F", "#455A64", "#546E7A", "#607D8B", "#78909C", "#90A4AE",
+            "#FFFFFF", "#FAFAFA", "#F5F5F5", "#EEEEEE", "#E0E0E0", "#BDBDBD", "#9E9E9E"
+        )
+
+        val colorInts = colors.map { android.graphics.Color.parseColor(it) }.toIntArray()
+
+        // Create main container layout
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val padding = (16 * resources.displayMetrics.density).toInt()
+            setPadding(padding, padding, padding, padding)
+        }
+
+        // Add hex input section
+        val hexInputLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val marginBottom = (12 * resources.displayMetrics.density).toInt()
+            setPadding(0, 0, 0, marginBottom)
+        }
+
+        val hexInputLabel = TextView(this).apply {
+            text = "Hex: "
+            textSize = 16f
+            setTextColor(android.graphics.Color.WHITE)
+            val padding = (8 * resources.displayMetrics.density).toInt()
+            setPadding(0, padding, padding, padding)
+        }
+
+        val hexInput = android.widget.EditText(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+            hint = "Enter hex color (e.g., #FF5722)"
+            textSize = 14f
+            setTextColor(android.graphics.Color.WHITE)
+            setHintTextColor(android.graphics.Color.parseColor("#999999"))
+            setBackgroundColor(android.graphics.Color.parseColor("#2D2D2D"))
+            val padding = (12 * resources.displayMetrics.density).toInt()
+            setPadding(padding, padding, padding, padding)
+
+            // Pre-fill with current color - READ FROM PREFS to get latest saved value
+            val latestColor = when(title) {
+                "System View Background Color" -> prefsManager.systemBackgroundColor
+                "Game View Background Color" -> prefsManager.gameBackgroundColor
+                else -> currentColor
+            }
+            val currentHex = String.format("#%06X", 0xFFFFFF and latestColor)
+            setText(currentHex)
+            setSelection(text.length) // Move cursor to end
+        }
+
+        hexInputLayout.addView(hexInputLabel)
+        hexInputLayout.addView(hexInput)
+        mainLayout.addView(hexInputLayout)
+
+        // Add color grid with proper padding to prevent clipping
+        val gridView = android.widget.GridView(this).apply {
+            numColumns = 7
+            val spacing = (8 * resources.displayMetrics.density).toInt()
+            verticalSpacing = spacing
+            horizontalSpacing = spacing
+
+            // CRITICAL: Prevent clipping by adding extra padding for selection border
+            clipToPadding = false
+            clipChildren = false
+            val extraPadding = (12 * resources.displayMetrics.density).toInt()
+            setPadding(extraPadding, 0, extraPadding, 0)
+        }
+
+        // Get the latest color from prefs for proper initial selection
+        val initialSelectedColor = when(title) {
+            "System View Background Color" -> prefsManager.systemBackgroundColor
+            "Game View Background Color" -> prefsManager.gameBackgroundColor
+            else -> currentColor
+        }
+
+        val adapter = object : android.widget.BaseAdapter() {
+            private var selectedPosition = colorInts.indexOf(initialSelectedColor)
+
+            override fun getCount() = colorInts.size
+            override fun getItem(position: Int) = colorInts[position]
+            override fun getItemId(position: Int) = position.toLong()
+
+            override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup?): android.view.View {
+                val container = convertView as? android.widget.FrameLayout ?: android.widget.FrameLayout(this@SettingsActivity)
+                container.removeAllViews()
+
+                val size = (48 * resources.displayMetrics.density).toInt()
+                container.layoutParams = android.widget.AbsListView.LayoutParams(size, size)
+
+                // Add inner padding to prevent border clipping
+                val innerPadding = (6 * resources.displayMetrics.density).toInt()
+                container.setPadding(innerPadding, innerPadding, innerPadding, innerPadding)
+
+                // Create color square
+                val colorSquare = android.view.View(this@SettingsActivity).apply {
+                    layoutParams = android.widget.FrameLayout.LayoutParams(
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                    val border = android.graphics.drawable.GradientDrawable()
+                    border.setColor(colorInts[position])
+                    border.setStroke(
+                        (2 * resources.displayMetrics.density).toInt(),
+                        android.graphics.Color.parseColor("#666666")
+                    )
+                    background = border
+                }
+
+                container.addView(colorSquare)
+
+                // Add selection indicator if this is the selected color
+                if (position == selectedPosition) {
+                    val selectionBorder = android.view.View(this@SettingsActivity).apply {
+                        // Make it slightly smaller than container to ensure visibility
+                        val margin = (-2 * resources.displayMetrics.density).toInt()
+                        layoutParams = android.widget.FrameLayout.LayoutParams(
+                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                        ).apply {
+                            setMargins(margin, margin, margin, margin)
+                        }
+                        val border = android.graphics.drawable.GradientDrawable()
+                        border.setColor(android.graphics.Color.TRANSPARENT)
+                        border.setStroke(
+                            (4 * resources.displayMetrics.density).toInt(),
+                            android.graphics.Color.WHITE
+                        )
+                        background = border
+                    }
+                    container.addView(selectionBorder)
+                }
+
+                return container
+            }
+
+            fun updateSelection(position: Int) {
+                selectedPosition = position
+                notifyDataSetChanged()
+            }
+        }
+
+        gridView.adapter = adapter
+        mainLayout.addView(gridView)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(mainLayout)
+            .setPositiveButton("OK") { _, _ ->
+                // Try to parse hex input first
+                val hexText = hexInput.text.toString().trim()
+                val finalColor = try {
+                    if (hexText.startsWith("#") && hexText.length == 7) {
+                        android.graphics.Color.parseColor(hexText)
+                    } else if (hexText.length == 6) {
+                        android.graphics.Color.parseColor("#$hexText")
+                    } else {
+                        initialSelectedColor // Invalid format, use current from prefs
+                    }
+                } catch (e: Exception) {
+                    // If parsing fails, use the current color from prefs
+                    initialSelectedColor
+                }
+                onColorSelected(finalColor)
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        // Update hex input when grid color is selected
+        gridView.setOnItemClickListener { _, _, position, _ ->
+            val selectedColor = colorInts[position]
+            val hexString = String.format("#%06X", 0xFFFFFF and selectedColor)
+            hexInput.setText(hexString)
+            hexInput.setSelection(hexString.length)
+            adapter.updateSelection(position)
+        }
+
+        // Update grid selection when hex is manually entered
+        hexInput.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                val hexText = s.toString().trim()
+                try {
+                    val parsedColor = if (hexText.startsWith("#") && hexText.length == 7) {
+                        android.graphics.Color.parseColor(hexText)
+                    } else if (hexText.length == 6) {
+                        android.graphics.Color.parseColor("#$hexText")
+                    } else {
+                        return // Invalid length, don't update
+                    }
+
+                    // Find if this color exists in the grid
+                    val position = colorInts.indexOf(parsedColor)
+                    if (position >= 0) {
+                        adapter.updateSelection(position)
+                        // Scroll to show the selected color
+                        gridView.smoothScrollToPosition(position)
+                    } else {
+                        // Color not in grid, clear selection
+                        adapter.updateSelection(-1)
+                    }
+                } catch (e: Exception) {
+                    // Invalid color format, ignore
+                }
+            }
+        })
+
+        dialog.show()
+    }
+
     private fun setupGameLaunchBehavior() {
         // Load saved game launch behavior (default: "game_image")
-        val gameLaunchBehavior = prefs.getString(GAME_LAUNCH_BEHAVIOR_KEY, "game_image") ?: "game_image"
+        val gameLaunchBehavior = prefsManager.gameLaunchBehavior
 
         // Set initial chip selection
         val chipToCheck = when (gameLaunchBehavior) {
-            "game_image" -> R.id.gameLaunchGameImage
-            "black_screen" -> R.id.gameLaunchBlackScreen
-            else -> R.id.gameLaunchDefaultImage
+            "game_image" -> binding.gameLaunchGameImage
+            "black_screen" -> binding.gameLaunchBlackScreen
+            else -> binding.gameLaunchDefaultImage
         }
-        gameLaunchBehaviorChipGroup.check(chipToCheck)
+        binding.gameLaunchBehaviorChipGroup.check(chipToCheck.id)
 
         // Setup listener
-        gameLaunchBehaviorChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.gameLaunchBehaviorChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
                 val behavior = when (checkedIds[0]) {
-                    R.id.gameLaunchGameImage -> "game_image"
-                    R.id.gameLaunchBlackScreen -> "black_screen"
+                    binding.gameLaunchGameImage.id -> "game_image"
+                    binding.gameLaunchBlackScreen.id -> "black_screen"
                     else -> "default_image"
                 }
-                prefs.edit().putString(GAME_LAUNCH_BEHAVIOR_KEY, behavior).apply()
+                prefsManager.gameLaunchBehavior = behavior
                 // Mark as changed
                 gameLaunchBehaviorChanged = true
             }
@@ -715,59 +835,53 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun setupScreensaverBehavior() {
         // Load saved screensaver behavior (default: "game_image")
-        val screensaverBehavior = prefs.getString(SCREENSAVER_BEHAVIOR_KEY, "game_image") ?: "game_image"
+        val screensaverBehavior = prefsManager.screensaverBehavior
 
         // Set initial chip selection
         val chipToCheck = when (screensaverBehavior) {
-            "game_image" -> R.id.screensaverGameImage
-            "black_screen" -> R.id.screensaverBlackScreen
-            else -> R.id.screensaverDefaultImage
+            "game_image" -> binding.screensaverGameImage
+            "black_screen" -> binding.screensaverBlackScreen
+            else -> binding.screensaverDefaultImage
         }
-        screensaverBehaviorChipGroup.check(chipToCheck)
+        binding.screensaverBehaviorChipGroup.check(chipToCheck.id)
 
         // Setup listener
-        screensaverBehaviorChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.screensaverBehaviorChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
                 val behavior = when (checkedIds[0]) {
-                    R.id.screensaverGameImage -> "game_image"
-                    R.id.screensaverBlackScreen -> "black_screen"
+                    binding.screensaverGameImage.id -> "game_image"
+                    binding.screensaverBlackScreen.id -> "black_screen"
                     else -> "default_image"
                 }
-                prefs.edit().putString(SCREENSAVER_BEHAVIOR_KEY, behavior).apply()
+                prefsManager.screensaverBehavior = behavior
                 // Mark as changed
                 screensaverBehaviorChanged = true
             }
         }
     }
 
-
-    private fun setupDoubleTapFunctionality() {
-
-    // ========== MUSIC INTEGRATION START ==========
-    // DELETE THIS ENTIRE FUNCTION when removing music feature
-
     /**
      * Setup background music settings
-     
+     */
     private fun setupMusicSettings() {
         android.util.Log.d("SettingsActivity", "Setting up music settings")
 
         // Master toggle
-        val musicEnabled = prefs.getBoolean("music.enabled", false)
-        val masterChipToCheck = if (musicEnabled) R.id.musicMasterOn else R.id.musicMasterOff
-        musicMasterChipGroup.check(masterChipToCheck)
+        val musicEnabled = prefsManager.musicEnabled
+        val masterChipToCheck = if (musicEnabled) binding.musicMasterOn else binding.musicMasterOff
+        binding.musicMasterChipGroup.check(masterChipToCheck.id)
 
         // Show/hide detailed settings based on master toggle
-        musicSettings.visibility = if (musicEnabled) View.VISIBLE else View.GONE
+        binding.musicSettings.visibility = if (musicEnabled) View.VISIBLE else View.GONE
 
         // Master toggle listener
-        musicMasterChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.musicMasterChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.musicMasterOn
-                prefs.edit().putBoolean("music.enabled", enabled).apply()
+                val enabled = checkedIds[0] == binding.musicMasterOn.id
+                prefsManager.musicEnabled = enabled
 
                 // Show/hide detailed settings
-                musicSettings.visibility = if (enabled) View.VISIBLE else View.GONE
+                binding.musicSettings.visibility = if (enabled) View.VISIBLE else View.GONE
 
                 // Mark as changed
                 musicSettingsChanged = true
@@ -778,110 +892,123 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         // System view music
-        val systemMusicEnabled = prefs.getBoolean("music.system_enabled", true)
-        val systemChipToCheck = if (systemMusicEnabled) R.id.musicSystemOn else R.id.musicSystemOff
-        musicSystemChipGroup.check(systemChipToCheck)
+        val systemMusicEnabled = prefsManager.musicSystemEnabled
+        val systemChipToCheck = if (systemMusicEnabled) binding.musicSystemOn else binding.musicSystemOff
+        binding.musicSystemChipGroup.check(systemChipToCheck.id)
 
-        musicSystemChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.musicSystemChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.musicSystemOn
-                prefs.edit().putBoolean("music.system_enabled", enabled).apply()
+                val enabled = checkedIds[0] == binding.musicSystemOn.id
+                prefsManager.musicSystemEnabled = enabled
                 musicSettingsChanged = true
                 android.util.Log.d("SettingsActivity", "System music: $enabled")
             }
         }
 
         // Game view music
-        val gameMusicEnabled = prefs.getBoolean("music.game_enabled", true)
-        val gameChipToCheck = if (gameMusicEnabled) R.id.musicGameOn else R.id.musicGameOff
-        musicGameChipGroup.check(gameChipToCheck)
+        val gameMusicEnabled = prefsManager.musicGameEnabled
+        val gameChipToCheck = if (gameMusicEnabled) binding.musicGameOn else binding.musicGameOff
+        binding.musicGameChipGroup.check(gameChipToCheck.id)
 
-        musicGameChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.musicGameChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.musicGameOn
-                prefs.edit().putBoolean("music.game_enabled", enabled).apply()
+                val enabled = checkedIds[0] == binding.musicGameOn.id
+                prefsManager.musicGameEnabled = enabled
                 musicSettingsChanged = true
                 android.util.Log.d("SettingsActivity", "Game music: $enabled")
             }
         }
 
-        // Screensaver music
-        val screensaverMusicEnabled = prefs.getBoolean("music.screensaver_enabled", false)
-        val screensaverChipToCheck = if (screensaverMusicEnabled) R.id.musicScreensaverOn else R.id.musicScreensaverOff
-        musicScreensaverChipGroup.check(screensaverChipToCheck)
+        val gameScrapeChipToCheck = if (prefsManager.musicScrapeGameEnabled) binding.musicScrapeGameOn else binding.musicScrapeGameOff
+        binding.musicScrapeGameChipGroup.check(gameScrapeChipToCheck.id)
 
-        musicScreensaverChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.musicScrapeGameChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.musicScreensaverOn
-                prefs.edit().putBoolean("music.screensaver_enabled", enabled).apply()
+                val enabled = checkedIds[0] == binding.musicScrapeGameOn.id
+                prefsManager.musicScrapeGameEnabled = enabled
+                musicSettingsChanged = true
+                android.util.Log.d("SettingsActivity", "Scrape game music: $enabled")
+            }
+        }
+
+        // Screensaver music
+        val screensaverMusicEnabled = prefsManager.musicScreensaverEnabled
+        val screensaverChipToCheck = if (screensaverMusicEnabled) binding.musicScreensaverOn else binding.musicScreensaverOff
+        binding.musicScreensaverChipGroup.check(screensaverChipToCheck.id)
+
+        binding.musicScreensaverChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == binding.musicScreensaverOn.id
+                prefsManager.musicScreensaverEnabled = enabled
                 musicSettingsChanged = true
                 android.util.Log.d("SettingsActivity", "Screensaver music: $enabled")
             }
         }
 
         // Music during videos
-        val videoBehavior = prefs.getString("music.video_behavior", "duck") ?: "duck"
+        val videoBehavior = prefsManager.musicVideoBehavior
         val videoChipToCheck = when (videoBehavior) {
-            "continue" -> R.id.musicVideoContinue
-            "pause" -> R.id.musicVideoPause
-            else -> R.id.musicVideoDuck
+            "continue" -> binding.musicVideoContinue
+            "pause" -> binding.musicVideoPause
+            else -> binding.musicVideoDuck
         }
-        musicVideoChipGroup.check(videoChipToCheck)
+        binding.musicVideoChipGroup.check(videoChipToCheck.id)
 
-        musicVideoChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.musicVideoChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
                 val behavior = when (checkedIds[0]) {
-                    R.id.musicVideoContinue -> "continue"
-                    R.id.musicVideoPause -> "pause"
+                    binding.musicVideoContinue.id -> "continue"
+                    binding.musicVideoPause.id -> "pause"
                     else -> "duck"
                 }
-                prefs.edit().putString("music.video_behavior", behavior).apply()
+                prefsManager.musicVideoBehavior = behavior
                 android.util.Log.d("SettingsActivity", "Video music behavior: $behavior")
-            }
-        }
-
-        // System-specific music
-        val systemSpecificEnabled = prefs.getBoolean("music.system_specific_enabled", false)
-        val systemSpecificChipToCheck = if (systemSpecificEnabled) R.id.musicSystemSpecificOn else R.id.musicSystemSpecificOff
-        musicSystemSpecificChipGroup.check(systemSpecificChipToCheck)
-
-        musicSystemSpecificChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.musicSystemSpecificOn
-                prefs.edit().putBoolean("music.system_specific_enabled", enabled).apply()
-                musicSettingsChanged = true
-                android.util.Log.d("SettingsActivity", "System-specific music: $enabled")
             }
         }
 
         android.util.Log.d("SettingsActivity", "Music settings setup complete")
 
         // Song title display
-        val songTitleEnabled = prefs.getBoolean("music.song_title_enabled", false)
-        val songTitleChipToCheck = if (songTitleEnabled) R.id.musicSongTitleOn else R.id.musicSongTitleOff
-        musicSongTitleChipGroup.check(songTitleChipToCheck)
+        val songTitleEnabled = prefsManager.musicSongTitleEnabled
+        val songTitleChipToCheck = if (songTitleEnabled) binding.musicSongTitleOn else binding.musicSongTitleOff
+        binding.musicSongTitleChipGroup.check(songTitleChipToCheck.id)
 
         // Show/hide duration section
-        musicSongTitleDurationSection.visibility = if (songTitleEnabled) View.VISIBLE else View.GONE
+        binding.musicSongTitleDurationSection.visibility = if (songTitleEnabled) View.VISIBLE else View.GONE
+        binding.musicSongTitleSystemOnlySection.visibility = if (songTitleEnabled) View.VISIBLE else View.GONE
 
-        musicSongTitleChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+        binding.musicSongTitleChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
-                val enabled = checkedIds[0] == R.id.musicSongTitleOn
-                prefs.edit().putBoolean("music.song_title_enabled", enabled).apply()
+                val enabled = checkedIds[0] == binding.musicSongTitleOn.id
+                prefsManager.musicSongTitleEnabled = enabled
 
                 // Show/hide duration section
-                musicSongTitleDurationSection.visibility = if (enabled) View.VISIBLE else View.GONE
-
+                binding.musicSongTitleDurationSection.visibility = if (enabled) View.VISIBLE else View.GONE
+                binding.musicSongTitleSystemOnlySection.visibility = if (enabled) View.VISIBLE else View.GONE
                 android.util.Log.d("SettingsActivity", "Song title display: $enabled")
             }
         }
 
+
+        val songTitleSystemOnlyEnabled = prefsManager.musicSongTitleSystemOnlyEnabled
+        val songTitleSystemOnlyChipToCheck = if (songTitleSystemOnlyEnabled) binding.musicSongTitleSystemOnlyOn else binding.musicSongTitleSystemOnlyOff
+        binding.musicSongTitleSystemOnlyChipGroup.check(songTitleSystemOnlyChipToCheck.id)
+
+        binding.musicSongTitleSystemOnlyChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == binding.musicSongTitleSystemOnlyOn.id
+                prefsManager.musicSongTitleSystemOnlyEnabled = enabled
+
+                android.util.Log.d("SettingsActivity", "Song title display for system only: $enabled")
+            }
+        }
+
         // Song title duration
-        val songTitleDuration = prefs.getInt("music.song_title_duration", 0) // 0-15 (0=2s, 15=infinite)
-        musicSongTitleDurationSeekBar.progress = songTitleDuration
+        val songTitleDuration = prefsManager.musicSongTitleDuration // 0-15 (0=2s, 15=infinite)
+        binding.musicSongTitleDurationSeekBar.progress = songTitleDuration
         updateSongTitleDurationText(songTitleDuration)
 
-        musicSongTitleDurationSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        binding.musicSongTitleDurationSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 updateSongTitleDurationText(progress)
             }
@@ -890,18 +1017,18 @@ class SettingsActivity : AppCompatActivity() {
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 seekBar?.let {
-                    prefs.edit().putInt("music.song_title_duration", it.progress).apply()
+                    prefsManager.musicSongTitleDuration = it.progress
                 }
             }
         })
 
         // Song title background opacity
-        val songTitleOpacity = prefs.getInt("music.song_title_opacity", 80) // 0-100 (default 80%)
+        val songTitleOpacity = prefsManager.musicSongTitleOpacity // 0-100 (default 80%)
         val opacityProgress = songTitleOpacity / 5 // Convert 0-100 to 0-20
-        musicSongTitleOpacitySeekBar.progress = opacityProgress
+        binding.musicSongTitleOpacitySeekBar.progress = opacityProgress
         updateSongTitleOpacityText(songTitleOpacity)
 
-        musicSongTitleOpacitySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        binding.musicSongTitleOpacitySeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 val opacityPercent = progress * 5 // Convert 0-20 to 0-100
                 updateSongTitleOpacityText(opacityPercent)
@@ -912,7 +1039,7 @@ class SettingsActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 seekBar?.let {
                     val opacityPercent = it.progress * 5 // Convert 0-20 to 0-100
-                    prefs.edit().putInt("music.song_title_opacity", opacityPercent).apply()
+                    prefsManager.musicSongTitleOpacity = opacityPercent
                     musicSettingsChanged = true
                 }
             }
@@ -930,51 +1057,50 @@ class SettingsActivity : AppCompatActivity() {
             val duration = (progress + 1) * 2 // 0->2s, 1->4s, 2->6s, ... 14->30s
             "${duration}s"
         }
-        musicSongTitleDurationText.text = text
+        binding.musicSongTitleDurationText.text = text
     }
 
     private fun updateSongTitleOpacityText(progress: Int) {
         // progress is 0-100 in 5% increments (0, 5, 10, ... 95, 100)
-        musicSongTitleOpacityText.text = "$progress%"
+        binding.musicSongTitleOpacityText.text = "$progress%"
     }
 
-    // ========== MUSIC INTEGRATION END ==========
-    */
-
+    private fun setupBlackOverlay() {
         // Load saved black overlay enabled state (default: false/off)
-        val savedMode = prefs.getString(DOUBLE_TAP_BEHAVIOR_KEY, "off")
+        val blackOverlayEnabled = prefsManager.blackOverlayEnabled
 
         // Set initial chip selection
-        val chipIdToCheck = when (savedMode) {
-            "black_overlay" -> R.id.blackOverlayOn
-            "video" -> R.id.doubleTapVideoOn
-            else -> R.id.doubleTapOff // Default to Off
-        }
-        doubleTapChipGroup.check(chipIdToCheck)
+        val chipToCheck = if (blackOverlayEnabled) binding.blackOverlayOn else binding.blackOverlayOff
+        binding.blackOverlayChipGroup.check(chipToCheck.id)
 
         // Setup listener
-        doubleTapChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
-            // Google's ChipGroup returns a list of IDs, we just want the first one
+        binding.blackOverlayChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
             if (checkedIds.isNotEmpty()) {
-                val selectedId = checkedIds[0]
+                val enabled = checkedIds[0] == binding.blackOverlayOn.id
+                prefsManager.blackOverlayEnabled = enabled
+            }
+        }
+    }
 
-                // Convert the selected UI ID back into a number to save
-                val modeToSave = when (selectedId) {
-                    R.id.blackOverlayOn -> "black_overlay"
-                    R.id.doubleTapVideoOn -> "video"
-                    else -> "off"
-                }
+    private fun setupVideoDoubleTap() {
+        val doubleTapVideoEnabled = prefsManager.doubleTapVideoEnabled
 
-                // Save the integer
-                prefs.edit().putString(DOUBLE_TAP_BEHAVIOR_KEY, modeToSave).apply()
-                doubleTapFunctionalityChanged = true
+        // Set initial chip selection
+        val chipToCheck = if (doubleTapVideoEnabled) binding.doubleTapVideoOn else binding.doubleTapVideoOff
+        binding.doubleTapChipGroup.check(chipToCheck.id)
+
+        // Setup listener
+        binding.doubleTapChipGroup.setOnCheckedStateChangeListener { _, checkedIds ->
+            if (checkedIds.isNotEmpty()) {
+                val enabled = checkedIds[0] == binding.doubleTapVideoOn.id
+                prefsManager.doubleTapVideoEnabled = enabled
             }
         }
     }
 
     private fun updateMediaPathDisplay() {
-        val path = prefs.getString(MEDIA_PATH_KEY, "/storage/emulated/0/ES-DE/downloaded_media") ?: "/storage/emulated/0/ES-DE/downloaded_media"
-        mediaPathText.text = path
+        val path = prefsManager.mediaPath
+        binding.mediaPathText.text = path
 
         // Check if folder exists
         val mediaDir = java.io.File(path)
@@ -984,40 +1110,37 @@ class SettingsActivity : AppCompatActivity() {
         when {
             exists && hasCorrectName -> {
                 // Folder exists and has correct name - green indicator
-                mediaStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                mediaStatusText.text = "●"
-                mediaStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                mediaStatusDescription.text = "✓ Folder found"
+                binding.mediaStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                binding.mediaStatusText.text = "●"
+                binding.mediaStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                binding.mediaStatusDescription.text = "✓ Folder found"
             }
             exists && !hasCorrectName -> {
                 // Folder exists but wrong name - yellow indicator
-                mediaStatusText.setTextColor(android.graphics.Color.parseColor("#FFC107"))
-                mediaStatusText.text = "●"
-                mediaStatusDescription.setTextColor(android.graphics.Color.parseColor("#FFC107"))
-                mediaStatusDescription.text = "⚠ Non-standard path"
+                binding.mediaStatusText.setTextColor(android.graphics.Color.parseColor("#FFC107"))
+                binding.mediaStatusText.text = "●"
+                binding.mediaStatusDescription.setTextColor(android.graphics.Color.parseColor("#FFC107"))
+                binding.mediaStatusDescription.text = "⚠ Non-standard path"
             }
             else -> {
                 // Folder not found - gray indicator
-                mediaStatusText.setTextColor(android.graphics.Color.parseColor("#666666"))
-                mediaStatusText.text = "●"
-                mediaStatusDescription.setTextColor(android.graphics.Color.parseColor("#666666"))
-                mediaStatusDescription.text = "Folder not found"
+                binding.mediaStatusText.setTextColor(android.graphics.Color.parseColor("#666666"))
+                binding.mediaStatusText.text = "●"
+                binding.mediaStatusDescription.setTextColor(android.graphics.Color.parseColor("#666666"))
+                binding.mediaStatusDescription.text = "Folder not found"
             }
         }
     }
 
     private fun updateSystemPathDisplay() {
-        val path = prefs.getString(SYSTEM_PATH_KEY, null)
+        val path = prefsManager.systemPath.takeIf { it.isNotEmpty() }
         val defaultPath = "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_images"
-        systemPathText.text = path ?: "Default: $defaultPath"
+        binding.systemPathText.text = path ?: "Default: $defaultPath"
 
         // Setup System Logos Path
-        val systemLogosPath = prefs.getString(
-            "system_logos_path",
-            null
-        )
+        val systemLogosPath = prefsManager.systemLogosPath.takeIf { it.isNotEmpty() }
         val defaultLogosPath = "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_logos"
-        systemLogosPathText.text = systemLogosPath ?: "Default: $defaultLogosPath"
+        binding.systemLogosPathText.text = systemLogosPath ?: "Default: $defaultLogosPath"
     }
 
     private fun getPathFromUri(uri: Uri): String {
@@ -1414,66 +1537,74 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Update scripts path display with validation
+     * Now uses ScriptManager for centralized validation logic
+     */
     private fun updateScriptsPathDisplay() {
-        val path = prefs.getString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts") ?: "/storage/emulated/0/ES-DE/scripts"
-        scriptsPathText.text = path
+        val path = prefsManager.scriptsPath
+        binding.scriptsPathText.text = path
 
         val scriptsDir = java.io.File(path)
 
-        var validityRapport: Array<Int> = scriptManager.checkScriptValidityWithRapport(scriptsDir)
-
-        var validScripts = validityRapport[0]
-        var invalidScripts = validityRapport[1]
-        var missingScripts = validityRapport[2]
+        // Validate scripts using ScriptManager
+        val validationResult = ScriptManager.validateScripts(scriptsDir)
 
         // Update status based on validation results
         when {
-            validScripts == 7 -> {
-                // All 7 scripts exist with correct content - green indicator
-                scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                scriptsStatusText.text = "●"
-                scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                scriptsStatusDescription.text = "✓ All 7 scripts valid"
+            validationResult.allValid -> {
+                // All 7 scripts valid - green indicator
+                binding.scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                binding.scriptsStatusText.text = "●"
+                binding.scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                binding.scriptsStatusDescription.text = "✓ All 7 scripts valid"
             }
-            validScripts > 0 -> {
+            validationResult.outdatedCount > 0 -> {
+                // Scripts exist but are outdated - yellow indicator
+                binding.scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#FFC107"))
+                binding.scriptsStatusText.text = "●"
+                binding.scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#FFC107"))
+                binding.scriptsStatusDescription.text = "⚠ ${validationResult.outdatedCount} outdated (update for quote handling)"
+            }
+            validationResult.validCount > 0 -> {
                 // Some scripts valid - yellow indicator
-                scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#FFC107"))
-                scriptsStatusText.text = "●"
-                scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#FFC107"))
+                binding.scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#FFC107"))
+                binding.scriptsStatusText.text = "●"
+                binding.scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#FFC107"))
 
                 val issues = mutableListOf<String>()
-                if (missingScripts > 0) issues.add("${missingScripts} missing")
-                if (invalidScripts > 0) issues.add("${invalidScripts} invalid/outdated")
+                if (validationResult.missingCount > 0) issues.add("${validationResult.missingCount} missing")
+                if (validationResult.invalidCount > 0) issues.add("${validationResult.invalidCount} invalid")
 
-                scriptsStatusDescription.text = "⚠ $validScripts/7 valid (${issues.joinToString(", ")})"
+                binding.scriptsStatusDescription.text = "⚠ ${validationResult.validCount}/7 valid (${issues.joinToString(", ")})"
             }
             else -> {
-                // No valid scripts - gray/red indicator
-                scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
-                scriptsStatusText.text = "●"
-                scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+                // No valid scripts - red indicator
+                binding.scriptsStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+                binding.scriptsStatusText.text = "●"
+                binding.scriptsStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
 
-                if (missingScripts == 7) {
-                    scriptsStatusDescription.text = "Scripts not found"
-                } else if (invalidScripts > 0) {
-                    scriptsStatusDescription.text = "⚠ Scripts found but invalid/outdated"
+                if (validationResult.missingCount == 7) {
+                    binding.scriptsStatusDescription.text = "Scripts not found"
+                } else if (validationResult.invalidCount > 0 || validationResult.outdatedCount > 0) {
+                    binding.scriptsStatusDescription.text = "⚠ Scripts found but invalid/outdated"
                 } else {
-                    scriptsStatusDescription.text = "Scripts missing or invalid"
+                    binding.scriptsStatusDescription.text = "Scripts missing or invalid"
                 }
             }
         }
     }
 
     private fun updateCustomBackgroundDisplay() {
-        val customBackgroundPath = prefs.getString(CUSTOM_BACKGROUND_KEY, null)
+        val customBackgroundPath = prefsManager.customBackgroundPath.takeIf { it.isNotEmpty() }
 
         if (customBackgroundPath == null) {
             // No custom background set
-            customBackgroundPathText.text = "Not set (using built-in default)"
-            customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#666666"))
-            customBackgroundStatusText.text = "●"
-            customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#666666"))
-            customBackgroundStatusDescription.text = "Using built-in default"
+            binding.customBackgroundPathText.text = "Not set (using built-in default)"
+            binding.customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#666666"))
+            binding.customBackgroundStatusText.text = "●"
+            binding.customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#666666"))
+            binding.customBackgroundStatusDescription.text = "Using built-in default"
             return
         }
 
@@ -1483,27 +1614,32 @@ class SettingsActivity : AppCompatActivity() {
 
             if (file.exists() && file.canRead()) {
                 // File exists and accessible - green indicator
-                customBackgroundPathText.text = file.name
-                customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                customBackgroundStatusText.text = "●"
-                customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                customBackgroundStatusDescription.text = "✓ Custom background set"
+                binding.customBackgroundPathText.text = file.name
+                binding.customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                binding.customBackgroundStatusText.text = "●"
+                binding.customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                binding.customBackgroundStatusDescription.text = "✓ Custom background set"
             } else {
                 // File not accessible - red indicator
-                customBackgroundPathText.text = file.name
-                customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
-                customBackgroundStatusText.text = "●"
-                customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
-                customBackgroundStatusDescription.text = "⚠ File not accessible"
+                binding.customBackgroundPathText.text = file.name
+                binding.customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+                binding.customBackgroundStatusText.text = "●"
+                binding.customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+                binding.customBackgroundStatusDescription.text = "⚠ File not accessible"
             }
         } catch (e: Exception) {
             // Error checking file - red indicator
-            customBackgroundPathText.text = customBackgroundPath
-            customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
-            customBackgroundStatusText.text = "●"
-            customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
-            customBackgroundStatusDescription.text = "⚠ Error: ${e.message}"
+           binding.customBackgroundPathText.text = customBackgroundPath
+           binding.customBackgroundStatusText.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+           binding.customBackgroundStatusText.text = "●"
+           binding.customBackgroundStatusDescription.setTextColor(android.graphics.Color.parseColor("#CF6679"))
+           binding.customBackgroundStatusDescription.text = "⚠ Error: ${e.message}"
         }
+    }
+
+    private fun updateMusicPathDisplay() {
+        val path = prefsManager.musicPath
+        binding.musicPathText.text = path
     }
 
     /**
@@ -1551,65 +1687,36 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * Update scripts directly in settings (similar to MainActivity version)
+     * Update scripts directly in settings
+     * Now uses ScriptManager for centralized logic
      */
     private fun updateScriptsInSettings() {
-        try {
-            val scriptsPath = prefs.getString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts")
-            scriptManager.updateScriptsIfNeeded(scriptsPath)
+        val scriptsPath = prefsManager.scriptsPath
+
+        val result = ScriptManager.createAllScripts(File(scriptsPath))
+
+        if (result.success) {
+            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
 
             // Update the display
             updateScriptsPathDisplay()
-
-            // Show success message
-            Toast.makeText(
-                this,
-                "Scripts updated successfully!",
-                Toast.LENGTH_LONG
-            ).show()
 
             // Offer verification
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 showScriptsPathChangedVerificationPrompt()
             }, 500)
-
-        } catch (e: Exception) {
-            // Show error message
-            Toast.makeText(
-                this,
-                "Error updating scripts: ${e.message}",
-                Toast.LENGTH_LONG
-            ).show()
-            android.util.Log.e("SettingsActivity", "Error updating scripts", e)
+        } else {
+            Toast.makeText(this, result.message, Toast.LENGTH_LONG).show()
+            android.util.Log.e("SettingsActivity", result.message)
         }
     }
 
     private fun checkAndRequestPermissions() {
-        when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
-                // Android 11+ - Check if we have MANAGE_EXTERNAL_STORAGE
-                if (Environment.isExternalStorageManager()) {
-                    createScriptFiles()
-                } else {
-                    showManageStoragePermissionDialog()
-                }
-            }
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                // Android 6-10 - Check WRITE_EXTERNAL_STORAGE
-                if (ContextCompat.checkSelfPermission(
-                        this,
-                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    createScriptFiles()
-                } else {
-                    storagePermissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                }
-            }
-            else -> {
-                // Android 5 and below - no runtime permissions needed
-                createScriptFiles()
-            }
+        // Android 13+ only - simplified permission model
+        if (Environment.isExternalStorageManager()) {
+            createScriptFiles()
+        } else {
+            showManageStoragePermissionDialog()
         }
     }
 
@@ -1764,17 +1871,14 @@ class SettingsActivity : AppCompatActivity() {
             .setCustomTitle(titleContainer)
             .setMessage("The app needs storage permissions to create script files and access media folders.\n\nClick 'Grant Permission' to open system settings. After granting permission, the wizard will automatically continue.")
             .setPositiveButton("Grant Permission") { _, _ ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                        intent.data = Uri.parse("package:$packageName")
-                        startActivity(intent)
-                    } catch (e: Exception) {
-                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                        startActivity(intent)
-                    }
-                } else {
-                    storagePermissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                // Android 13+ - always use MANAGE_ALL_FILES_ACCESS_PERMISSION
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    intent.data = Uri.parse("package:$packageName")
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    startActivity(intent)
                 }
             }
             .setCancelable(false)
@@ -1802,8 +1906,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun createScriptFiles() {
-        val scriptsPath = prefs.getString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts")
-            ?: "/storage/emulated/0/ES-DE/scripts"
+        val scriptsPath = prefsManager.scriptsPath
 
         try {
             val scriptsDir = File(scriptsPath)
@@ -1816,8 +1919,8 @@ class SettingsActivity : AppCompatActivity() {
                 showScriptOverwriteDialog(scriptsDir, existingScripts)
             } else {
                 // No existing scripts, create them
-                val gameSelectScript = File(scriptsDir, "game-select/esdecompanion-game-select.sh")
-                val systemSelectScript = File(scriptsDir, "system-select/esdecompanion-system-select.sh")
+                val gameSelectScript = File(scriptsDir, "game-select/${AppConstants.Scripts.GAME_SELECT_SCRIPT}")
+                val systemSelectScript = File(scriptsDir, "system-select/${AppConstants.Scripts.SYSTEM_SELECT_SCRIPT}")
                 writeScriptFiles(scriptsDir, gameSelectScript, systemSelectScript)
             }
 
@@ -1841,7 +1944,7 @@ class SettingsActivity : AppCompatActivity() {
             val failedToDelete = deleteOldScriptFiles(scriptsDir)
 
             // Write all 7 script files
-            scriptManager.updateScriptsIfNeeded(scriptsDir)
+            writeAllScriptFiles(scriptsDir)
 
             // Generate and show success message
             val successMessage = getScriptCreationSuccessMessage(failedToDelete)
@@ -1866,20 +1969,11 @@ class SettingsActivity : AppCompatActivity() {
 
     /**
      * Check for existing scripts
+     * Now delegates to ScriptManager
      * @return List of existing script File objects
      */
     private fun findExistingScripts(scriptsDir: File): List<File> {
-        val scriptFiles = listOf(
-            File(scriptsDir, "game-select/esdecompanion-game-select.sh"),
-            File(scriptsDir, "system-select/esdecompanion-system-select.sh"),
-            File(scriptsDir, "game-start/esdecompanion-game-start.sh"),
-            File(scriptsDir, "game-end/esdecompanion-game-end.sh"),
-            File(scriptsDir, "screensaver-start/esdecompanion-screensaver-start.sh"),
-            File(scriptsDir, "screensaver-end/esdecompanion-screensaver-end.sh"),
-            File(scriptsDir, "screensaver-game-select/esdecompanion-screensaver-game-select.sh")
-        )
-
-        return scriptFiles.filter { it.exists() }
+        return ScriptManager.findExistingScripts(scriptsDir)
     }
 
     /**
@@ -1895,8 +1989,8 @@ class SettingsActivity : AppCompatActivity() {
                     "\n\nOverwriting them will replace any custom modifications you may have made.\n\n" +
                     "Do you want to overwrite the existing scripts?")
             .setPositiveButton("Overwrite") { _, _ ->
-                val gameSelectScript = File(scriptsDir, "game-select/esdecompanion-game-select.sh")
-                val systemSelectScript = File(scriptsDir, "system-select/esdecompanion-system-select.sh")
+                val gameSelectScript = File(scriptsDir, "game-select/${AppConstants.Scripts.GAME_SELECT_SCRIPT}")
+                val systemSelectScript = File(scriptsDir, "system-select/${AppConstants.Scripts.SYSTEM_SELECT_SCRIPT}")
                 writeScriptFiles(scriptsDir, gameSelectScript, systemSelectScript)
             }
             .setNegativeButton("Cancel") { _, _ ->
@@ -1915,54 +2009,29 @@ class SettingsActivity : AppCompatActivity() {
             .show()
     }
 
-
     /**
      * Prepare script directories
+     * Now delegates to ScriptManager
      */
     private fun prepareScriptDirectories(scriptsDir: File) {
-        val directories = listOf(
-            "game-select",
-            "system-select",
-            "game-start",
-            "game-end",
-            "screensaver-start",
-            "screensaver-end",
-            "screensaver-game-select"
-        )
-
-        directories.forEach { dirName ->
-            val dir = File(scriptsDir, dirName)
-            if (!dir.exists()) {
-                dir.mkdirs()
-            }
-        }
+        ScriptManager.prepareScriptDirectories(scriptsDir)
     }
 
     /**
      * Delete old script files that are no longer needed
+     * Now delegates to ScriptManager
      * @return List of script names that failed to delete
      */
     private fun deleteOldScriptFiles(scriptsDir: File): List<String> {
-        val failedToDelete = mutableListOf<String>()
+        return ScriptManager.deleteOldScriptFiles(scriptsDir)
+    }
 
-        val oldScripts = listOf(
-            File(scriptsDir, "game-select/companion_game_select.sh"),
-            File(scriptsDir, "system-select/companion_system_select.sh")
-        )
-
-        oldScripts.forEach { oldScript ->
-            if (oldScript.exists()) {
-                try {
-                    if (!oldScript.delete()) {
-                        failedToDelete.add(oldScript.name)
-                    }
-                } catch (e: Exception) {
-                    failedToDelete.add(oldScript.name)
-                }
-            }
-        }
-
-        return failedToDelete
+    /**
+     * Write all 7 script files
+     * Now delegates to ScriptManager for centralized logic
+     */
+    private fun writeAllScriptFiles(scriptsDir: File) {
+        ScriptManager.writeAllScriptFiles(scriptsDir)
     }
 
     /**
@@ -1991,20 +2060,11 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun checkAndAutoStartWizard() {
-        // Check if permissions are granted
-        val hasPermission = when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                ContextCompat.checkSelfPermission(
-                    this,
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                ) == PackageManager.PERMISSION_GRANTED
-            }
-            else -> true
-        }
+        // Check if permissions are granted (Android 13+ simplified)
+        val hasPermission = Environment.isExternalStorageManager()
 
         // Check if this is first launch
-        val hasCompletedSetup = prefs.getBoolean("setup_completed", false)
+        val hasCompletedSetup = prefsManager.setupCompleted
 
         android.util.Log.d("SettingsActivity", "Auto-start check - hasPermission: $hasPermission, hasCompletedSetup: $hasCompletedSetup")
 
@@ -2078,17 +2138,8 @@ class SettingsActivity : AppCompatActivity() {
 
         when (setupStep) {
             1 -> {
-                // Step 1: Check permissions
-                val hasPermission = when {
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
-                        ContextCompat.checkSelfPermission(
-                            this,
-                            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                        ) == PackageManager.PERMISSION_GRANTED
-                    }
-                    else -> true
-                }
+                // Step 1: Check permissions (Android 13+ simplified)
+                val hasPermission = Environment.isExternalStorageManager()
 
                 if (hasPermission) {
                     // Permissions already granted
@@ -2114,7 +2165,7 @@ class SettingsActivity : AppCompatActivity() {
                     onCancel = { isInSetupWizard = false },
                     onTopRight = {
                         // Use default path
-                        prefs.edit().putString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts").apply()
+                        prefsManager.scriptsPath = "/storage/emulated/0/ES-DE/scripts"
                         updateScriptsPathDisplay()
                         continueSetupWizard()
                     },
@@ -2134,16 +2185,16 @@ class SettingsActivity : AppCompatActivity() {
                     onCancel = { isInSetupWizard = false },
                     onTopRight = {
                         // Check if all 7 scripts exist
-                        val scriptsPath = prefs.getString(SCRIPTS_PATH_KEY, "/storage/emulated/0/ES-DE/scripts") ?: "/storage/emulated/0/ES-DE/scripts"
+                        val scriptsPath = prefsManager.scriptsPath
                         val scriptsDir = java.io.File(scriptsPath)
                         val scriptFiles = listOf(
-                            java.io.File(scriptsDir, "game-select/esdecompanion-game-select.sh"),
-                            java.io.File(scriptsDir, "system-select/esdecompanion-system-select.sh"),
-                            java.io.File(scriptsDir, "game-start/esdecompanion-game-start.sh"),
-                            java.io.File(scriptsDir, "game-end/esdecompanion-game-end.sh"),
-                            java.io.File(scriptsDir, "screensaver-start/esdecompanion-screensaver-start.sh"),
-                            java.io.File(scriptsDir, "screensaver-end/esdecompanion-screensaver-end.sh"),
-                            java.io.File(scriptsDir, "screensaver-game-select/esdecompanion-screensaver-game-select.sh")
+                            java.io.File(scriptsDir, "game-select/${AppConstants.Scripts.GAME_SELECT_SCRIPT}"),
+                            java.io.File(scriptsDir, "system-select/${AppConstants.Scripts.SYSTEM_SELECT_SCRIPT}"),
+                            java.io.File(scriptsDir, "game-start/${AppConstants.Scripts.GAME_START_SCRIPT}"),
+                            java.io.File(scriptsDir, "game-end/${AppConstants.Scripts.GAME_END_SCRIPT}"),
+                            java.io.File(scriptsDir, "screensaver-start/${AppConstants.Scripts.SCREENSAVER_START_SCRIPT}"),
+                            java.io.File(scriptsDir, "screensaver-end/${AppConstants.Scripts.SCREENSAVER_END_SCRIPT}"),
+                            java.io.File(scriptsDir, "screensaver-game-select/${AppConstants.Scripts.SCREENSAVER_GAME_SELECT_SCRIPT}")
                         )
 
                         val allExist = scriptFiles.all { it.exists() }
@@ -2171,7 +2222,7 @@ class SettingsActivity : AppCompatActivity() {
                     onCancel = { isInSetupWizard = false },
                     onTopRight = {
                         // Use default path
-                        prefs.edit().putString(MEDIA_PATH_KEY, "/storage/emulated/0/ES-DE/downloaded_media").apply()
+                        prefsManager.mediaPath = "/storage/emulated/0/ES-DE/downloaded_media"
                         updateMediaPathDisplay()
                         continueSetupWizard()
                     },
@@ -2203,7 +2254,7 @@ class SettingsActivity : AppCompatActivity() {
                 isInSetupWizard = false
 
                 // Mark setup as completed
-                prefs.edit().putBoolean("setup_completed", true).apply()
+                prefsManager.setupCompleted = true
 
                 // Show comprehensive tutorial dialog
                 showPostSetupTutorial(triggerVerification = true)
@@ -2294,7 +2345,7 @@ class SettingsActivity : AppCompatActivity() {
             .sortedBy { it.name.lowercase() }
 
         // Load hidden apps from preferences
-        val hiddenApps = prefs.getStringSet("hidden_apps", setOf()) ?: setOf()
+        val hiddenApps = prefsManager.hiddenApps
         val selectedApps = apps.map { !hiddenApps.contains(it.packageName) }.toBooleanArray()
 
         // Create ListView
@@ -2364,7 +2415,7 @@ class SettingsActivity : AppCompatActivity() {
                     }
                 }
                 android.util.Log.d("SettingsActivity", "Saving hidden apps: $newHiddenApps")
-                prefs.edit().putStringSet("hidden_apps", newHiddenApps).apply()
+                prefsManager.hiddenApps = newHiddenApps
 
                 // Notify MainActivity to refresh app list
                 setResult(Activity.RESULT_OK, Intent().apply {
@@ -2384,8 +2435,8 @@ class SettingsActivity : AppCompatActivity() {
     )
 
     private fun setupSwipeGesture() {
-        val scrollView = findViewById<android.widget.ScrollView>(R.id.settingsScrollView)
-        val settingsBackButton = findViewById<ImageButton>(R.id.settingsBackButton)
+        val scrollView = findViewById<android.widget.ScrollView>(binding.settingsScrollView.id)
+        val settingsBackButton = findViewById<ImageButton>(binding.settingsBackButton.id)
         settingsBackButton.setOnClickListener {
             onBackPressedDispatcher.onBackPressed()
         }
@@ -2543,18 +2594,42 @@ Enjoy your enhanced retro gaming experience!
             .show()
     }
 
+    private fun observeApiKeys() {
+        lifecycleScope.launch {
+            apiKeyManager.scraperCredentials.collect { creds ->
+                if (binding.etSteamGridKey.text.isNullOrEmpty()) {
+                    binding.etSteamGridKey.setText(creds.sgdbKey ?: "")
+                }
+                if (binding.etIgdbClientId.text.isNullOrEmpty()) {
+                    binding.etIgdbClientId.setText(creds.igdbId ?: "")
+                }
+                if (binding.etIgdbClientSecret.text.isNullOrEmpty()) {
+                    binding.etIgdbClientSecret.setText(creds.igdbSecret ?: "")
+                }
+            }
+        }
+    }
+
     companion object {
         const val PREFS_NAME = "ESDESecondScreenPrefs"
         const val MEDIA_PATH_KEY = "media_path"
         const val SYSTEM_PATH_KEY = "system_path"
         const val SCRIPTS_PATH_KEY = "scripts_path"
         const val COLUMN_COUNT_KEY = "column_count"
+        const val IMAGE_PREFERENCE_KEY = "image_preference"
+        const val SYSTEM_IMAGE_PREFERENCE_KEY = "system_image_preference"
+        const val GAME_IMAGE_PREFERENCE_KEY = "game_image_preference"
+        const val SYSTEM_BACKGROUND_COLOR_KEY = "system_background_color"
+        const val GAME_BACKGROUND_COLOR_KEY = "game_background_color"
         const val DIMMING_KEY = "dimming"
         const val BLUR_KEY = "blur"
         const val DRAWER_TRANSPARENCY_KEY = "drawer_transparency"
+        const val VIDEO_ENABLED_KEY = "video_enabled"
+        const val VIDEO_DELAY_KEY = "video_delay"
+        const val VIDEO_AUDIO_ENABLED_KEY = "video_audio_enabled"
         const val GAME_LAUNCH_BEHAVIOR_KEY = "game_launch_behavior"
         const val SCREENSAVER_BEHAVIOR_KEY = "screensaver_behavior"
-        const val DOUBLE_TAP_BEHAVIOR_KEY = "double_tap_behavior"
+        const val BLACK_OVERLAY_ENABLED_KEY = "black_overlay_enabled"
         const val CUSTOM_BACKGROUND_KEY = "custom_background_uri"  // ADD THIS LINE
     }
 }

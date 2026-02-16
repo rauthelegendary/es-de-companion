@@ -23,12 +23,17 @@ class SGDBScraper (apiKey: String) : ArtScraper {
         .create(SteamGridDBService::class.java)
 
     override suspend fun searchGame(query: String): List<GameSearchResult> {
-        val response = service.searchGame(query)
-        return if (response.success) {
-            response.data.map {
-                GameSearchResult(it.id, it.name, sourceName)
-            }
-        } else emptyList()
+        try {
+            val response = service.searchGame(query)
+            return if (response.success) {
+                response.data.map {
+                    GameSearchResult(it.id, it.name, sourceName)
+                }
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.e("SteamGrid", "Failed SGDB search", e)
+            return emptyList()
+        }
     }
 
     override suspend fun getAvailableMediaTypes(gameId: String): List<MediaCategory> {
