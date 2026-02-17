@@ -283,8 +283,7 @@ class WidgetView(
     fun updateContent(newWidget: Widget, page: WidgetPage, game: String, system: String) {
         this.game = game
         this.system = system
-        val isDifferentWidget = this.widget.id != newWidget.id
-        if (isDifferentWidget) {
+        if (widget.id != newWidget.id) {
             prepareForReuse()
             currentImageIndex = newWidget.slot
         }
@@ -357,14 +356,16 @@ class WidgetView(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // If locked, don't allow any interaction
         if (isLocked) {
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                return true
+            }
             if (event.action == MotionEvent.ACTION_UP) {
                 cycleImage()
-                return false
+                return true
             }
+            return super.onTouchEvent(event)
         } else {
-
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     isDragging = false
@@ -578,6 +579,7 @@ class WidgetView(
             data = data,
             playAnimation = animate,
             isMarquee = widget.contentType == ContentType.MARQUEE,
+            glint = widget.glint,
             system = system,
             game = game,
             textFallback = widget.contentType == ContentType.MARQUEE || widget.contentType == ContentType.SYSTEM_LOGO
@@ -694,7 +696,7 @@ class WidgetView(
     }
 
     fun isTouchingExtendedCorner(x: Float, y: Float): Boolean {
-        val extend = handleHitZone / 2  // Half the hit zone extends outside
+        val extend = handleHitZone / 10
 
         // Top-left extended zone
         if (x >= -extend && x <= handleHitZone - extend &&
@@ -721,7 +723,7 @@ class WidgetView(
     }
 
     private fun getTouchedResizeCorner(x: Float, y: Float): ResizeCorner {
-        val extend = handleHitZone / 10  // Half extends outside
+        val extend = handleHitZone / 10
 
         // Check top-left (extended outside)
         if (x >= -extend && x <= handleHitZone - extend &&

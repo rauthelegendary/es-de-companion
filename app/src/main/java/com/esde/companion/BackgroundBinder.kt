@@ -100,6 +100,23 @@ class BackgroundBinder(
         switchedGame = (previousGame != gameName) && gameName != null
         this.widgetsLocked = widgetsLocked
 
+        dimmerView.alpha = 1.0f - page.backgroundOpacity
+        if (page.blurRadius > 0) {
+            val blurEffect = RenderEffect.createBlurEffect(
+                page.blurRadius,
+                page.blurRadius,
+                Shader.TileMode.CLAMP
+            )
+            imageView.setRenderEffect(blurEffect)
+        } else {
+            imageView.setRenderEffect(null)
+        }
+        if(page.backgroundType == PageContentType.VIDEO) {
+            updateVideoLayering(page.displayWidgetsOverVideo)
+        } else {
+            updateVideoLayering(true)
+        }
+
         if(sameContent(forcedRefresh, gameName, page, mediaFile)) {
             if(widgetsLocked && player != null && player!!.playbackState == Player.STATE_READY && !player!!.playWhenReady) {
                 player?.play()
@@ -133,28 +150,9 @@ class BackgroundBinder(
         } else {
             showSolidColor(page.solidColor!!)
         }
-
-        dimmerView.alpha = 1.0f - page.backgroundOpacity
-
-        if (page.blurRadius > 0) {
-            val blurEffect = RenderEffect.createBlurEffect(
-                page.blurRadius,
-                page.blurRadius,
-                Shader.TileMode.CLAMP
-            )
-            imageView.setRenderEffect(blurEffect)
-        } else {
-            imageView.setRenderEffect(null)
-        }
     }
 
     private fun sameContent(forcedRefresh: Boolean, gameName: String?, page: WidgetPage, mediaFile: File?): Boolean {
-        var a = !forcedRefresh
-                var b = (!switchedSystem && ((previousGame.isEmpty() && gameName == null) || !switchedGame))
-                var c =  (currentPage != null
-                && page.hasSameVisualSettings(currentPage!!))
-                        var d = (previousMediaFilePath == mediaFile?.absolutePath && page.backgroundType != PageContentType.CUSTOM_IMAGE)
-        var e = a && b && c && d
         return !forcedRefresh
                 && ((!switchedSystem && ((previousGame.isEmpty() && gameName == null) || !switchedGame))
                 && (currentPage != null
@@ -183,7 +181,6 @@ class BackgroundBinder(
         )
 
     }
-
 
     fun stopVideoPlayer() {
         videoView.visibility = View.GONE
@@ -306,7 +303,7 @@ class BackgroundBinder(
             }
 
             val runLayoutLogic = {
-                updateVideoLayering(currentPage?.displayWidgetsOverVideo == true)
+                //updateVideoLayering(currentPage?.displayWidgetsOverVideo == true)
 
                 // 5. Prepare the Stage
                 videoView.visibility = View.VISIBLE
@@ -333,18 +330,17 @@ class BackgroundBinder(
         }
     }
 
-    fun updateVideoLayering(widgetsOverVideo: Boolean) {
+    private fun updateVideoLayering(widgetsOverVideo: Boolean) {
         if (!widgetsOverVideo) {
-            videoView.bringToFront()
-            menuView.bringToFront()
+            widgetContainer.translationZ = 0f
+            videoView.translationZ = 10f
+            dimmerView.translationZ = 20f
         } else {
-            dimmerView.bringToFront()
-            widgetContainer.bringToFront()
-            menuView.bringToFront()
+            videoView.translationZ = 0f
+            dimmerView.translationZ = 10f
+            widgetContainer.translationZ = 20f
         }
-
-        rootContainer.requestLayout()
-        rootContainer.invalidate()
+        menuView.translationZ = 30f
     }
 
     /**

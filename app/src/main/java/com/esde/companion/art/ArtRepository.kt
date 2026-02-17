@@ -29,13 +29,15 @@ class ArtRepository(
         return typesAvailable
     }
 
-    fun setScraper(newScraper: ArtScraper, type: ScraperType) {
-        when(type) {
-            ScraperType.SGDB -> sgdbScraper = newScraper
-            ScraperType.IGDB -> igdbScraper = newScraper
-            ScraperType.LaunchBox -> {
-                if(newScraper is LaunchBoxScraper) {
-                    launchBoxScraper = newScraper
+    fun setScraper(newScraper: ArtScraper?, type: ScraperType) {
+        if (newScraper != null) {
+            when (type) {
+                ScraperType.SGDB -> sgdbScraper = newScraper
+                ScraperType.IGDB -> igdbScraper = newScraper
+                ScraperType.LaunchBox -> {
+                    if (newScraper is LaunchBoxScraper) {
+                        launchBoxScraper = newScraper
+                    }
                 }
             }
         }

@@ -99,6 +99,13 @@ fun WidgetSettingsOverlay(
                     })
                 }
 
+                if (liveWidget.contentType == ContentType.MARQUEE) {
+                    MenuChip("Use glint animation", liveWidget.glint, {
+                        liveWidget = liveWidget.copy(glint = !liveWidget.glint)
+                        onUpdate(liveWidget)
+                    })
+                }
+
                 if (!liveWidget.contentType.isTextWidget()
                     && liveWidget.contentType != ContentType.VIDEO
                     && liveWidget.contentType != ContentType.COLOR_BACKGROUND
@@ -114,9 +121,14 @@ fun WidgetSettingsOverlay(
                         liveWidget = liveWidget.copy(cycle = !liveWidget.cycle)
                         onUpdate(liveWidget)
                     })
+                }
 
                     Divider(Modifier.padding(vertical = 16.dp), color = Color.DarkGray)
 
+                if (!liveWidget.contentType.isTextWidget()
+                    && liveWidget.contentType != ContentType.VIDEO
+                    && liveWidget.contentType != ContentType.COLOR_BACKGROUND
+                ) {
                     Text("Scale Type", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(ScaleType.FIT, ScaleType.CROP).forEach { type ->

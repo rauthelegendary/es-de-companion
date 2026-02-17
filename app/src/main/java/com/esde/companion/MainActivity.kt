@@ -2,6 +2,7 @@ package com.esde.companion
 
 import android.app.ActivityOptions
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -126,11 +127,18 @@ import java.io.IOException
 import kotlin.math.abs
 import androidx.core.view.isVisible
 import coil.Coil
+import coil.Coil.imageLoader
 import com.esde.companion.art.ApiKeyManager
+import com.esde.companion.art.ArtScraper
+import com.esde.companion.art.LaunchBox.LaunchBoxDao
+import com.esde.companion.art.ScraperType
 import com.esde.companion.data.MusicSource
+import com.esde.companion.data.ScraperCredentials
 import com.esde.companion.managers.ImageManager
 import com.esde.companion.managers.MediaManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 
 
 class ContextMenuStateHolder {
@@ -173,6 +181,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private lateinit var menuComposeView: ComposeView
     private lateinit var artRepository: ArtRepository
+    private lateinit var launchBoxDao: LaunchBoxDao
     private lateinit var mediaOverrideRepository: MediaOverrideRepository
     private lateinit var rootLayout: RelativeLayout
     private lateinit var appDrawer: View
@@ -210,6 +219,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
     private var longPressTriggered = false
+    private var isDrag = false
     private var touchDownX = 0f
     private var touchDownY = 0f
     private val LONG_PRESS_TIMEOUT by lazy {
@@ -649,40 +659,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         val database = AppDatabase.getDatabase(this)
         val loudnessDao = database.loudnessDao()
         val mediaOverrideDao = database.mediaOverrideDao()
-        val launchBoxDao = database.launchBoxDao()
+        launchBoxDao = database.launchBoxDao()
         val apiKeyManager = ApiKeyManager.getInstance(this)
         mediaOverrideRepository = MediaOverrideRepository(mediaOverrideDao)
 
-        //lifecycleScope.launch(Dispatchers.IO) {
-        // loudnessDao.clearAllLoudnessData()
-        //}
-
-        ////SCRAPING STUFF////
         lifecycleScope.launch(Dispatchers.IO) {
             mediaOverrideRepository.initialize()
 
             apiKeyManager.scraperCredentials.collect { creds ->
-                var steamGridScraper: SGDBScraper? = null
-                var igdbScraper: IgdbArtScraper? = null
-                if(creds.sgdbKey != null && creds.sgdbKey.isNotEmpty()) {
-                    steamGridScraper = SGDBScraper(creds.sgdbKey)
-                }
-                val launchBoxScraper = LaunchBoxScraper(launchBoxDao)
-
-                if(creds.igdbId != null && creds.igdbSecret != null && creds.igdbId.isNotEmpty() && creds.igdbSecret.isNotEmpty()) {
-                    val token = TwitchAuth.getTwitchAccessToken(creds.igdbId, creds.igdbSecret)
-                    if (token != null) {
-                        IGDBWrapper.setCredentials(creds.igdbId, token)
-                        igdbScraper = IgdbArtScraper()
-                    }
-                }
-                artRepository = ArtRepository(steamGridScraper, igdbScraper, launchBoxScraper)
-
-                if(steamGridScraper != null && igdbScraper != null) {
-                    Log.d("Scraper", "Scrapers re-initialized with latest credentials")
-                } else {
-                    Log.d("Scraper", "Scrapers couldn't be initialized")
-                }
+               updateScrapers(creds)
             }
         }
 
@@ -727,6 +712,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         songTitleText = findViewById(R.id.songTitleText)
         songTitleOverlay = findViewById(R.id.songTitleOverlay)
+        songTitleOverlay.translationZ = 25f
         musicPlayPauseButton = findViewById(R.id.musicPlayPauseButton)
         musicNextButton = findViewById(R.id.musicNextButton)
         songTitleHandler = Handler(Looper.getMainLooper())
@@ -746,9 +732,14 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         widgetPathResolver = WidgetPathResolver(mediaManager, prefsManager, mediaOverrideRepository, gameRepository, prefsManager)
         widgetViewBinder = WidgetViewBinder()
 
-        //TODO: not hardcode this
         lifecycleScope.launch {
-            GameListSyncManager.syncAll(this@MainActivity, File("/storage/emulated/0/ES-DE/gamelists"))
+            val esdeRoot = mediaManager.resolveGamelistFolder()
+            if (esdeRoot != null && esdeRoot.exists()) {
+                GameListSyncManager.syncAll(
+                    this@MainActivity,
+                    esdeRoot
+                )
+            }
         }
 
         // Set initial position off-screen (above the top)
@@ -767,8 +758,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         setupAndroidSettingsButton()
         gameWidgetManager.load()
         systemWidgetManager.load()
-
-
 
         // Apply drawer transparency
         updateDrawerTransparency()
@@ -958,6 +947,36 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         // Auto-launch setup wizard if needed
         checkAndLaunchSetupWizard()
+    }
+
+    private suspend fun updateScrapers(creds: ScraperCredentials) {
+        var steamGridScraper: ArtScraper? = null
+        var igdbScraper: ArtScraper? = null
+        if(creds.sgdbKey != null && creds.sgdbKey.isNotEmpty()) {
+            steamGridScraper = SGDBScraper(creds.sgdbKey)
+        }
+        val launchBoxScraper = LaunchBoxScraper(launchBoxDao)
+
+        if(creds.igdbId != null && creds.igdbSecret != null && creds.igdbId.isNotEmpty() && creds.igdbSecret.isNotEmpty()) {
+            val token = TwitchAuth.getTwitchAccessToken(creds.igdbId, creds.igdbSecret)
+            if (token != null) {
+                IGDBWrapper.setCredentials(creds.igdbId, token)
+                igdbScraper = IgdbArtScraper()
+            }
+        }
+        if(this::artRepository.isInitialized) {
+            artRepository.setScraper(steamGridScraper, ScraperType.SGDB)
+            artRepository.setScraper(igdbScraper, ScraperType.IGDB)
+            artRepository.setScraper(launchBoxScraper, ScraperType.LaunchBox)
+        } else {
+            artRepository = ArtRepository(steamGridScraper, igdbScraper, launchBoxScraper)
+        }
+
+        if(steamGridScraper != null && igdbScraper != null) {
+            Log.d("Scraper", "Scrapers re-initialized with latest credentials")
+        } else {
+            Log.d("Scraper", "Scrapers couldn't be initialized")
+        }
     }
 
     private fun onDeleteMedia(
@@ -1226,7 +1245,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         val currentVersion = try {
             packageManager.getPackageInfo(packageName, 0).versionName
         } catch (e: Exception) {
-            "0.4.3"  // Fallback version
+            "0.6.0"  // Fallback version
         }
 
         // Create custom title view with emoji
@@ -1256,7 +1275,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         messageText.text = """
 ${updatePrefix}🎨 What Are Widgets?
 
-Widgets are overlay elements that display game/system artwork like marquees, box art, screenshots, and more. You can position and size them however you want!
+Widgets are overlay elements that display game/system artwork like marquees, box art, screenshots, and more. You can position and size them however you want! You can also add more pages to create separate collections of widgets and backgrounds.
 
 🔓 Widget Edit Mode
 
@@ -1294,7 +1313,7 @@ After arranging your widgets, toggle Edit Mode back to OFF. This prevents accide
 
 💡 Tips
 
-• Widgets are context-aware - create separate layouts for games vs systems
+• Pages/widgets are context-aware - create separate layouts for games vs systems
 • Use "Bring to Front" / "Send to Back" to layer widgets
 • Each widget updates automatically when you browse in ES-DE
 • System logos work for both built-in and custom system logos
@@ -1665,35 +1684,7 @@ Access this help anytime from the widget menu!
                     }
                     return false
                 }
-
-                override fun onSingleTapUp(event: MotionEvent): Boolean {
-                    if (widgetViewBinder.isWidgetOnLocation(widgetContainer, event.x, event.y)) {
-                        return true
-                    }
-
-                    if (!widgetMenuShowing && menuState.widgetToEditState == null && !menuState.showMenu) {
-                        val screenWidth = resources.displayMetrics.widthPixels
-                        val touchX = event.x
-                        val edgeThreshold = screenWidth * 0.10f // 10% of screen width
-
-                        when {
-                            touchX < edgeThreshold -> {
-                                // Left edge tap
-                                flipPage(false)
-                                return true
-                            }
-
-                            touchX > (screenWidth - edgeThreshold) -> {
-                                // Right edge tap
-                                flipPage(true)
-                                return true
-                            }
-                        }
-                        return true
-                    }
-                    return true
-                }
-            })
+        })
     }
 
     private fun startLongPressTimer() {
@@ -1738,6 +1729,8 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "Hiding black overlay")
         isBlackOverlayShown = false
 
+        backgroundBinder.onBlackscreen()
+
         musicManager.onBlackOverlayChanged(false)
 
         // Hide overlay instantly without animation
@@ -1767,6 +1760,7 @@ Access this help anytime from the widget menu!
         val isDrawerOpen = drawerState == BottomSheetBehavior.STATE_EXPANDED ||
                 drawerState == BottomSheetBehavior.STATE_SETTLING
 
+
         if (!isDrawerOpen) {
             val musicEnabled = prefsManager.musicEnabled
             val songTitleEnabled = prefsManager.musicSongTitleEnabled
@@ -1774,7 +1768,7 @@ Access this help anytime from the widget menu!
             Log.d("MainActivity", "Two-finger check: pointerCount=${ev.pointerCount}, action=${ev.action}, musicEnabled=$musicEnabled, songTitleEnabled=$songTitleEnabled, hasActiveMusic=${musicManager.isPlaying() || musicManager.isPaused()}")
 
             // Only process two-finger gestures when music and song title are enabled
-            if (musicEnabled && songTitleEnabled && ev.pointerCount == 2 && ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            if (!menuState.showMenu && musicEnabled && songTitleEnabled && ev.pointerCount == 2 && ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
                 val currentTime = System.currentTimeMillis()
                 val timeSinceLast = currentTime - lastTwoFingerTapTime
 
@@ -1839,8 +1833,9 @@ Access this help anytime from the widget menu!
                 touchDownX = ev.x
                 touchDownY = ev.y
                 longPressTriggered = false
+                isDrag = false
 
-                if (!isInteractingWithWidget && !widgetMenuShowing && drawerState != BottomSheetBehavior.STATE_EXPANDED) {
+                if (!widgetMenuShowing && drawerState != BottomSheetBehavior.STATE_EXPANDED) {
                     startLongPressTimer()
                 }
             }
@@ -1852,9 +1847,28 @@ Access this help anytime from the widget menu!
 
                 if (deltaX > touchSlop || deltaY > touchSlop) {
                     cancelLongPress()
+                    isDrag = true
                 }
             }
 
+            MotionEvent.ACTION_UP -> {
+                if (!isDrag && !menuState.showMenu && !isDrawerOpen && !isBlackOverlayShown && !longPressTriggered) {
+                    val screenWidth = resources.displayMetrics.widthPixels
+                    val edgeThreshold = screenWidth * 0.12f
+
+                    if (widgetsLocked || !isInteractingWithWidget) {
+                        var switching = false
+                        if (ev.x < edgeThreshold) {
+                            switching = flipPage(false)
+                        } else if (ev.x > (screenWidth - edgeThreshold)) {
+                            switching = flipPage(true)
+                        }
+                        if(switching) {
+                            cancelLongPress()
+                        }
+                    }
+                }
+            }
         }
 
         if (ev.action == MotionEvent.ACTION_UP && !longPressTriggered) {
@@ -1863,7 +1877,7 @@ Access this help anytime from the widget menu!
             }
         }
 
-        if ((drawerState == BottomSheetBehavior.STATE_HIDDEN || drawerState == BottomSheetBehavior.STATE_COLLAPSED) && !isInteractingWithWidget) {
+        if ((drawerState == BottomSheetBehavior.STATE_HIDDEN || drawerState == BottomSheetBehavior.STATE_COLLAPSED) && widgetsLocked || (!widgetsLocked && !isInteractingWithWidget)) {
             gestureDetector.onTouchEvent(ev)
         }
 
@@ -1875,10 +1889,6 @@ Access this help anytime from the widget menu!
                 longPressTriggered = false
                 return true
             }
-        }
-
-        if ((drawerState == BottomSheetBehavior.STATE_HIDDEN || drawerState == BottomSheetBehavior.STATE_COLLAPSED) && !isInteractingWithWidget) {
-            gestureDetector.onTouchEvent(ev)
         }
 
         return super.dispatchTouchEvent(ev)
@@ -2755,8 +2765,8 @@ Access this help anytime from the widget menu!
         var wrapperPage: WidgetPage? = null
         val gameLaunchBehaviour = prefsManager.gameLaunchBehavior
         val screensaverBehavior = prefsManager.screensaverBehavior
-        //if(state is AppState.GamePlaying) { wrapperPage = createWidgetPageForBehaviour(gameLaunchBehaviour)}
-        //if(state is AppState.Screensaver) { wrapperPage = createWidgetPageForBehaviour(screensaverBehavior)}
+        if(state is AppState.GamePlaying) { wrapperPage = createWidgetPageForBehaviour(gameLaunchBehaviour)}
+        if(state is AppState.Screensaver) { wrapperPage = createWidgetPageForBehaviour(screensaverBehavior)}
         var currentPage: WidgetPage = currentWidgetManager().getCurrentPage()
         //setSolidColorForPage(currentPage)
 
@@ -2908,9 +2918,9 @@ Access this help anytime from the widget menu!
         }
     }
 
-    private fun flipPage(next: Boolean) {
+    private fun flipPage(next: Boolean): Boolean {
         if (widgetViewBinder.isAnyWidgetBusy(widgetContainer)) {
-            return
+            return false
         }
 
         val currentManager = currentWidgetManager()
@@ -2936,6 +2946,7 @@ Access this help anytime from the widget menu!
                 refreshWidgets(pagePreValidated = true, pageSwap = true)
             }
         }
+        return foundValidPage
     }
 
     suspend fun isPageValid(page: WidgetPage): Boolean {
@@ -2991,6 +3002,10 @@ Access this help anytime from the widget menu!
                 "loadGameInfo blocked - game is playing, maintaining game launch display"
             )
             return
+        }
+
+        if(switchingFromPlaying && isBlackOverlayShown){
+            hideBlackOverlay()
         }
 
         gameInfoJob?.cancel()
@@ -3992,26 +4007,24 @@ Access this help anytime from the widget menu!
     }
 
     private fun showContextMenu() {
-        if(this::artRepository.isInitialized) {
-            if(state !is AppState.GamePlaying && state !is AppState.Screensaver)
-            {
-                runOnUiThread {
-                    widgetMenuShowing = true
-                    menuState.showMenu = true
-                    AudioReferee.updateMenuState(true)
-                    AudioReferee.forceUpdate()
-                }
-            } else {
-                Toast.makeText(
-                    this,
-                    "Can't open the menu while playing a game or during screensavers",
-                    Toast.LENGTH_SHORT
-                ).show()
+        if(!this::artRepository.isInitialized || artRepository.getAvailableScraperTypes().size != ScraperType.entries.size) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                updateScrapers(ApiKeyManager.getInstance(this@MainActivity).scraperCredentials.first())
+            }
+        }
+
+        if(state !is AppState.GamePlaying && state !is AppState.Screensaver)
+        {
+            runOnUiThread {
+                widgetMenuShowing = true
+                menuState.showMenu = true
+                AudioReferee.updateMenuState(true)
+                AudioReferee.forceUpdate()
             }
         } else {
             Toast.makeText(
                 this,
-                "Please wait for the repositories to load (try again in 5 seconds)",
+                "Can't open the menu while playing a game or during screensavers",
                 Toast.LENGTH_SHORT
             ).show()
         }

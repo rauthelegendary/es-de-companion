@@ -2,6 +2,7 @@ package com.esde.companion
 
 import com.esde.companion.data.Widget
 import com.esde.companion.data.Widget.MediaSlot
+import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import java.util.UUID
 
@@ -26,17 +27,22 @@ data class WidgetPage(
 )
 
 fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
-    return this.backgroundType == other.backgroundType &&
-            this.backgroundPath == other.backgroundPath &&
-            this.slot == other.slot &&
-            this.backgroundOpacity == other.backgroundOpacity &&
-            this.isVideoMuted == other.isVideoMuted &&
-            this.blurRadius == other.blurRadius &&
-            this.panZoomAnimation == other.panZoomAnimation &&
-            this.solidColor == other.solidColor &&
-            this.customPath == other.customPath &&
-            this.videoDelay == other.videoDelay &&
-            this.displayWidgets == other.displayWidgets &&
-            this.displayWidgetsOverVideo == other.displayWidgetsOverVideo &&
-            this.videoVolume == other.videoVolume
+    if(this.backgroundType == other.backgroundType) {
+        if(this.backgroundType == PageContentType.VIDEO) {
+            return this.isVideoMuted == other.isVideoMuted &&
+                    this.videoDelay == other.videoDelay &&
+                    this.videoVolume == other.videoVolume &&
+                    this.backgroundPath == other.backgroundPath &&
+                    this.slot == other.slot
+        } else if (this.panZoomAnimation == other.panZoomAnimation) {
+            if (this.backgroundType == PageContentType.SOLID_COLOR) {
+                if(this.solidColor == other.solidColor) return true
+            } else if(this.backgroundType == PageContentType.CUSTOM_IMAGE) {
+                if(this.customPath == other.customPath) return true
+            } else if(this.slot == other.slot && this.backgroundPath == other.backgroundPath) {
+                return true
+            }
+        }
+    }
+    return false
 }

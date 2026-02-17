@@ -129,6 +129,12 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
     }
 
     override fun draw(canvas: Canvas) {
+        if (cachedBitmap == null || cachedBitmap?.isRecycled == true) {
+            if (!bounds.isEmpty) {
+                updateCache(bounds)
+            }
+        }
+
         val bitmap = cachedBitmap ?: return
         val gShader = glintShader ?: return
         if (bitmap.isRecycled) return

@@ -75,7 +75,7 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         }
     }
 
-    private fun checkCroppedAlternative(file: java.io.File?): java.io.File? {
+    private fun checkCroppedAlternative(file: File?): File? {
         if (file == null) return null
 
         val name = file.nameWithoutExtension
@@ -239,5 +239,16 @@ class MediaManager(private val prefsManager: PreferencesManager) {
                 }
             }
         }
+    }
+
+    fun resolveGamelistFolder(): File? {
+        val scriptsDir = File(prefsManager.scriptsPath)
+        val esdeRoot = scriptsDir.parentFile ?: return null
+
+        // Standard path: ~/ES-DE/gamelists/
+        if (esdeRoot.exists()) {
+            return esdeRoot
+        }
+        return null
     }
 }

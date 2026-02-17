@@ -1,5 +1,6 @@
 package com.esde.companion.managers
 
+import android.R.attr.height
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.drawable.Animatable
@@ -14,6 +15,9 @@ import coil.load
 import coil.request.CachePolicy
 import coil.request.Disposable
 import coil.request.ImageRequest
+import coil.size.Precision
+import coil.size.Scale
+import coil.size.Size
 import com.esde.companion.AnimationSettings
 import com.esde.companion.CoilUtils
 import com.esde.companion.R
@@ -43,6 +47,7 @@ class ImageManager(
         panZoom: Boolean = false,
         isMarquee: Boolean = false,
         textFallback: Boolean = false,
+        glint: Boolean = false,
         system: String = "",
         game: String = ""
     ) {
@@ -59,10 +64,7 @@ class ImageManager(
         if(isBackground) PanZoomAnimator.stopPanZoom(imageView)
         (imageView.drawable as? Animatable)?.stop()
 
-        imageView.setLayerType(
-            if (isMarquee) View.LAYER_TYPE_SOFTWARE else View.LAYER_TYPE_HARDWARE,
-            null
-        )
+        val useGlint = isMarquee && glint
 
         //fallback chain
         val attempts = mutableListOf<Any?>()
@@ -74,7 +76,7 @@ class ImageManager(
             attempts.add(getTextDrawable(system, game))
         }
 
-        executeLoadChain(imageView, attempts, isBackground, panZoom, isMarquee, playAnimation)
+        executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation)
     }
 
     private fun executeLoadChain(
@@ -82,7 +84,7 @@ class ImageManager(
         attempts: MutableList<Any?>,
         isBackground: Boolean,
         panZoom: Boolean,
-        isMarquee: Boolean,
+        useGlint: Boolean,
         playAnimation: Boolean
     ) {
         val current = attempts.removeFirstOrNull()
@@ -91,10 +93,13 @@ class ImageManager(
                 imageView.alpha = 0f
                 return
             } else {
-                executeLoadChain(imageView, attempts, isBackground, panZoom, isMarquee, playAnimation)
+                executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation)
                 return
             }
         }
+
+        val width = if (imageView.width > 400) imageView.width else 1000
+        val height = if (imageView.height > 400) imageView.height else 1000
 
         when (current) {
             is Int -> applySolidColor(imageView, current, playAnimation, isBackground)
@@ -102,8 +107,9 @@ class ImageManager(
             else -> {
                 val request = ImageRequest.Builder(context)
                     .data(current)
-                    .size(imageView.width.takeIf { it > 0 } ?: 1000, imageView.height.takeIf { it > 0 } ?: 1000) // Fallback size if view not measured
-                    .allowHardware(!isMarquee)
+                    .size(width, height)
+                    .allowHardware(!useGlint)
+                    .precision(Precision.AUTOMATIC)
                     .apply {
                         val isPotentialAnim = when (current) {
                             is File -> CoilUtils.isPotentialAnimation(current)
@@ -119,39 +125,37 @@ class ImageManager(
                         },
                         onSuccess = { result ->
                             activeRequests.remove(imageView)
-
-                            val finalDrawable = if (isMarquee && !CoilUtils.isAnimated(result)) {
-                                GlintDrawable(result).apply { start() }
+                            imageView.setLayerType(
+                                if (useGlint) View.LAYER_TYPE_SOFTWARE else View.LAYER_TYPE_HARDWARE,
+                                null
+                            )
+                            val finalDrawable = if (useGlint && !CoilUtils.isAnimated(result)) {
+                                GlintDrawable(result.mutate()).apply { start() }
                             } else {
                                 result
                             }
                             imageView.setImageDrawable(finalDrawable)
+
                             if(isBackground) {
                                 applySmartScale(imageView)
                             }
-                            handleEntranceAnimation(imageView, finalDrawable, isBackground, panZoom, isMarquee, playAnimation)
+                            handleEntranceAnimation(imageView, finalDrawable, isBackground, panZoom, useGlint, playAnimation)
                         },
                         onError = { error ->
-                            executeLoadChain(imageView, attempts, isBackground, panZoom, isMarquee, playAnimation)
+                            executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation)
                         }
                     )
                     .build()
-
-                // Track this request so we can cancel it if 'load' is called again
                 activeRequests[imageView] = context.imageLoader.enqueue(request)
             }
         }
     }
 
-    private fun handleEntranceAnimation(view: ImageView, drawable: Drawable, isBackground: Boolean, panZoom: Boolean, isMarquee: Boolean, playAnimation: Boolean) {
-        view.setLayerType(
-            if (isMarquee) View.LAYER_TYPE_SOFTWARE else View.LAYER_TYPE_HARDWARE,
-            null
-        )
+    private fun handleEntranceAnimation(view: ImageView, drawable: Drawable, isBackground: Boolean, panZoom: Boolean, useGlint: Boolean, playAnimation: Boolean) {
         CoilUtils.startIfAnimated(drawable)
 
         val isAnimated = CoilUtils.isAnimated(drawable)
-        val shouldPanZoom = !isMarquee && !isAnimated && panZoom
+        val shouldPanZoom = !useGlint && !isAnimated && panZoom
 
         var style = AnimationStyle.NONE
         var duration = animationSettings.duration.value.toLong()

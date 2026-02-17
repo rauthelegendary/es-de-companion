@@ -1,5 +1,6 @@
 package com.esde.companion.data
 
+import com.esde.companion.WidgetPage
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
@@ -37,6 +38,7 @@ data class Widget(
     var isRequired: Boolean = false,
     var cycle: Boolean = false,
     var solidColor: Int? = null,
+    var glint: Boolean = true,
     @Transient
     var images: Map<MediaSlot, File?>? = emptyMap()
 ) {
@@ -61,6 +63,37 @@ data class Widget(
             width = (widthPercent!! / 100f) * screenWidth
             height = (heightPercent!! / 100f) * screenHeight
         }
+    }
+
+    fun hasSameVisualSettings(other: Widget): Boolean {
+        if(this.contentType == other.contentType && this.width == other.width && this.height == other.height) {
+            if(this.contentType == ContentType.VIDEO) {
+                return this.playAudio == other.playAudio &&
+                        this.contentPath == other.contentPath &&
+                        this.videoVolume == other.videoVolume &&
+                        this.slot == other.slot
+            } else if (this.contentType == ContentType.COLOR_BACKGROUND) {
+                    return this.solidColor == other.solidColor
+            } else if(this.contentType.isTextWidget()){
+                return this.fontType == other.fontType
+                        && this.fontSize == other.fontSize
+                        && this.textAlignment == other.textAlignment
+                        && this.text == other.text
+                        && this.textPadding == other.textPadding
+                        && this.isItalic == other.isItalic
+                        && this.isBold == other.isBold
+                        && this.scrollText == other.scrollText
+                        && this.backgroundOpacity == other.backgroundOpacity
+            } else if(this.contentType == ContentType.MARQUEE && this.glint != other.glint) {
+                return false
+            } else {
+                return this.slot == other.slot &&
+                        this.contentPath == other.contentPath &&
+                        this.cycle == other.cycle &&
+                        this.scaleType == other.scaleType
+            }
+        }
+        return false
     }
 
     enum class MediaSlot(val index: Int) {
