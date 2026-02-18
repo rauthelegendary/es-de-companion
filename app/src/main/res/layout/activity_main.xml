@@ -233,6 +233,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/compose_menu_host"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="24dp"/>
+
     <!-- Black overlay that can be pulled down during game mode -->
     <View
         android:id="@+id/blackOverlay"
@@ -243,5 +250,4 @@
         android:clickable="true"
         android:focusable="true"
         android:elevation="100dp" />
-
 </RelativeLayout>

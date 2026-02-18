@@ -24,11 +24,7 @@ class WidgetViewBinder {
         gridSize: Float,
         pageSwap: Boolean,
         onUpdate: (Widget) -> Unit,
-        onSelect: (WidgetView) -> Unit = { selectedView: WidgetView ->
-                deselectAll(container)
-                selectedView.isWidgetSelected = true
-        },
-        onEditRequested: (Widget) -> Unit,
+        onSelect: (WidgetView) -> Unit,
         animationSettings: AnimationSettings,
         imageManager: ImageManager,
         game: String = "",
@@ -64,7 +60,7 @@ class WidgetViewBinder {
                     view.visibility = View.VISIBLE
                     view.updateContent(data, page, game, system)
                 } else {
-                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, onEditRequested, animationSettings, imageManager, game, system)
+                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, animationSettings, imageManager, game, system)
                 }
                 container.addView(view)
             } else {
@@ -84,9 +80,10 @@ class WidgetViewBinder {
     /**
      * Loops through all WidgetView children and triggers their internal deselect logic.
      */
+    //TODO: remove?
     fun deselectAll(container: ResizableWidgetContainer) {
         for (i in 0 until container.childCount) {
-            (container.getChildAt(i) as? WidgetView)?.deselect()
+            (container.getChildAt(i) as? WidgetView)?.currentMode = WidgetMode.IDLE
         }
     }
 
@@ -122,30 +119,35 @@ class WidgetViewBinder {
     }
 
     fun isAnyWidgetBusy(container: ResizableWidgetContainer): Boolean {
-        return (0 until container.childCount)
-            .map { container.getChildAt(it) }
-            .filterIsInstance<WidgetView>()
-            .any { it.isDragging || it.isResizing || it.isWidgetSelected}
+        //return (0 until container.childCount)
+        //    .map { container.getChildAt(it) }
+         //   .filterIsInstance<WidgetView>()
+        //    .any { it.isDragging || it.isResizing || it.isWidgetSelected}
+        //TODO: needed?
+        return false
     }
 
     /**
      * Utility to find which widget is under a touch coordinate.
      * Searches in reverse order to respect Z-index (top-most widget first).
      */
-    fun findWidgetAt(container: ResizableWidgetContainer, x: Float, y: Float): WidgetView? {
+    fun findWidgetAt(container: ResizableWidgetContainer, x: Float, y: Float): List<WidgetView> {
         val rect = Rect()
+        val results = mutableListOf<WidgetView>()
         for (i in container.childCount - 1 downTo 0) {
             val child = container.getChildAt(i) as? WidgetView ?: continue
             if (child.visibility != View.VISIBLE) continue
 
             child.getHitRect(rect)
-            if (rect.contains(x.toInt(), y.toInt())) return child
+            if (rect.contains(x.toInt(), y.toInt())) {
+                results.add(child)
+            }
         }
-        return null
+        return results
     }
 
     fun isWidgetOnLocation(container: ResizableWidgetContainer, x: Float, y: Float): Boolean {
-        return findWidgetAt(container, x, y) != null
+        return findWidgetAt(container, x, y).isNotEmpty()
     }
 
     fun syncSingleWidget(widget: Widget, widgetContainer: ResizableWidgetContainer, widgetPage: WidgetPage, game: String, system: String) {

@@ -7,6 +7,7 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
@@ -61,6 +62,9 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.InputStream
 import java.net.URI
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -79,6 +83,12 @@ class AutoScrollOnlyView(context: Context) : android.widget.ScrollView(context) 
         return false
     }
 }
+
+enum class WidgetMode {
+    IDLE, SELECTED, MOVING, RESIZING
+}
+
+
 class WidgetView(
     private val context: Context,
     private val lifecycleOwner: LifecycleOwner,
@@ -86,12 +96,31 @@ class WidgetView(
     var page: WidgetPage,
     private val onUpdate: (Widget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
-    private val onEditRequested: (Widget) -> Unit,
     private val animationSettings: AnimationSettings,
     private val imageManager: ImageManager,
     private var system: String,
     private var game: String
 ) : RelativeLayout(context) {
+
+    var currentMode = WidgetMode.IDLE
+        set(value) {
+            field = value
+            alpha = when (value) {
+                WidgetMode.MOVING -> 0.75f
+                WidgetMode.RESIZING -> 0.75f
+                else -> 1.0f
+            }
+            invalidate()
+        }
+
+    // Drag/Resize Temp Variables
+    private var dragStartX = 0f
+    private var dragStartY = 0f
+    private var initialX = 0f
+    private var initialY = 0f
+    private var initialWidth = 0f
+    private var initialHeight = 0f
+    private var resizeCorner = ResizeCorner.NONE
 
     private var imageList: List<File?> = emptyList()
     private var currentImageIndex: MediaSlot = MediaSlot.Default
@@ -112,33 +141,19 @@ class WidgetView(
         visibility = GONE
     }
     private val scrollView: AutoScrollOnlyView
-    private val settingsButton: ImageButton
-
-    private var isPausing = false
-
     private val borderPaint = Paint().apply {
         style = Paint.Style.STROKE
         strokeWidth = 4f
         color = 0xFF4CAF50.toInt()
     }
-    private val handlePaint = Paint().apply {
-        style = Paint.Style.FILL
+    private val movePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 8f
         color = 0xFF4CAF50.toInt()
+        pathEffect = DashPathEffect(floatArrayOf(20f, 10f), 0f)
     }
-    private val handleSize = 60f
-    private val handleHitZone = 200f  // ADDED: Much larger invisible hit area
-
-    var isDragging = false
-    var isResizing = false
-    private var resizeCorner = ResizeCorner.NONE
-    private var dragStartX = 0f
-    private var dragStartY = 0f
-    private var initialX = 0f
-    private var initialY = 0f
-    private var initialWidth = 0f
-    private var initialHeight = 0f
-
-    var isWidgetSelected = false
+    private val handleHitZone = 200f
+    private var isPausing = false
     private var isLocked = false
 
     // Snap to grid settings
@@ -224,38 +239,7 @@ class WidgetView(
         addView(videoCover, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
        // }
 
-        // Make sure onDraw (which draws handles) happens after child views
         setWillNotDraw(false)
-
-        val buttonSize = (handleSize * 2f).toInt()
-
-        // Create a container for the buttons at the top center
-        val buttonContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER
-            isClickable = false
-            isFocusable = false
-        }
-        val containerParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
-        containerParams.addRule(ALIGN_PARENT_TOP)
-        containerParams.addRule(CENTER_HORIZONTAL)
-        containerParams.topMargin = 0
-
-
-        // Create settings button (cog icon)
-        settingsButton = ImageButton(context).apply {
-            setImageResource(android.R.drawable.ic_menu_preferences)
-            setBackgroundColor(0xFF2196F3.toInt())  // Blue background
-            visibility = GONE
-            setOnClickListener {
-                onEditRequested.invoke(this@WidgetView.widget)
-            }
-        }
-        val settingsButtonParams = LinearLayout.LayoutParams(buttonSize, buttonSize)
-        buttonContainer.addView(settingsButton, settingsButtonParams)
-        settingsButton.bringToFront()
-
-        addView(buttonContainer, containerParams)
 
         // Make this view clickable but not focusable (touch-only, no D-pad focus border)
         isClickable = true
@@ -313,171 +297,68 @@ class WidgetView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-
-        // Nothing here - we'll use dispatchDraw instead
     }
 
     override fun dispatchDraw(canvas: Canvas) {
-        // First draw all child views (images, etc.)
         super.dispatchDraw(canvas)
 
-        // Then draw border and handles ON TOP when selected (and not locked)
-        if (isWidgetSelected && !isLocked) {
-            // Draw green border
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
-
-            // Draw L-shaped corner handles
-            val handleLength = handleSize * 1.5f  // CHANGED: Longer handles
-            val handleThickness = 16f  // CHANGED: Much thicker (was 8f)
-
-            val handlePaintThick = Paint().apply {
-                style = Paint.Style.STROKE
-                strokeWidth = handleThickness
-                color = 0xFFFFFFFF.toInt()  // CHANGED: White color (was green)
-                strokeCap = Paint.Cap.ROUND
+        when (currentMode) {
+            WidgetMode.SELECTED -> {
+                canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), borderPaint)
             }
-
-            // Top-left corner (⌐ shape)
-            canvas.drawLine(0f, handleLength, 0f, 0f, handlePaintThick)  // Vertical
-            canvas.drawLine(0f, 0f, handleLength, 0f, handlePaintThick)  // Horizontal
-
-            // Top-right corner (¬ shape)
-            canvas.drawLine(width.toFloat(), 0f, width - handleLength, 0f, handlePaintThick)  // Horizontal
-            canvas.drawLine(width.toFloat(), 0f, width.toFloat(), handleLength, handlePaintThick)  // Vertical
-
-            // Bottom-left corner (L shape)
-            canvas.drawLine(0f, height.toFloat(), 0f, height - handleLength, handlePaintThick)  // Vertical
-            canvas.drawLine(0f, height.toFloat(), handleLength, height.toFloat(), handlePaintThick)  // Horizontal
-
-            // Bottom-right corner (⌙ shape)
-            canvas.drawLine(width.toFloat(), height - handleLength, width.toFloat(), height.toFloat(), handlePaintThick)  // Vertical
-            canvas.drawLine(width - handleLength, height.toFloat(), width.toFloat(), height.toFloat(), handlePaintThick)  // Horizontal
+            WidgetMode.MOVING -> {
+                canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), movePaint)
+            }
+            WidgetMode.RESIZING -> {
+                drawResizeHandles(canvas)
+            }
+            else -> {}
         }
+    }
+
+    private fun drawResizeHandles(canvas: Canvas) {
+        val handleLength = 20 * 1.5f  // CHANGED: Longer handles
+        val handleThickness = 16f  // CHANGED: Much thicker (was 8f)
+
+        val handlePaintThick = Paint().apply {
+            style = Paint.Style.STROKE
+            strokeWidth = handleThickness
+            color = 0xFFFFFFFF.toInt()  // CHANGED: White color (was green)
+            strokeCap = Paint.Cap.ROUND
+        }
+
+        // Top-left corner (⌐ shape)
+        canvas.drawLine(0f, handleLength, 0f, 0f, handlePaintThick)  // Vertical
+        canvas.drawLine(0f, 0f, handleLength, 0f, handlePaintThick)  // Horizontal
+
+        // Top-right corner (¬ shape)
+        canvas.drawLine(width.toFloat(), 0f, width - handleLength, 0f, handlePaintThick)  // Horizontal
+        canvas.drawLine(width.toFloat(), 0f, width.toFloat(), handleLength, handlePaintThick)  // Vertical
+
+        // Bottom-left corner (L shape)
+        canvas.drawLine(0f, height.toFloat(), 0f, height - handleLength, handlePaintThick)  // Vertical
+        canvas.drawLine(0f, height.toFloat(), handleLength, height.toFloat(), handlePaintThick)  // Horizontal
+
+        // Bottom-right corner (⌙ shape)
+        canvas.drawLine(width.toFloat(), height - handleLength, width.toFloat(), height.toFloat(), handlePaintThick)  // Vertical
+        canvas.drawLine(width - handleLength, height.toFloat(), width.toFloat(), height.toFloat(), handlePaintThick)  // Horizontal
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (isLocked) {
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                return true
-            }
             if (event.action == MotionEvent.ACTION_UP) {
                 cycleImage()
                 return true
             }
             return super.onTouchEvent(event)
         } else {
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    isDragging = false
-                    isResizing = false
-                    resizeCorner = ResizeCorner.NONE
-                    dragStartX = event.rawX
-                    dragStartY = event.rawY
-                    initialX = widget.x
-                    initialY = widget.y
-                    initialWidth = widget.width
-                    initialHeight = widget.height
-
-                    // Check if touching any resize handle
-                    val touchX = event.x
-                    val touchY = event.y
-                    if (isWidgetSelected) {
-                        resizeCorner = getTouchedResizeCorner(touchX, touchY)
-                        if (resizeCorner != ResizeCorner.NONE) {
-                            isResizing = true
-                            parent.requestDisallowInterceptTouchEvent(true)
-                            val mainActivity = context as? MainActivity
-                            mainActivity?.cancelLongPress()
-                            return true
-                        }
-                    }
-                    isDragging = true
-                    return true
-                }
-
-                MotionEvent.ACTION_MOVE -> {
-                    val deltaX = event.rawX - dragStartX
-                    val deltaY = event.rawY - dragStartY
-
-                    val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
-
-                    if (isResizing) {
-                        parent.requestDisallowInterceptTouchEvent(true)
-                    }
-
-                    if (abs(deltaX) > touchSlop || abs(deltaY) > touchSlop) {
-                        if (isResizing || (isWidgetSelected && isDragging)) {
-                            parent.requestDisallowInterceptTouchEvent(true)
-                        }
-                    }
-
-                    if (isResizing) {
-                        // Resize based on which corner is being dragged
-                        resizeFromCorner(resizeCorner, deltaX, deltaY)
-                        updateLayout()
-                    } else if (isDragging && isWidgetSelected) {
-                        // Move the widget only if selected
-                        val newX = initialX + deltaX
-                        val newY = initialY + deltaY
-
-                        widget.x = if (snapToGrid) snapXToGrid(newX) else newX
-                        widget.y = if (snapToGrid) snapYToGrid(newY) else newY
-                        updateLayout()
-                    }
-
-                    return true
-                }
-
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    parent.requestDisallowInterceptTouchEvent(false)
-
-                    val deltaX = event.rawX - dragStartX
-                    val deltaY = event.rawY - dragStartY
-                    val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
-                    val wasMoved = abs(deltaX) > touchSlop || abs(deltaY) > touchSlop
-                    val wasResized = isResizing  // Track if we were resizing
-
-                    // Check for tap (to select/deselect)
-                    if (!wasMoved && !isResizing) {
-                        if (isWidgetSelected) {
-                            // Already selected - deselect this one
-                            isWidgetSelected = false
-                            updateButtonVisibility()
-                            invalidate()
-                        } else {
-                            // Not selected - deselect all others first, then select this one
-                            onSelect(this)
-                            isWidgetSelected = true
-                            updateButtonVisibility()
-                            invalidate()
-                        }
-                    }
-
-                    // Apply final snap on release if enabled
-                    if (snapToGrid && (isDragging || isResizing)) {
-                        widget.x = snapXToGrid(widget.x)
-                        widget.y = snapYToGrid(widget.y)
-                        widget.width = snapToGridValue(widget.width)
-                        widget.height = snapToGridValue(widget.height)
-                        updateLayout()
-                    }
-
-                    isDragging = false
-                    isResizing = false
-                    resizeCorner = ResizeCorner.NONE
-                    // Save widget state
-                    onUpdate(widget)
-
-                    // ADDED: Reload image after resize to fit new dimensions
-                    if (wasResized) {
-                        loadWidgetContent()
-                    }
-
-                    return true
-                }
+            return when (currentMode) {
+                WidgetMode.IDLE -> handleIdleTouch(event)
+                WidgetMode.SELECTED -> handleSelectedTouch(event)
+                WidgetMode.MOVING -> handleMoveTouch(event)
+                WidgetMode.RESIZING -> handleResizeTouch(event)
             }
         }
-        return super.onTouchEvent(event)
     }
 
     private fun cycleImage() {
@@ -506,24 +387,76 @@ class WidgetView(
         }
     }
 
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        // If locked, don't intercept
-        if (isLocked) {
-            return false
+    private fun handleIdleTouch(event: MotionEvent): Boolean {
+        if (event.action == MotionEvent.ACTION_UP) {
+            onSelect.invoke(this)
+            currentMode = WidgetMode.SELECTED
         }
+        return true
+    }
 
-        // If selected, check if touching extended corner hit zones (including outside bounds)
-        if (isWidgetSelected && ev.action == MotionEvent.ACTION_DOWN) {
-            val touchX = ev.x
-            val touchY = ev.y
+    private fun handleSelectedTouch(event: MotionEvent): Boolean {
+        // In "Selected" mode, we just wait for a button click in the toolbar.
+        // But if they tap again, we could deselect or allow moving.
+        if (event.action == MotionEvent.ACTION_UP) {
+            // Option: Toggle off if tapped again
+        }
+        return true
+    }
 
-            // Check extended hit zones that go outside the widget bounds
-            if (isTouchingExtendedCorner(touchX, touchY)) {
-                return true  // Intercept this touch
+    private fun handleMoveTouch(event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                dragStartX = event.rawX
+                dragStartY = event.rawY
+                initialX = widget.x
+                initialY = widget.y
+                parent.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val deltaX = event.rawX - dragStartX
+                val deltaY = event.rawY - dragStartY
+
+                val newX = initialX + deltaX
+                val newY = initialY + deltaY
+
+                widget.x = if (snapToGrid) snapXToGrid(newX) else newX
+                widget.y = if (snapToGrid) snapYToGrid(newY) else newY
+                updateLayout()
+            }
+            MotionEvent.ACTION_UP -> {
+                onUpdate?.invoke(widget)
             }
         }
+        return true
+    }
 
-        return false
+    private fun handleResizeTouch(event: MotionEvent): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                resizeCorner = getTouchedResizeCorner(event.x, event.y)
+                if (resizeCorner == ResizeCorner.NONE) return false
+
+                dragStartX = event.rawX
+                dragStartY = event.rawY
+                initialWidth = widget.width
+                initialHeight = widget.height
+                initialX = widget.x
+                initialY = widget.y
+                parent.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val deltaX = event.rawX - dragStartX
+                val deltaY = event.rawY - dragStartY
+                resizeFromCorner(resizeCorner, deltaX, deltaY)
+                updateLayout()
+            }
+            MotionEvent.ACTION_UP -> {
+                loadWidgetContent()
+                onUpdate?.invoke(widget)
+            }
+        }
+        return true
     }
 
    private fun loadWidgetContent() {
@@ -640,7 +573,11 @@ class WidgetView(
             textView.setBackgroundColor(Color.parseColor("#4D000000"))
             setBackgroundOpacity(widget.backgroundOpacity)
 
-            textView.text = widget.text
+            if(widget.contentType == ContentType.RELEASE_DATE) {
+                textView.text = formatDate(widget.text)
+            } else {
+                textView.text = widget.text
+            }
             if(widget.scrollText) {
                 Handler(Looper.getMainLooper()).postDelayed({
                     startAutoScroll()
@@ -699,6 +636,19 @@ class WidgetView(
             }
         } else {
             AudioReferee.updateWidgetState(widget.id,false)
+        }
+    }
+
+    fun formatDate(rawDate: String?): String {
+        if (rawDate.isNullOrBlank()) return ""
+
+        return try {
+            val inputFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss", Locale.ENGLISH)
+            val dateTime = LocalDateTime.parse(rawDate, inputFormatter)
+            val outputFormatter = DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.getDefault())
+            dateTime.format(outputFormatter)
+        } catch (e: Exception) {
+            rawDate
         }
     }
 
@@ -837,22 +787,7 @@ class WidgetView(
 
     fun setLocked(locked: Boolean) {
         isLocked = locked
-        if (locked) {
-            isWidgetSelected = false
-        }
         invalidate()
-    }
-
-    fun deselect() {
-        isWidgetSelected = false
-        updateButtonVisibility()
-        invalidate()
-    }
-
-    private fun updateButtonVisibility() {
-        val shouldShow = isWidgetSelected && !isLocked
-        android.util.Log.d("WidgetView", "updateDeleteButtonVisibility: shouldShow=$shouldShow, isWidgetSelected=$isWidgetSelected, isLocked=$isLocked")
-        settingsButton.visibility = if (shouldShow) VISIBLE else GONE
     }
 
      fun setBackgroundOpacity(opacity: Float) {
@@ -940,8 +875,6 @@ class WidgetView(
         //volumeFader.cancel()
 
         stopAutoScroll()
-        isWidgetSelected = false
-        updateButtonVisibility()
 
         AudioReferee.updateWidgetState(widget.id, false)
     }

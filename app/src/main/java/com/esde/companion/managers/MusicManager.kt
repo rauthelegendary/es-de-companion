@@ -291,32 +291,36 @@ class MusicManager(
             }
 
             if(currentMusicSource != actualSource) {
+                // Determine if we need to cross-fade or continue
+                val oldSource = currentMusicSource
+                val needsCrossFade = shouldCrossFade(oldSource, actualSource, lastState, newState)
 
-            // Determine if we need to cross-fade or continue
-            val oldSource = currentMusicSource
-            val needsCrossFade = shouldCrossFade(oldSource, actualSource, lastState, newState)
+                Log.d(TAG, "Old source: $oldSource")
+                Log.d(TAG, "Needs cross-fade: $needsCrossFade")
 
-            Log.d(TAG, "Old source: $oldSource")
-            Log.d(TAG, "Needs cross-fade: $needsCrossFade")
-
-            if (needsCrossFade) {
-                // Different source - cross-fade
-                crossFadeToSource(actualSource)
-            } else if (!isMusicPlaying) {
-                // Music was stopped (even if source is the same) - start fresh
-                Log.d(TAG, "Starting music (was not playing)")
-                startMusic(actualSource)
-            } else if (oldSource == null) {
-                // No music playing - start fresh
-                Log.d(TAG, "Starting music (no previous source)")
-                startMusic(actualSource)
-            } else {
-                // Same source AND already playing - continue
-                Log.d(TAG, "Continuing current music (same source)")
+                if (needsCrossFade) {
+                    // Different source - cross-fade
+                    crossFadeToSource(actualSource)
+                } else if (!isMusicPlaying) {
+                    // Music was stopped (even if source is the same) - start fresh
+                    Log.d(TAG, "Starting music (was not playing)")
+                    startMusic(actualSource)
+                } else if (oldSource == null) {
+                    // No music playing - start fresh
+                    Log.d(TAG, "Starting music (no previous source)")
+                    startMusic(actualSource)
+                } else {
+                    // Same source AND already playing - continue
+                    Log.d(TAG, "Continuing current music (same source)")
+                }
+                lastState = newState
+             } else if(musicPlayer?.isPlaying == false){
+                 if(musicPlayer?.playbackState == Player.STATE_READY) {
+                     musicPlayer?.play()
+                 } else {
+                     startMusic(actualSource)
+                 }
             }
-
-            lastState = newState
-        }
         }
     }
 
@@ -432,21 +436,16 @@ class MusicManager(
     fun onActivityInvisible() {
         Log.d(TAG, "━━━ ACTIVITY INVISIBLE ━━━")
         isActivityVisible = false
-
         // Pause music if currently playing
         if (musicPlayer?.isPlaying == true) {
             Log.d(TAG, "Pausing music (activity not visible)")
-
             wasMusicPlayingBeforeInvisible = true
-
-            // Fade out then pause
-            volumeFader?.fadeTo(0f, CROSS_FADE_DURATION) {
-                musicPlayer?.pause()
-            }
         } else {
             Log.d(TAG, "Music not playing - no pause needed")
             wasMusicPlayingBeforeInvisible = false
         }
+
+        musicPlayer?.pause()
     }
 
     fun cleanup() {

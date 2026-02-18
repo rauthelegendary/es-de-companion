@@ -139,6 +139,7 @@ class BackgroundBinder(
 
         if(page.backgroundType == PageContentType.CUSTOM_FOLDER && mediaFile != null) {
             if(mediaManager.isVideo(mediaFile)) {
+                page.isVideoMuted = true
                 showVideo(mediaFile)
             } else {
                 showImage(mediaFile)
@@ -355,7 +356,6 @@ class BackgroundBinder(
             dimmerView.translationZ = 10f
             widgetContainer.translationZ = 20f
         }
-        menuView.translationZ = 30f
     }
 
     /**

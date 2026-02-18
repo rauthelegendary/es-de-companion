@@ -1,5 +1,6 @@
 package com.esde.companion.ui.contextmenu
 
+import com.esde.companion.WidgetMode
 import com.esde.companion.WidgetPage
 import com.esde.companion.ui.ContentType
 
@@ -7,6 +8,12 @@ data class MenuUiState(
     val locked: Boolean,
     val snap: Boolean,
     val showGrid: Boolean
+)
+
+data class WidgetUiState(
+    val isVisible: Boolean = false,
+    val mode: WidgetMode = WidgetMode.IDLE,
+    val widgetName: String = ""
 )
 
 data class WidgetActions(
