@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.RenderEffect
 import android.graphics.Shader
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -30,6 +31,7 @@ import com.esde.companion.data.AppState
 import com.esde.companion.data.getCurrentGameFilename
 import com.esde.companion.data.getCurrentSystemName
 import com.esde.companion.managers.ImageManager
+import com.esde.companion.managers.MediaManager
 import com.esde.companion.ui.AnimationHelper
 import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
@@ -53,7 +55,8 @@ class BackgroundBinder(
     private val pathResolver: WidgetPathResolver,
     private val menuView: ComposeView,
     private val animationSettings: AnimationSettings,
-    private val imageManager: ImageManager
+    private val imageManager: ImageManager,
+    private val mediaManager: MediaManager
 ): DefaultLifecycleObserver {
     private var wasPlayingOnPause: Boolean = false
     var isActivityVisible: Boolean = true
@@ -72,7 +75,7 @@ class BackgroundBinder(
     private var switchedSystem = false
     private var widgetsLocked = false
     private var manualMuteInversion = false
-    private var previousMediaFilePath: String = ""
+    private var previousMediaFile: Any? = null
 
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
@@ -92,7 +95,7 @@ class BackgroundBinder(
         }
     }
 
-    fun apply(page: WidgetPage, newState: AppState, mediaFile: File?, widgetsLocked: Boolean, forcedRefresh: Boolean = false) {
+    fun apply(page: WidgetPage, newState: AppState, mediaFile: Any?, widgetsLocked: Boolean, forcedRefresh: Boolean = false) {
         val systemName = newState.getCurrentSystemName()
         val gameName = newState.getCurrentGameFilename()
 
@@ -132,10 +135,15 @@ class BackgroundBinder(
 
         previousSystem = systemName ?: ""
         previousGame = gameName ?: ""
-        previousMediaFilePath = mediaFile?.absolutePath ?: ""
+        previousMediaFile = mediaFile
 
-        //if not solid color or no system
-        if ((page.backgroundType != PageContentType.SOLID_COLOR || page.solidColor == null) && systemName != null) {
+        if(page.backgroundType == PageContentType.CUSTOM_FOLDER && mediaFile != null) {
+            if(mediaManager.isVideo(mediaFile)) {
+                showVideo(mediaFile)
+            } else {
+                showImage(mediaFile)
+            }
+        } else if ((page.backgroundType != PageContentType.SOLID_COLOR || page.solidColor == null)) {
             if(page.backgroundType != PageContentType.CUSTOM_IMAGE) {
                 if (page.backgroundType == PageContentType.VIDEO) {
                     if(mediaFile != null) {
@@ -152,12 +160,13 @@ class BackgroundBinder(
         }
     }
 
-    private fun sameContent(forcedRefresh: Boolean, gameName: String?, page: WidgetPage, mediaFile: File?): Boolean {
+    private fun sameContent(forcedRefresh: Boolean, gameName: String?, page: WidgetPage, mediaFile: Any?): Boolean {
         return !forcedRefresh
                 && ((!switchedSystem && ((previousGame.isEmpty() && gameName == null) || !switchedGame))
                 && (currentPage != null
                 && page.hasSameVisualSettings(currentPage!!))
-                && (previousMediaFilePath == mediaFile?.absolutePath
+                && (previousMediaFile == mediaFile
+                && mediaFile != null
                 && page.backgroundType != PageContentType.CUSTOM_IMAGE))
     }
 
@@ -189,7 +198,7 @@ class BackgroundBinder(
         AudioReferee.updateBackgroundState(false)
     }
 
-    private fun showVideo(file: File?) {
+    private fun showVideo(file: Any?) {
         imageView.visibility = View.GONE
         videoView.visibility = View.VISIBLE
 
@@ -251,81 +260,87 @@ class BackgroundBinder(
 
     private var videoFirstFrameListener: Player.Listener? = null
 
-    private fun loadVideo(videoFile: File) {
+    private fun loadVideo(videoFile: Any) {
         try {
             stopVideoPlayer()
             if (player == null) buildVideoPlayer()
 
             imageView.visibility = View.GONE
-            currentVideoPath = videoFile.absolutePath
-            val mediaItem = MediaItem.fromUri(videoFile.absolutePath)
+            var mediaItem: MediaItem? = null
+            if(videoFile is Uri) {
+                mediaItem = MediaItem.fromUri(videoFile)
+            } else if (videoFile is File) {
+                mediaItem = MediaItem.fromUri(videoFile.absolutePath)
+            }
 
-            videoFirstFrameListener?.let { player?.removeListener(it) }
+            if(mediaItem != null) {
+                videoFirstFrameListener?.let { player?.removeListener(it) }
 
-            videoFirstFrameListener = object : Player.Listener {
-                override fun onRenderedFirstFrame() {
-                    videoView.post {
-                        videoCover.visibility = View.GONE
-                        if (playAnimation) {
-                            AnimationHelper.applyAnimation(
-                                videoView,
-                                animationSettings.duration.value.toLong(),
-                                animationSettings.animationStyle.value
-                            )
-                        } else {
-                            videoView.alpha = 1f
-                            videoView.scaleX = 1f
-                            videoView.scaleY = 1f
+                videoFirstFrameListener = object : Player.Listener {
+                    override fun onRenderedFirstFrame() {
+                        videoView.post {
+                            videoCover.visibility = View.GONE
+                            if (playAnimation) {
+                                AnimationHelper.applyAnimation(
+                                    videoView,
+                                    animationSettings.duration.value.toLong(),
+                                    animationSettings.animationStyle.value
+                                )
+                            } else {
+                                videoView.alpha = 1f
+                                videoView.scaleX = 1f
+                                videoView.scaleY = 1f
+                            }
                         }
+
+                        // Cleanup self
+                        videoFirstFrameListener?.let { player?.removeListener(it) }
+                        videoFirstFrameListener = null
                     }
-
-                    // Cleanup self
-                    videoFirstFrameListener?.let { player?.removeListener(it) }
-                    videoFirstFrameListener = null
                 }
-            }
 
-            player?.addListener(videoFirstFrameListener!!)
+                player?.addListener(videoFirstFrameListener!!)
 
-            player?.apply {
-                setMediaItem(mediaItem)
-                volume = 0f
-                repeatMode = Player.REPEAT_MODE_ONE
-                prepare()
-                playWhenReady = true
-            }
+                player?.apply {
+                    setMediaItem(mediaItem)
+                    volume = 0f
+                    repeatMode = Player.REPEAT_MODE_ONE
+                    prepare()
+                    playWhenReady = true
+                }
 
-            // 4. Existing Audio Logic (Unchanged)
-            if (currentPage?.isVideoMuted == false) {
-                AudioReferee.updateBackgroundState(true)
-                allowedVolume = this.getAllowedAudioLevel()
-                volumeFader.fadeTo(allowedVolume)
-            }
+                // 4. Existing Audio Logic (Unchanged)
+                if (currentPage?.isVideoMuted == false) {
+                    AudioReferee.updateBackgroundState(true)
+                    allowedVolume = this.getAllowedAudioLevel()
+                    volumeFader.fadeTo(allowedVolume)
+                }
 
-            val runLayoutLogic = {
-                //updateVideoLayering(currentPage?.displayWidgetsOverVideo == true)
+                val runLayoutLogic = {
+                    //updateVideoLayering(currentPage?.displayWidgetsOverVideo == true)
 
-                // 5. Prepare the Stage
-                videoView.visibility = View.VISIBLE
-                videoView.alpha = if (playAnimation) 0f else 1f
+                    // 5. Prepare the Stage
+                    videoView.visibility = View.VISIBLE
+                    videoView.alpha = if (playAnimation) 0f else 1f
 
-                videoCover.animate().cancel()
-                if (playAnimation) {
-                    videoCover.alpha = 1f
-                    videoCover.visibility = View.VISIBLE
+                    videoCover.animate().cancel()
+                    if (playAnimation) {
+                        videoCover.alpha = 1f
+                        videoCover.visibility = View.VISIBLE
+                    } else {
+                        videoCover.visibility = View.GONE
+                    }
+                }
+
+                if (videoView.isAttachedToWindow) {
+                    runLayoutLogic()
                 } else {
-                    videoCover.visibility = View.GONE
+                    videoView.post { runLayoutLogic() }
                 }
-            }
-
-            if (videoView.isAttachedToWindow) {
-                runLayoutLogic()
-            } else {
-                videoView.post { runLayoutLogic() }
             }
 
         } catch (e: Exception) {
-            Log.e("MainActivity", "Error loading video: ${videoFile.absolutePath}", e)
+            Log.e("MainActivity", "Error loading video: $videoFile", e)
             releasePlayer()
         }
     }
@@ -369,43 +384,6 @@ class BackgroundBinder(
         releasePlayer()
         AudioReferee.updateBackgroundState(false)
         musicStop()
-    }
-
-    fun loadBuiltInFallbackBackground() {
-       /** try {
-            //TODO: How to access this better
-            val assetPath = "fallback/default_background.webp"
-            // Copy asset to cache for loadImageWithAnimation
-            val fallbackFile = File(File.cacheDir, "default_background.webp")
-            if (!fallbackFile.exists()) {
-                assets.open(assetPath).use { input ->
-                    fallbackFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-            }
-
-            // Use loadImageWithAnimation for consistent behavior
-            loadImageWithAnimation(fallbackFile, gameImageView) {
-                android.util.Log.d("MainActivity", "Loaded built-in fallback image from assets")
-            }
-        } catch (e: Exception) {
-            android.util.Log.w(
-                "MainActivity",
-                "Failed to load built-in fallback image, using solid color",
-                e
-            )
-            // Final fallback: solid color (no animation possible)
-            imageView.setBackgroundColor(android.graphics.Color.parseColor("#1A1A1A"))
-            imageView.setImageDrawable(null)
-        }*/
-    }
-
-    /**
-     * Check if video is currently playing
-     */
-    private fun isVideoPlaying(): Boolean {
-        return player?.isPlaying == true
     }
 
     /**

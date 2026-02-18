@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.core.content.edit
 import androidx.core.view.GestureDetectorCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.AudioAttributes
@@ -652,6 +653,11 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        //val prefs = this.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
+        //prefs.edit { putString("system_widgets_json", "") }
+        //prefs.edit { putString("game_widgets_json", "") }
+
         Coil.setImageLoader(newImageLoader())
         setContentView(R.layout.activity_main)
         enableImmersiveMode()
@@ -729,7 +735,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         animationSettings = AnimationSettings(prefsManager)
         imageManager = ImageManager(this, animationSettings, prefsManager)
-        widgetPathResolver = WidgetPathResolver(mediaManager, prefsManager, mediaOverrideRepository, gameRepository, prefsManager)
+        widgetPathResolver = WidgetPathResolver(mediaManager, prefsManager, mediaOverrideRepository, gameRepository, prefsManager, this)
         widgetViewBinder = WidgetViewBinder()
 
         lifecycleScope.launch {
@@ -909,7 +915,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             rootContainer = rootLayout,
             menuView = menuComposeView,
             animationSettings = animationSettings,
-            imageManager = imageManager
+            imageManager = imageManager,
+            mediaManager = mediaManager
         )
 
         val logsDir = File(mediaManager.getLogsPath())
@@ -1729,8 +1736,6 @@ Access this help anytime from the widget menu!
         Log.d("MainActivity", "Hiding black overlay")
         isBlackOverlayShown = false
 
-        backgroundBinder.onBlackscreen()
-
         musicManager.onBlackOverlayChanged(false)
 
         // Hide overlay instantly without animation
@@ -1740,18 +1745,7 @@ Access this help anytime from the widget menu!
         blackOverlay.translationY = -displayHeight
 
         onStateChangedMusicHandler(state)
-
-        // Reload video if applicable (don't reload images)
-        when (val s = state) {
-            is AppState.GameBrowsing -> {
-                // In GameBrowsing, we ALWAYS have systemName and gameFilename (non-null)
-                //handleVideoForGame(s.systemName, s.gameFilename)
-            }
-
-            else -> {
-                // Not in game browsing mode - don't play video
-            }
-        }
+        refreshWidgets(forcedRefresh = true)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -2648,7 +2642,7 @@ Access this help anytime from the widget menu!
             Log.d("MainActivity", "Window focus gained")
             backgroundBinder.onWindowFocusChanged(hasFocus)
             listeningToAudioRef = true
-            refreshWidgets()
+            refreshWidgets(forcedRefresh = true)
             enableImmersiveMode()
         } else {
             Log.d("MainActivity", "Window focus lost (ignoring for video blocking)")
@@ -2750,7 +2744,7 @@ Access this help anytime from the widget menu!
         }
     }
 
-    private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false) {
+    private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false, forcedRefresh: Boolean = false) {
         Log.d("TEMP_DEBUG", "Widget Refreshing for: ${state.getCurrentGameFilename()}")
         val currentWidgetContext = state.toWidgetContext()
         if(previousWidgetContext != null && previousWidgetContext != currentWidgetContext) {
@@ -2785,7 +2779,7 @@ Access this help anytime from the widget menu!
             }
 
             val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
-            backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked)
+            backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked, forcedRefresh)
 
             if (processPage.displayWidgets) {
                 val resolved = widgetPathResolver.resolve(
@@ -2952,7 +2946,8 @@ Access this help anytime from the widget menu!
     suspend fun isPageValid(page: WidgetPage): Boolean {
         if(!widgetsLocked) return true
         val bgFile = widgetPathResolver.resolvePage(page, state)
-        if (page.backgroundType != PageContentType.SOLID_COLOR && page.isRequired && (bgFile == null || !bgFile.exists())) {
+        //TODO; this might crash
+        if (page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_FOLDER && page.backgroundType != PageContentType.CUSTOM_IMAGE && page.isRequired && (bgFile == null || !(bgFile as File).exists())) {
             return false
         }
 

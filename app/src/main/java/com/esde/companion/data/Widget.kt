@@ -1,5 +1,8 @@
 package com.esde.companion.data
 
+import android.R.attr.height
+import android.R.attr.x
+import android.R.attr.y
 import com.esde.companion.WidgetPage
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
@@ -39,8 +42,12 @@ data class Widget(
     var cycle: Boolean = false,
     var solidColor: Int? = null,
     var glint: Boolean = true,
+    var customPath: String = "",
+    var contentFallbackType: ContentType = ContentType.MARQUEE,
     @Transient
-    var images: Map<MediaSlot, File?>? = emptyMap()
+    var images: Map<MediaSlot, File?>? = emptyMap(),
+    @Transient
+    var video: Boolean = false
 ) {
     /**
      * Convert absolute pixels to percentages based on screen dimensions

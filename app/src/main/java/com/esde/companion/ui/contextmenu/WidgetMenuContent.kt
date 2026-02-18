@@ -1,5 +1,6 @@
 package com.esde.companion.ui.contextmenu
 
+import android.R.attr.type
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -121,6 +122,22 @@ fun WidgetMenuContent(
         }
     }
 
+    val pageFolderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                draftPage = draftPage.copy(customPath = it.toString())
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             actions.onSavePageSettings(draftPage)
@@ -206,12 +223,17 @@ fun WidgetMenuContent(
             item {
                 MenuSection(title = "Background Content") {
                     // Type Selector (Custom implementation of a dropdown or chips)
-                    BackgroundTypeSelector(isSystemView,draftPage.backgroundType) {
-                        draftPage = draftPage.copy(backgroundType = it)
-                        if (it == PageContentType.CUSTOM_IMAGE) {
+                    BackgroundTypeSelector(isSystemView,draftPage.backgroundType, draftPage.backgroundFallbackType,
+                    { type ->
+                        draftPage = draftPage.copy(backgroundType = type)
+                        if (type == PageContentType.CUSTOM_IMAGE) {
                             pageImagePicker.launch(arrayOf("image/*"))
+                        } else if(type == PageContentType.CUSTOM_FOLDER) {
+                            pageFolderPicker.launch(null)
                         }
-                    }
+                    }, {fallback ->
+                            draftPage = draftPage.copy(backgroundFallbackType = fallback)
+                        })
 
                     if (draftPage.backgroundType == PageContentType.CUSTOM_IMAGE) {
                         CustomImageSection(draftPage.customPath) {
@@ -401,12 +423,20 @@ fun MenuSlider(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun BackgroundTypeSelector(isSystemView: Boolean, currentType: PageContentType, onTypeSelected: (PageContentType) -> Unit) {
+fun BackgroundTypeSelector(isSystemView: Boolean, currentType: PageContentType, fallbackType: PageContentType, onTypeSelected: (PageContentType) -> Unit, onFallbackTypeSelected: (PageContentType) -> Unit) {
     val types = PageContentType.entries.let { entries ->
         if (isSystemView) {
             entries.filter { it != PageContentType.VIDEO }.toTypedArray()
         } else {
             entries.toTypedArray()
+        }
+    }
+
+    val fallbackTypes = PageContentType.entries.let { entries ->
+        if (isSystemView) {
+            entries.filter { it != PageContentType.VIDEO && it != PageContentType.CUSTOM_IMAGE && it != PageContentType.CUSTOM_FOLDER && it != PageContentType.SOLID_COLOR}.toTypedArray()
+        } else {
+            entries.filter { it != PageContentType.CUSTOM_IMAGE && it != PageContentType.CUSTOM_FOLDER && it != PageContentType.SOLID_COLOR}.toTypedArray()
         }
     }
     Column {
@@ -426,7 +456,29 @@ fun BackgroundTypeSelector(isSystemView: Boolean, currentType: PageContentType, 
             }
         }
     }
+
+    if(currentType == PageContentType.CUSTOM_FOLDER) {
+        Column {
+            Text("Fallback type", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                fallbackTypes.forEach { newType ->
+                    FilterChip(
+                        selected = fallbackType == newType,
+                        onClick = { onFallbackTypeSelected(newType) },
+                        label = { Text(newType.name.replace("_", " ").lowercase().capitalize()) }
+                    )
+                }
+            }
+        }
+    }
 }
+
+
 
 @Composable
 fun CustomImageSection(currentPath: String?, onPickImage: () -> Unit) {
@@ -479,6 +531,7 @@ fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType, String?) -> Uni
             "Random Fanart" to ContentType.FANART,
             "Random Screenshot" to ContentType.SCREENSHOT,
             "Custom Image" to ContentType.CUSTOM_IMAGE,
+            "Custom Folder" to ContentType.CUSTOM_FOLDER,
             "Solid Color" to ContentType.COLOR_BACKGROUND
         )
     } else {
@@ -500,7 +553,32 @@ fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType, String?) -> Uni
             "Genre" to ContentType.GENRE,
             "Description" to ContentType.GAME_DESCRIPTION,
             "Custom Image" to ContentType.CUSTOM_IMAGE,
+            "Custom Folder" to ContentType.CUSTOM_FOLDER,
             "Solid Color" to ContentType.COLOR_BACKGROUND,
+            "System Image" to ContentType.SYSTEM_IMAGE,
+            "System Logo" to ContentType.SYSTEM_LOGO
+        )
+    }
+
+    val fallbackOptions = if (isSystemView) {
+        listOf(
+            "System Logo" to ContentType.SYSTEM_LOGO,
+            "System Image" to ContentType.SYSTEM_IMAGE,
+            "Random Fanart" to ContentType.FANART,
+            "Random Screenshot" to ContentType.SCREENSHOT
+        )
+    } else {
+        listOf(
+            "Marquee" to ContentType.MARQUEE,
+            "2D Box" to ContentType.BOX_2D,
+            "3D Box" to ContentType.BOX_3D,
+            "Back Cover" to ContentType.BACK_COVER,
+            "Mix Image" to ContentType.MIX_IMAGE,
+            "Screenshot" to ContentType.SCREENSHOT,
+            "Title Screen" to ContentType.TITLE_SCREEN,
+            "Physical Media" to ContentType.PHYSICAL_MEDIA,
+            "Fanart" to ContentType.FANART,
+            "Video" to ContentType.VIDEO,
             "System Image" to ContentType.SYSTEM_IMAGE,
             "System Logo" to ContentType.SYSTEM_LOGO
         )

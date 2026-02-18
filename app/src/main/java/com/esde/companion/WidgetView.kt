@@ -549,7 +549,14 @@ class WidgetView(
 
         val path = widget.contentPath
 
-        if(widget.contentType == ContentType.COLOR_BACKGROUND) {
+       if(widget.contentType == ContentType.CUSTOM_FOLDER) {
+            if(widget.video) {
+                loadVideo(path!!)
+            } else {
+                loadImage(path)
+            }
+       }
+        else if(widget.contentType == ContentType.COLOR_BACKGROUND) {
             loadImage(widget.solidColor!!)
         } else if (widget.contentType == ContentType.CUSTOM_IMAGE) {
             loadImage(path)

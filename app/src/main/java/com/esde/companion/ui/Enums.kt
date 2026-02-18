@@ -48,21 +48,22 @@ enum class ContentType {
     GENRE,
     RELEASE_DATE,
     COLOR_BACKGROUND,
-    CUSTOM_IMAGE;
+    CUSTOM_IMAGE,
+    CUSTOM_FOLDER;
 
     fun toDisplayName(): String = when(this) {
-        ContentType.BOX_2D -> "2D Boxart"
-        ContentType.BOX_3D -> "3D Boxart"
+        BOX_2D -> "2D Boxart"
+        BOX_3D -> "3D Boxart"
         else -> this.name.replace("_", " ").lowercase().capitalize()
     }
 
     fun isTextWidget(): Boolean = when(this) {
-        ContentType.GAME_DESCRIPTION -> true
-        ContentType.TITLE -> true
-        ContentType.DEVELOPER -> true
-        ContentType.PUBLISHER -> true
-        ContentType.GENRE -> true
-        ContentType.RELEASE_DATE -> true
+        GAME_DESCRIPTION -> true
+        TITLE -> true
+        DEVELOPER -> true
+        PUBLISHER -> true
+        GENRE -> true
+        RELEASE_DATE -> true
         else -> false
     }
 }
@@ -86,7 +87,8 @@ enum class PageContentType {
     VIDEO,
     SOLID_COLOR,
     SYSTEM_IMAGE,
-    CUSTOM_IMAGE;
+    CUSTOM_IMAGE,
+    CUSTOM_FOLDER;
 
 
     fun toDisplayName(): String = when (this) {

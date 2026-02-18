@@ -23,7 +23,8 @@ data class WidgetPage(
     var videoDelay: Int = 0,
     var displayWidgets: Boolean = true,
     var isRequired: Boolean = false,
-    var displayWidgetsOverVideo: Boolean = false
+    var displayWidgetsOverVideo: Boolean = false,
+    var backgroundFallbackType: PageContentType = PageContentType.FANART
 )
 
 fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
