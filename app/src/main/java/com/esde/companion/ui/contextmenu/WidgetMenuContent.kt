@@ -191,7 +191,6 @@ fun WidgetMenuContent(
                             actions.onToggleLock
                         )
                         MenuChip("Snap", uiState.snap, actions.onToggleSnap)
-                        MenuChip("Grid", uiState.showGrid, actions.onToggleGrid)
                         if(currentPageIndex != 0) {
                             MenuChip(
                                 "Required content",
@@ -253,7 +252,7 @@ fun WidgetMenuContent(
                         }
                     }
 
-                    if (draftPage.backgroundType == PageContentType.VIDEO) {
+                    if (draftPage.backgroundType == PageContentType.VIDEO || draftPage.backgroundType == PageContentType.CUSTOM_FOLDER) {
                         MenuToggle("Mute Video", draftPage.isVideoMuted) {
                             draftPage = draftPage.copy(isVideoMuted = it)
                         }
@@ -522,6 +521,21 @@ fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType, String?) -> Uni
             }
         }
     }
+    val widgetFolderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    it,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                onAddWidget(ContentType.CUSTOM_FOLDER, it.toString())
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
     var showColorDialog by remember { mutableStateOf(false) }
 
     val options = if (isSystemView) {
@@ -560,30 +574,6 @@ fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType, String?) -> Uni
         )
     }
 
-    val fallbackOptions = if (isSystemView) {
-        listOf(
-            "System Logo" to ContentType.SYSTEM_LOGO,
-            "System Image" to ContentType.SYSTEM_IMAGE,
-            "Random Fanart" to ContentType.FANART,
-            "Random Screenshot" to ContentType.SCREENSHOT
-        )
-    } else {
-        listOf(
-            "Marquee" to ContentType.MARQUEE,
-            "2D Box" to ContentType.BOX_2D,
-            "3D Box" to ContentType.BOX_3D,
-            "Back Cover" to ContentType.BACK_COVER,
-            "Mix Image" to ContentType.MIX_IMAGE,
-            "Screenshot" to ContentType.SCREENSHOT,
-            "Title Screen" to ContentType.TITLE_SCREEN,
-            "Physical Media" to ContentType.PHYSICAL_MEDIA,
-            "Fanart" to ContentType.FANART,
-            "Video" to ContentType.VIDEO,
-            "System Image" to ContentType.SYSTEM_IMAGE,
-            "System Logo" to ContentType.SYSTEM_LOGO
-        )
-    }
-
     // Using FlowRow instead of LazyColumn so it doesn't nest scrollable areas
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
@@ -597,6 +587,9 @@ fun WidgetGrid(isSystemView: Boolean, onAddWidget: (ContentType, String?) -> Uni
                     when (type) {
                         ContentType.CUSTOM_IMAGE -> {
                             imagePicker.launch(arrayOf("image/*"))
+                        }
+                        ContentType.CUSTOM_FOLDER -> {
+                            widgetFolderPicker.launch(null)
                         }
                         ContentType.COLOR_BACKGROUND -> {
                             showColorDialog = true

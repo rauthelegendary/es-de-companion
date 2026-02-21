@@ -13,7 +13,8 @@ data class MenuUiState(
 data class WidgetUiState(
     val isVisible: Boolean = false,
     val mode: WidgetMode = WidgetMode.IDLE,
-    val widgetName: String = ""
+    val widgetName: String = "",
+    val isDragging: Boolean = false
 )
 
 data class WidgetActions(

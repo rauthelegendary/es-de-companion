@@ -2,6 +2,7 @@ package com.esde.companion
 
 import android.app.ActivityOptions
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2
 import android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
 import android.content.Context
 import android.content.Intent
@@ -129,7 +130,9 @@ import java.io.IOException
 import kotlin.math.abs
 import androidx.core.view.isVisible
 import coil.Coil
-import coil.Coil.imageLoader
+import coil.decode.DecodeResult
+import coil.memory.MemoryCache
+import coil.request.ImageRequest
 import com.esde.companion.art.ApiKeyManager
 import com.esde.companion.art.ArtScraper
 import com.esde.companion.art.LaunchBox.LaunchBoxDao
@@ -141,8 +144,8 @@ import com.esde.companion.managers.MediaManager
 import com.esde.companion.ui.contextmenu.WidgetUiState
 import com.esde.companion.ui.widget.WidgetControlMenu
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import java.util.EventListener
 
 
 class ContextMenuStateHolder {
@@ -156,20 +159,20 @@ class ContextMenuStateHolder {
 }
 
 class MainActivity : AppCompatActivity(), ImageLoaderFactory {
-
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .crossfade(false)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.3)
+                    .build()
+            }
             .okHttpClient {
                 NetworkClientManager.baseClient
             }
             .components {
                 add(SvgDecoder.Factory())
-                if (SDK_INT >= 28) {
-                    add(ImageDecoderDecoder.Factory())
-                } else {
-                    add(GifDecoder.Factory())
-                }
+                add(ImageDecoderDecoder.Factory())
             }
             .build()
     }
@@ -225,7 +228,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
     private var longPressTriggered = false
-    private var isDrag = false
+    private var isDrag by mutableStateOf(false)
     private var touchDownX = 0f
     private var touchDownY = 0f
     private val LONG_PRESS_TIMEOUT by lazy {
@@ -275,9 +278,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
     private var twoFingerTapCount = 0
     private var lastTwoFingerTapTime = 0L
-    private val TWO_FINGER_TAP_TIMEOUT by lazy {
-        ViewConfiguration.getDoubleTapTimeout().toLong()  // Standard Android double-tap timeout (~300ms)
-    }
     // Standard Android double-tap timeout (max time between taps)
     private val DOUBLE_TAP_TIMEOUT by lazy {
         ViewConfiguration.getDoubleTapTimeout().toLong() // Default: 300ms
@@ -300,8 +300,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     // Dynamic debouncing for fast scrolling - separate tracking for systems and games
     private val imageLoadHandler = Handler(Looper.getMainLooper())
     private var imageLoadRunnable: Runnable? = null
-    private var musicLoadHandler = Handler(Looper.getMainLooper())
-    private var musicLoadRunnable: Runnable? = null
     private var musicSearchJob: Job? = null
     private var musicResults by mutableStateOf<List<StreamInfoItem>>(emptyList())
     private var isSearchingMusic by mutableStateOf(false)
@@ -585,7 +583,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
 
         val songTitleSystemOnly = prefsManager.musicSongTitleSystemOnlyEnabled
 
-        if(!songTitleSystemOnly || (songTitleSystemOnly && state !is AppState.GameBrowsing)) {
+        if(!AudioReferee.getMenuState() && AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC && (!songTitleSystemOnly || (songTitleSystemOnly && state !is AppState.GameBrowsing))) {
             // Apply background opacity setting
             val opacity = prefsManager.musicSongTitleOpacity
             val alpha = (opacity * 255 / 100).coerceIn(0, 255)
@@ -894,12 +892,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                                 menuState.widgetToEditState = null
                                 widgetMenuShowing = false
                             },
-                            onReorder = { widget, forward ->
-                                onWidgetReordered(
-                                    widget,
-                                    forward
-                                )
-                            },
                             inSystemView = state is AppState.SystemBrowsing
                         )
                     }
@@ -921,18 +913,15 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                                     menuState.widgetSelected.copy(mode = mode)
                             },
                             onEdit = { openWidgetSettings(activeWidget?.widget) },
-                            onDelete = { /* Delete widget */ },
-                            onDone = {
-                                activeWidget?.currentMode = WidgetMode.IDLE
-                                menuState.widgetSelected =
-                                    menuState.widgetSelected.copy(
-                                        isVisible = false,
-                                        mode = WidgetMode.IDLE
-                                    )
-                            },
+                            onDone = { deselectMenuWidget() },
                             onInteractionChanged = { interacting ->
                                 isTouchingWidgetToolbar = interacting
                             },
+                            onReorder = {forward -> onWidgetReordered(forward)},
+                            onClose = {
+                                deselectMenuWidget()
+                                toggleWidgetLock()
+                            }
                         )
                     }
                 }
@@ -1806,18 +1795,9 @@ Access this help anytime from the widget menu!
 
                 Log.d("MainActivity", "Two-finger tap detected: timeSinceLast=${timeSinceLast}ms")
 
-                // Reset if too much time passed
-                if (timeSinceLast > TWO_FINGER_TAP_TIMEOUT) {
-                    twoFingerTapCount = 0
-                }
+                if (currentTime - lastTwoFingerTapTime > 300) {
+                    lastTwoFingerTapTime = currentTime
 
-                twoFingerTapCount++
-                lastTwoFingerTapTime = currentTime
-
-                Log.d("MainActivity", "Two-finger tap count: $twoFingerTapCount")
-
-                // Trigger on first two-finger tap
-                if (twoFingerTapCount >= 1) {
                     Log.d("MainActivity", "Two-finger tap confirmed - toggling song title")
                     twoFingerTapCount = 0
 
@@ -1858,20 +1838,26 @@ Access this help anytime from the widget menu!
         // Handle long press for widget menu (works anywhere, even on widgets)
         when (ev.action) {
             MotionEvent.ACTION_DOWN -> {
+                touchDownX = ev.x
+                touchDownY = ev.y
                 isDrag = false
-                if (!menuState.widgetSelected.isVisible && !menuState.isActive() && drawerState != BottomSheetBehavior.STATE_EXPANDED) {
+                if (!menuState.isActive() && drawerState != BottomSheetBehavior.STATE_EXPANDED) {
                     startLongPressTimer()
+                    Log.d("MainActivity", "Longpress timer started")
                 }
             }
 
             MotionEvent.ACTION_MOVE -> {
-                val deltaX = abs(ev.x - touchDownX)
-                val deltaY = abs(ev.y - touchDownY)
-                val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+                if(!menuState.isActive()) {
+                    val deltaX = abs(ev.x - touchDownX)
+                    val deltaY = abs(ev.y - touchDownY)
+                    val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
 
-                if (deltaX > touchSlop || deltaY > touchSlop) {
-                    cancelLongPress()
-                    isDrag = true
+                    if (deltaX > touchSlop || deltaY > touchSlop) {
+                        cancelLongPress()
+                        Log.d("MainActivity", "Longpress timer cancelled by move")
+                        isDrag = true
+                    }
                 }
             }
 
@@ -1891,22 +1877,54 @@ Access this help anytime from the widget menu!
                         }
                         if(switching) {
                             cancelLongPress()
+                            tapCount = 0
+                            Log.d("MainActivity", "Longpress timer cancelled by page flip")
                         }
                     }
-                } else if (!isDrag && !isTouchingWidgetToolbar && menuState.widgetSelected.isVisible && menuState.widgetSelected.mode != WidgetMode.RESIZING) {
-                        val hitWidgets = widgetViewBinder.findWidgetAt(widgetContainer, ev.x, ev.y)
+                }
 
-                        if (hitWidgets.isEmpty() || !hitWidgets.contains(activeWidget)) {
+                if (!widgetsLocked && !isDrag && !menuState.showMenu && menuState.widgetToEditState == null && !isTouchingWidgetToolbar && !isBlackOverlayShown && !longPressTriggered) {
+                    val hitWidgets = widgetViewBinder.findWidgetAt(widgetContainer, ev.x, ev.y)
+
+                    if (activeWidget == null || menuState.widgetSelected.mode == WidgetMode.SELECTED || menuState.widgetSelected.mode == WidgetMode.IDLE) {
+                        if (hitWidgets.isEmpty() && menuState.widgetSelected.mode == WidgetMode.SELECTED) {
                             activeWidget?.currentMode = WidgetMode.IDLE
                             menuState.widgetSelected = menuState.widgetSelected.copy(
                                 isVisible = false,
                                 mode = WidgetMode.IDLE
                             )
                             activeWidget = null
+                        } else if (hitWidgets.isNotEmpty()) {
+                            val currentlySelected = hitWidgets.find { it == activeWidget }
+                            if (currentlySelected != null && menuState.widgetSelected.mode == WidgetMode.SELECTED) {
+                                val currentIndex = hitWidgets.indexOf(currentlySelected)
+                                val nextIndex = (currentIndex + 1) % hitWidgets.size
+                                val nextWidget = hitWidgets[nextIndex]
+
+                                if (nextWidget != activeWidget) {
+                                    activeWidget?.currentMode = WidgetMode.IDLE
+                                    activeWidget = nextWidget
+                                    activeWidget?.currentMode = WidgetMode.SELECTED
+
+                                    menuState.widgetSelected = menuState.widgetSelected.copy(
+                                        isVisible = true,
+                                        mode = WidgetMode.SELECTED
+                                    )
+                                }
+                            } else {
+                                activeWidget?.currentMode = WidgetMode.IDLE
+                                activeWidget = hitWidgets.first()
+                                activeWidget?.currentMode = WidgetMode.SELECTED
+
+                                menuState.widgetSelected = menuState.widgetSelected.copy(
+                                    isVisible = true,
+                                    mode = WidgetMode.SELECTED
+                                )
+                            }
                         }
 
+                    }
                 }
-                var a = isTouchingWidgetToolbar
                 isDrag = false
             }
         }
@@ -1916,6 +1934,8 @@ Access this help anytime from the widget menu!
         }
 
         if (ev.action == MotionEvent.ACTION_UP || ev.action == MotionEvent.ACTION_CANCEL) {
+
+            Log.d("MainActivity", "Longpress timer cancelled by final if check")
             cancelLongPress()
             isInteractingWithWidget = false
 
@@ -2784,7 +2804,7 @@ Access this help anytime from the widget menu!
         }
     }
 
-    private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false, forcedRefresh: Boolean = false) {
+    private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false, forcedRefresh: Boolean = false, pendingWidgetId: String? = null) {
         Log.d("TEMP_DEBUG", "Widget Refreshing for: ${state.getCurrentGameFilename()}")
         val currentWidgetContext = state.toWidgetContext()
         if(previousWidgetContext != null && previousWidgetContext != currentWidgetContext) {
@@ -2810,7 +2830,6 @@ Access this help anytime from the widget menu!
                 currentPage = currentWidgetManager().getCurrentPage()
             }
 
-            //TODO: what happens when we change settings/widgets on a wrapper page?
             if(wrapperPage != null) {
                 wrapperPage.widgets = currentPage.widgets
                 processPage = wrapperPage
@@ -2843,13 +2862,15 @@ Access this help anytime from the widget menu!
                     locked = widgetsLocked,
                     snapToGrid = snapToGrid,
                     gridSize = gridSize,
-                    pageSwap = pageSwap,
                     onUpdate = ::onWidgetUpdated,
                     animationSettings = animationSettings,
                     imageManager = imageManager,
                     game = gameName,
                     system = system,
                     onSelect = {widget -> showMenuForWidget(widget)},
+                    forcedRefresh = forcedRefresh,
+                    pendingWidgetId = pendingWidgetId,
+                    onTouch = {widget, drag -> onStartWidgetTouch(widget, drag)}
                 )
             } else {
                 hideWidgets()
@@ -2919,9 +2940,11 @@ Access this help anytime from the widget menu!
         refreshWidgets()
     }
 
-    private fun onWidgetReordered(widget: Widget, forward: Boolean) {
-        currentWidgetManager().moveWidgetZOrder(widget.id, forward)
-        refreshWidgets()
+    private fun onWidgetReordered(forward: Boolean) {
+        if(activeWidget != null) {
+            currentWidgetManager().moveWidgetZOrder(activeWidget?.widget?.id!!, forward)
+            refreshWidgets()
+        }
     }
 
     fun addNewWidget(type: ContentType, configData: String? = null) {
@@ -2935,6 +2958,9 @@ Access this help anytime from the widget menu!
                 ContentType.CUSTOM_IMAGE -> {
                     newWidget.contentPath = configData
                 }
+                ContentType.CUSTOM_FOLDER -> {
+                    newWidget.customPath = configData
+                }
                 ContentType.COLOR_BACKGROUND -> {
                     newWidget.solidColor = Color.parseColor(configData)
                 }
@@ -2944,23 +2970,35 @@ Access this help anytime from the widget menu!
             currentWidgetManager().updateWidget(newWidget, resources.displayMetrics)
         }
 
-        refreshWidgets()
-        val newView = widgetContainer.getChildAt(widgetContainer.childCount - 1) as? WidgetView
-        newView?.let {
-            activeWidget?.currentMode = WidgetMode.IDLE
-            it.currentMode = WidgetMode.SELECTED
-            showMenuForWidget(it)
+        refreshWidgets(pendingWidgetId = newWidget.id)
+    }
+
+    fun deselectMenuWidget() {
+        activeWidget?.currentMode = WidgetMode.IDLE
+        menuState.widgetSelected =
+            menuState.widgetSelected.copy(
+                isVisible = false,
+                mode = WidgetMode.IDLE
+            )
+    }
+
+    fun onStartWidgetTouch(widget: WidgetView, drag: Boolean) {
+        if (activeWidget == widget && (activeWidget?.currentMode == WidgetMode.MOVING || activeWidget?.currentMode == WidgetMode.RESIZING) && menuState.widgetSelected.isDragging != drag) {
+            menuState.widgetSelected = WidgetUiState(isVisible = true, mode = widget.currentMode, isDragging = drag)
         }
     }
 
     fun showMenuForWidget(widget: WidgetView) {
-        activeWidget?.currentMode = WidgetMode.IDLE
+        if (activeWidget == widget) {
+            menuState.widgetSelected = WidgetUiState(isVisible = true, mode = widget.currentMode)
+        }
+
         activeWidget = widget
-        menuState.widgetSelected = WidgetUiState(isVisible = true, mode = WidgetMode.SELECTED)
+        menuState.widgetSelected = WidgetUiState(isVisible = true, mode = widget.currentMode)
     }
 
     private fun flipPage(next: Boolean): Boolean {
-        if (widgetViewBinder.isAnyWidgetBusy(widgetContainer)) {
+        if (activeWidget != null && activeWidget?.currentMode != WidgetMode.IDLE) {
             return false
         }
 
@@ -3088,7 +3126,7 @@ Access this help anytime from the widget menu!
                     }
 
                     updateCurrentGameVolume()
-                    refreshWidgets()
+                    refreshWidgets(forcedRefresh = switchingFromPlaying)
                 }
             }
         }
@@ -4075,7 +4113,7 @@ Access this help anytime from the widget menu!
         menuState.widgetToEditState = null
         AudioReferee.updateMenuState(false)
         AudioReferee.forceUpdate()
-        refreshWidgets()
+        refreshWidgets(forcedRefresh = true)
     }
 
     private fun openWidgetSettings(widget: Widget?) {
@@ -4189,11 +4227,6 @@ Access this help anytime from the widget menu!
     private fun toggleShowGrid() {
         showGrid = !showGrid
         updateGridOverlay()
-
-        // Save show grid state to preferences
-        prefsManager.showGrid = showGrid
-
-        Log.d("MainActivity", "Show grid toggled: $showGrid")
     }
 
     private fun toggleWidgetLock() {
@@ -4212,24 +4245,17 @@ Access this help anytime from the widget menu!
 
         // Handle video playback and widget reload when toggling widget lock
         if (widgetsLocked) {
-            // Locked (edit mode OFF) - videos can resume if other conditions allow
             Log.d("MainActivity", "Widget edit mode OFF - allowing videos")
-            // Reload current state to potentially start videos
-            /**if (state is AppState.SystemBrowsing) {
-                loadSystemImage()
-            } else if (state !is AppState.GamePlaying) {
-                loadGameInfo()
-            }*/
+            showGrid = false
+            updateGridOverlay()
         } else {
-            // Unlocked (edit mode ON) - stop videos and reload widgets
             Log.d(
                 "MainActivity",
                 "Widget edit mode ON - blocking videos and reloading widgets"
             )
             backgroundBinder.releasePlayer()
-
-            // Reload widgets with current images so they're visible during editing
-            //refreshWidgets()
+            showGrid = true
+            updateGridOverlay()
         }
     }
 

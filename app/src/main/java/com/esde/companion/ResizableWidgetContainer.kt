@@ -10,44 +10,40 @@ class ResizableWidgetContainer @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : RelativeLayout(context, attrs, defStyleAttr) {  // Changed from FrameLayout
+) : RelativeLayout(context, attrs, defStyleAttr) {
+    var currentActiveWidget: WidgetView? = null
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        // Check if any child widget wants to handle extended touch
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            if (child is WidgetView) {
-                // Convert touch coordinates to child's coordinate space
-                val childX = ev.x - child.left
-                val childY = ev.y - child.top
+        val active = currentActiveWidget ?: return super.onInterceptTouchEvent(ev)
 
-                if (child.isTouchingExtendedCorner(childX, childY)) {
-                    // Let the child handle this touch
-                    return false
-                }
+        // If we have an active widget, check if we are touching its extended corners
+        val childX = ev.x - active.left
+        val childY = ev.y - active.top
+
+        if (active.isTouchingExtendedCorner(childX, childY)) {
+            return true // Intercept! We are resizing the buried widget.
+        }
+
+        // If the active widget is MOVING (or just selected and we want to drag its body), intercept.
+        if (active.currentMode == WidgetMode.MOVING || active.currentMode == WidgetMode.SELECTED) {
+            // Only intercept if the touch is actually inside the active widget's bounds
+            if (ev.x >= active.left && ev.x <= active.right && ev.y >= active.top && ev.y <= active.bottom) {
+                return true
             }
         }
+
         return super.onInterceptTouchEvent(ev)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // Forward touches to children that might be in extended zones
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            if (child is WidgetView) {
-                val childX = event.x - child.left
-                val childY = event.y - child.top
+        val active = currentActiveWidget ?: return super.onTouchEvent(event)
 
-                if (child.isTouchingExtendedCorner(childX, childY)) {
-                    // Transform event coordinates and dispatch
-                    val transformed = MotionEvent.obtain(event)
-                    transformed.setLocation(childX, childY)
-                    val handled = child.dispatchTouchEvent(transformed)
-                    transformed.recycle()
-                    return handled
-                }
-            }
-        }
-        return super.onTouchEvent(event)
+        // Manually route the touch to the active widget, bypassing Z-order
+        val transformed = MotionEvent.obtain(event)
+        transformed.setLocation(event.x - active.left, event.y - active.top)
+        val handled = active.dispatchTouchEvent(transformed)
+        transformed.recycle()
+
+        return handled
     }
 }

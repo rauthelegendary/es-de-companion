@@ -169,19 +169,15 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         val extension = when (input) {
             is File -> input.extension
             is Uri -> {
-                // For URIs, we extract the extension from the path
-                MimeTypeMap.getFileExtensionFromUrl(input.toString())
-                    ?: input.path?.substringAfterLast('.', "")
+                val lastSegment = input.lastPathSegment
+                lastSegment?.substringAfterLast('.', "")
             }
             is String -> input.substringAfterLast('.', "")
             else -> ""
         }
 
         val ext = extension?.lowercase() ?: ""
-        return when {
-            VIDEO_EXTENSIONS.contains(ext) -> true
-            else -> false
-        }
+        return VIDEO_EXTENSIONS.contains(ext)
     }
 
     private fun findFileInDirectory(

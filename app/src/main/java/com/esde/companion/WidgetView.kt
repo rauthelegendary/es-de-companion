@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.graphics.drawable.Animatable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Handler
@@ -19,17 +20,11 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.View.TEXT_ALIGNMENT_CENTER
-import android.view.View.TEXT_ALIGNMENT_TEXT_END
-import android.view.View.TEXT_ALIGNMENT_TEXT_START
 import android.view.animation.DecelerateInterpolator
-import android.widget.ImageButton
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
-import androidx.core.graphics.drawable.toDrawable
-import androidx.core.os.HandlerCompat.postDelayed
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -39,20 +34,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import be.tarsos.dsp.beatroot.Peaks.post
-import coil.Coil.imageLoader
-import coil.ImageLoader
 import coil.dispose
-import coil.imageLoader
-import coil.request.CachePolicy
-import coil.request.ImageRequest
 import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.animators.GlintDrawable
 import com.esde.companion.data.Widget
 import com.esde.companion.managers.ImageManager
-import com.esde.companion.ui.AnimationHelper
-import com.esde.companion.ui.AnimationStyle
 import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.GlintView
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
 import com.esde.companion.ui.TextAlignment
@@ -60,12 +48,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.InputStream
-import java.net.URI
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -94,6 +79,7 @@ class WidgetView(
     private val lifecycleOwner: LifecycleOwner,
     var widget: Widget,
     var page: WidgetPage,
+    private val onTouch: (WidgetView, Boolean) -> Unit,
     private val onUpdate: (Widget) -> Unit,
     private val onSelect: (WidgetView) -> Unit,
     private val animationSettings: AnimationSettings,
@@ -106,8 +92,8 @@ class WidgetView(
         set(value) {
             field = value
             alpha = when (value) {
-                WidgetMode.MOVING -> 0.75f
-                WidgetMode.RESIZING -> 0.75f
+                WidgetMode.MOVING -> 0.65f
+                WidgetMode.RESIZING -> 0.65f
                 else -> 1.0f
             }
             invalidate()
@@ -125,6 +111,7 @@ class WidgetView(
     private var imageList: List<File?> = emptyList()
     private var currentImageIndex: MediaSlot = MediaSlot.Default
     private val imageView: ImageView
+    private val glintView: GlintView
     private val textView: TextView
 
     private var player: ExoPlayer? = null
@@ -143,12 +130,12 @@ class WidgetView(
     private val scrollView: AutoScrollOnlyView
     private val borderPaint = Paint().apply {
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = 10f
         color = 0xFF4CAF50.toInt()
     }
     private val movePaint = Paint().apply {
         style = Paint.Style.STROKE
-        strokeWidth = 8f
+        strokeWidth = 12f
         color = 0xFF4CAF50.toInt()
         pathEffect = DashPathEffect(floatArrayOf(20f, 10f), 0f)
     }
@@ -226,15 +213,20 @@ class WidgetView(
 
         // Create ImageView for the widget content
         imageView = ImageView(context).apply {
-            // Scale type will be set dynamically in loadWidgetImage()
-            // Remove any max dimensions that might constrain scaling
             maxHeight = Int.MAX_VALUE
             maxWidth = Int.MAX_VALUE
+        }
+
+        glintView = GlintView(context).apply {
+            maxHeight = Int.MAX_VALUE
+            maxWidth = Int.MAX_VALUE
+            setPadding(15, 15, 15, 15)
         }
 
         // Add both views (only one will be visible at a time)
         addView(scrollView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(imageView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(glintView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(playerView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(videoCover, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
        // }
@@ -264,10 +256,10 @@ class WidgetView(
         }
     }
 
-    fun updateContent(newWidget: Widget, page: WidgetPage, game: String, system: String) {
+    fun updateContent(newWidget: Widget, page: WidgetPage, game: String, system: String, forcedRefresh: Boolean = false) {
         this.game = game
         this.system = system
-        if (widget.id != newWidget.id) {
+        if (widget.id != newWidget.id || forcedRefresh) {
             prepareForReuse()
             currentImageIndex = newWidget.slot
         }
@@ -317,13 +309,13 @@ class WidgetView(
     }
 
     private fun drawResizeHandles(canvas: Canvas) {
-        val handleLength = 20 * 1.5f  // CHANGED: Longer handles
-        val handleThickness = 16f  // CHANGED: Much thicker (was 8f)
+        val handleLength = 60f
+        val handleThickness = 16f
 
         val handlePaintThick = Paint().apply {
             style = Paint.Style.STROKE
             strokeWidth = handleThickness
-            color = 0xFFFFFFFF.toInt()  // CHANGED: White color (was green)
+            color = 0xFFFFFFFF.toInt()
             strokeCap = Paint.Cap.ROUND
         }
 
@@ -353,12 +345,16 @@ class WidgetView(
             return super.onTouchEvent(event)
         } else {
             return when (currentMode) {
-                WidgetMode.IDLE -> handleIdleTouch(event)
-                WidgetMode.SELECTED -> handleSelectedTouch(event)
                 WidgetMode.MOVING -> handleMoveTouch(event)
                 WidgetMode.RESIZING -> handleResizeTouch(event)
+                else -> return false
             }
         }
+    }
+
+    fun setSelected() {
+        this.currentMode = WidgetMode.SELECTED
+        this.onSelect.invoke(this)
     }
 
     private fun cycleImage() {
@@ -387,23 +383,6 @@ class WidgetView(
         }
     }
 
-    private fun handleIdleTouch(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_UP) {
-            onSelect.invoke(this)
-            currentMode = WidgetMode.SELECTED
-        }
-        return true
-    }
-
-    private fun handleSelectedTouch(event: MotionEvent): Boolean {
-        // In "Selected" mode, we just wait for a button click in the toolbar.
-        // But if they tap again, we could deselect or allow moving.
-        if (event.action == MotionEvent.ACTION_UP) {
-            // Option: Toggle off if tapped again
-        }
-        return true
-    }
-
     private fun handleMoveTouch(event: MotionEvent): Boolean {
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
@@ -412,6 +391,7 @@ class WidgetView(
                 initialX = widget.x
                 initialY = widget.y
                 parent.requestDisallowInterceptTouchEvent(true)
+                onTouch.invoke(this, true)
             }
             MotionEvent.ACTION_MOVE -> {
                 val deltaX = event.rawX - dragStartX
@@ -425,7 +405,8 @@ class WidgetView(
                 updateLayout()
             }
             MotionEvent.ACTION_UP -> {
-                onUpdate?.invoke(widget)
+                onTouch.invoke(this, false)
+                onUpdate.invoke(widget)
             }
         }
         return true
@@ -443,6 +424,8 @@ class WidgetView(
                 initialHeight = widget.height
                 initialX = widget.x
                 initialY = widget.y
+
+                onTouch.invoke(this, true)
                 parent.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
@@ -452,8 +435,9 @@ class WidgetView(
                 updateLayout()
             }
             MotionEvent.ACTION_UP -> {
+                onTouch.invoke(this, false)
                 loadWidgetContent()
-                onUpdate?.invoke(widget)
+                onUpdate.invoke(widget)
             }
         }
         return true
@@ -461,6 +445,7 @@ class WidgetView(
 
    private fun loadWidgetContent() {
        imageView.visibility = GONE
+       glintView.visibility = GONE
        playerView.visibility = GONE
        scrollView.visibility = GONE
 
@@ -475,15 +460,10 @@ class WidgetView(
             return
         }
 
-        imageView.scaleType = when (widget.scaleType ?: ScaleType.FIT) {
-            ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
-            ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
-        }
-
         val path = widget.contentPath
 
        if(widget.contentType == ContentType.CUSTOM_FOLDER) {
-            if(widget.video) {
+            if(widget.video || (widget.fallback && widget.contentFallbackType == ContentType.VIDEO)) {
                 loadVideo(path!!)
             } else {
                 loadImage(path)
@@ -509,21 +489,26 @@ class WidgetView(
             }
             loadImage(currentFile)
         }
-       imageView.visibility = VISIBLE
        AudioReferee.updateWidgetState(widget.id,false)
     }
 
     private fun loadImage(data: Any?, animate: Boolean = animationSettings.animateWidgets.value) {
+        val viewToUse = if(widget.glint && (widget.contentType == ContentType.MARQUEE || (widget.fallback && widget.contentFallbackType == ContentType.MARQUEE))) glintView else imageView
+        viewToUse.scaleType = when (widget.scaleType) {
+            ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
+            ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
+        }
         imageManager.load(
-            imageView = imageView,
+            imageView = viewToUse,
             data = data,
             playAnimation = animate,
-            isMarquee = widget.contentType == ContentType.MARQUEE,
+            isMarquee = (widget.contentType == ContentType.MARQUEE || (widget.contentType == ContentType.CUSTOM_FOLDER && widget.contentFallbackType == ContentType.MARQUEE && widget.fallback)),
             glint = widget.glint,
             system = system,
             game = game,
             textFallback = widget.contentType == ContentType.MARQUEE || widget.contentType == ContentType.SYSTEM_LOGO
         )
+        viewToUse.visibility = VISIBLE
     }
 
     /**
@@ -531,6 +516,7 @@ class WidgetView(
      */
     private fun handleTextWidget() {
         imageView.visibility = View.GONE
+        glintView.visibility = View.GONE
         stopAutoScroll()
 
         if (widget.text.isNotEmpty()) {
@@ -653,7 +639,7 @@ class WidgetView(
     }
 
     fun isTouchingExtendedCorner(x: Float, y: Float): Boolean {
-        val extend = handleHitZone / 10
+        val extend = handleHitZone / 2
 
         // Top-left extended zone
         if (x >= -extend && x <= handleHitZone - extend &&
@@ -680,7 +666,7 @@ class WidgetView(
     }
 
     private fun getTouchedResizeCorner(x: Float, y: Float): ResizeCorner {
-        val extend = handleHitZone / 10
+        val extend = handleHitZone / 2
 
         // Check top-left (extended outside)
         if (x >= -extend && x <= handleHitZone - extend &&
@@ -869,10 +855,14 @@ class WidgetView(
         (imageView.drawable as? GlintDrawable)?.let { glint ->
             glint.stop()
         }
+        (imageView.drawable as? Animatable)?.stop()
         imageView.setImageDrawable(null)
         imageView.dispose()
+
+        (glintView.drawable as? Animatable)?.stop()
+        glintView.setImageDrawable(null)
+        glintView.dispose()
         volumeFader.setPlayer(null)
-        //volumeFader.cancel()
 
         stopAutoScroll()
 

@@ -53,18 +53,35 @@ class WidgetPathResolver(
 
         if (system != null) {
             var contentTypeToUse = resolvedWidget.contentType
-            if(resolvedWidget.contentType == ContentType.CUSTOM_FOLDER) {
-                val fileResult = mediaLocator.findAnyMediaInFolder(system, gameFilename, rawWidget.customPath)
-                if(fileResult != null) {
-                    rawWidget.contentPath = fileResult.path
-                    rawWidget.video = mediaLocator.isVideo(fileResult)
+            if(resolvedWidget.contentType == ContentType.CUSTOM_FOLDER && !resolvedWidget.customPath.isBlank()) {
+                resolvedWidget.contentPath = null
+                var result: Uri?
+                if(gameFilename != null && gameFilename.isNotEmpty()) {
+                    result = mediaLocator.findGameMediaUri(context,
+                        resolvedWidget.customPath,
+                        system,
+                        gameFilename
+                    )
+                } else {
+                    result = mediaLocator.findSystemMediaUri(context,
+                        resolvedWidget.customPath,
+                        system
+                    )
+                }
+                if(result != null) {
+                    resolvedWidget.contentPath = result.toString()
+                    resolvedWidget.video = mediaLocator.isVideo(result)
+                    resolvedWidget.fallback = false
                 }
                 contentTypeToUse = resolvedWidget.contentFallbackType
             }
-            if(resolvedWidget.contentType != ContentType.CUSTOM_FOLDER || (rawWidget.contentPath == null || rawWidget.contentPath!!.isEmpty())) {
+            if(resolvedWidget.contentType != ContentType.CUSTOM_FOLDER || (resolvedWidget.contentPath == null || resolvedWidget.contentPath!!.isEmpty())) {
+                if(resolvedWidget.contentType == ContentType.CUSTOM_FOLDER) {
+                    resolvedWidget.fallback = true
+                }
                     resolveContentTypeForWidget(
                         contentTypeToUse,
-                        rawWidget,
+                        resolvedWidget,
                         gameFilename,
                         resolvedWidget,
                         system
@@ -111,8 +128,8 @@ class WidgetPathResolver(
             } else {
                 resolvedWidget.contentPath = ""
             }
-            if (rawWidget.cycle) {
-                rawWidget.images =
+            if (resolvedWidget.cycle) {
+                resolvedWidget.images =
                     getAllImagesForGameAndContentType(contentType, gameFilename, system)
             }
         }
@@ -262,7 +279,7 @@ class WidgetPathResolver(
                 )
         }
         if (uriResult != null) {
-            page.backgroundPath = uriResult.path
+            page.backgroundPath = uriResult.toString()
             return uriResult
         } else if (gameName != null) {
             return resolvePageMediaPath(

@@ -35,6 +35,9 @@ class ImageManager(
 ) {
     private val activeRequests = mutableMapOf<ImageView, Disposable>()
 
+    private val backupSizeBackground = 1000
+    private val backupSize = 300
+
     /**
      * The primary entry point.
      * @param data Can be a String (URI/Path), File, Int (Color), or Drawable.
@@ -97,9 +100,11 @@ class ImageManager(
                 return
             }
         }
-
-        val width = if (imageView.width > 400) imageView.width else 1000
-        val height = if (imageView.height > 400) imageView.height else 1000
+        val displayMetrics = context.resources.displayMetrics
+        val backupWidth = if (isBackground) displayMetrics.widthPixels else backupSize
+        val backupHeight = if (isBackground) displayMetrics.heightPixels else backupSize
+        val width = if (imageView.width > 300) imageView.width else backupWidth
+        val height = if (imageView.height > 300) imageView.height else backupHeight
 
         when (current) {
             is Int -> applySolidColor(imageView, current, playAnimation, isBackground)
@@ -108,15 +113,15 @@ class ImageManager(
                 val request = ImageRequest.Builder(context)
                     .data(current)
                     .size(width, height)
-                    .allowHardware(!useGlint)
-                    .precision(Precision.AUTOMATIC)
+                    .allowHardware(true)
+                    .precision(Precision.EXACT)
                     .apply {
                         val isPotentialAnim = when (current) {
                             is File -> CoilUtils.isPotentialAnimation(current)
                             is String -> CoilUtils.isPotentialAnimation(context, current)
                             else -> false
                         }
-                        if (isPotentialAnim) memoryCachePolicy(CachePolicy.DISABLED)
+                        if (isPotentialAnim) memoryCachePolicy(CachePolicy.READ_ONLY)
                     }
                     .target(
                         onStart = { placeholder ->
@@ -125,15 +130,15 @@ class ImageManager(
                         },
                         onSuccess = { result ->
                             activeRequests.remove(imageView)
-                            imageView.setLayerType(
-                                if (useGlint) View.LAYER_TYPE_SOFTWARE else View.LAYER_TYPE_HARDWARE,
-                                null
-                            )
-                            val finalDrawable = if (useGlint && !CoilUtils.isAnimated(result)) {
-                                GlintDrawable(result.mutate()).apply { start() }
-                            } else {
-                                result
-                            }
+                            //imageView.setLayerType(
+                            ///    View.LAYER_TYPE_HARDWARE, //if (useGlint) View.LAYER_TYPE_SOFTWARE else
+                             //   null
+                            //)
+                            val finalDrawable = result//if (useGlint && !CoilUtils.isAnimated(result)) {
+                                //GlintDrawable(result.mutate()).apply { start() }
+                            //} else {
+                                //result
+                            //}
                             imageView.setImageDrawable(finalDrawable)
 
                             if(isBackground) {

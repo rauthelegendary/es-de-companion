@@ -1,3 +1,4 @@
+import org.gradle.kotlin.dsl.debugImplementation
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -7,6 +8,7 @@ plugins {
     id("com.google.devtools.ksp") version "2.0.21-1.0.25"
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21"
     id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
@@ -18,7 +20,7 @@ android {
         minSdk = 31
         targetSdk = 35
         versionCode = 25
-        versionName = "0.6.0b"
+        versionName = "0.6.1b"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -178,6 +180,7 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     implementation("com.google.code.gson:gson:2.10.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
@@ -186,6 +189,8 @@ dependencies {
     //secure store
     implementation("com.google.crypto.tink:tink-android:1.20.0")
     implementation("androidx.datastore:datastore-preferences:1.2.0")
+
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
 }
 
 secrets {

@@ -1,15 +1,19 @@
 package com.esde.companion.ui.widget
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +23,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.esde.companion.data.Widget
 import com.esde.companion.ui.ContentType
+import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.PageContentType.FontType
 import com.esde.companion.ui.ScaleType
 import com.esde.companion.ui.TextAlignment
@@ -43,7 +50,9 @@ import com.esde.companion.ui.contextmenu.MediaSlotScreen
 import com.esde.companion.ui.contextmenu.MenuChip
 import com.esde.companion.ui.contextmenu.MenuSlider
 import com.esde.companion.ui.contextmenu.MenuToggle
+import com.esde.companion.ui.contextmenu.SimpleColorPickerDialog
 
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun WidgetSettingsOverlay(
     widget: Widget,
@@ -51,10 +60,10 @@ fun WidgetSettingsOverlay(
     onDismiss: () -> Unit,
     onUpdate: (Widget) -> Unit,
     onDelete: (Widget) -> Unit,
-    onReorder: (Widget, Boolean) -> Unit,
     inSystemView: Boolean
 ) {
     var liveWidget by remember(widget.id) { mutableStateOf(widget) }
+    var showPageColorPicker by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -79,6 +88,7 @@ fun WidgetSettingsOverlay(
                     && liveWidget.contentType != ContentType.SYSTEM_IMAGE
                     && liveWidget.contentType != ContentType.SYSTEM_LOGO
                     && liveWidget.contentType != ContentType.CUSTOM_IMAGE
+                    && liveWidget.contentType != ContentType.CUSTOM_FOLDER
                     && (!inSystemView
                             || (liveWidget.contentType != ContentType.FANART
                             || liveWidget.contentType != ContentType.SCREENSHOT)
@@ -88,6 +98,76 @@ fun WidgetSettingsOverlay(
                         liveWidget = liveWidget.copy(slot = newSlot)
                         onUpdate(liveWidget)
                     }
+                }
+
+                if(liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
+                    val fallbackTypes = ContentType.entries.let { entries ->
+                        if (inSystemView) {
+                            entries.filter { it != ContentType.VIDEO && it != ContentType.CUSTOM_IMAGE && it != ContentType.CUSTOM_FOLDER && it != ContentType.COLOR_BACKGROUND && !it.isTextWidget() }
+                                .toTypedArray()
+                        } else {
+                            entries.filter { it != ContentType.CUSTOM_IMAGE && it != ContentType.CUSTOM_FOLDER && it != ContentType.COLOR_BACKGROUND && !it.isTextWidget() }
+                                .toTypedArray()
+                        }
+                    }
+                    Column {
+                        Text(
+                            "Fallback type (when no custom media is found for given system/game)",
+                            color = Color.Gray,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        FlowRow(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            fallbackTypes.forEach { type ->
+                                FilterChip(
+                                    selected = liveWidget.contentFallbackType == type,
+                                    onClick = {
+                                        liveWidget = liveWidget.copy(contentFallbackType = type)
+                                        onUpdate(liveWidget)
+                                    },
+                                    label = {
+                                        Text(
+                                            type.name.replace("_", " ").lowercase().capitalize()
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (liveWidget.contentType == ContentType.COLOR_BACKGROUND) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { showPageColorPicker = true }
+                    ) {
+                        // Preview Circle
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    if (liveWidget.solidColor != null) Color(liveWidget.solidColor!!) else Color.Black,
+                                    RoundedCornerShape(8.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Text("Select Background Color", color = Color.White)
+                    }
+                }
+
+                if (showPageColorPicker) {
+                    SimpleColorPickerDialog(
+                        onDismiss = { showPageColorPicker = false },
+                        onColorSelected = { hexString ->
+                            liveWidget = liveWidget.copy(solidColor = android.graphics.Color.parseColor(hexString))
+                            showPageColorPicker = false
+                            onUpdate(liveWidget)
+                        }
+                    )
                 }
 
                 Spacer(Modifier.height(2.dp))
@@ -112,6 +192,7 @@ fun WidgetSettingsOverlay(
                     && liveWidget.contentType != ContentType.SYSTEM_IMAGE
                     && liveWidget.contentType != ContentType.SYSTEM_LOGO
                     && liveWidget.contentType != ContentType.CUSTOM_IMAGE
+                    && liveWidget.contentType != ContentType.CUSTOM_FOLDER
                     && (!inSystemView
                             || (liveWidget.contentType != ContentType.FANART
                             || liveWidget.contentType != ContentType.SCREENSHOT)
@@ -242,7 +323,7 @@ fun WidgetSettingsOverlay(
 
                 }
 
-                if (liveWidget.contentType == ContentType.VIDEO) {
+                if (liveWidget.contentType == ContentType.VIDEO || liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
                     MenuToggle("Mute video", !liveWidget.playAudio) { muted ->
                         liveWidget = liveWidget.copy(playAudio = !muted)
                         onUpdate(liveWidget)
@@ -260,15 +341,6 @@ fun WidgetSettingsOverlay(
                 }
 
                 Spacer(Modifier.height(16.dp))
-
-                Text("Layering", color = Color.Gray, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(2.dp))
-                Spacer(Modifier.height(2.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ActionButton("Backward", { onReorder(liveWidget, false) })
-                    ActionButton("Forward", { onReorder(liveWidget, true) })
-                }
-
-                Spacer(Modifier.height(10.dp))
 
                 Button(
                     onClick = { onDelete(widget) },

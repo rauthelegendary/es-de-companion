@@ -22,23 +22,16 @@ class WidgetViewBinder {
         locked: Boolean,
         snapToGrid: Boolean,
         gridSize: Float,
-        pageSwap: Boolean,
+        onTouch: (WidgetView, Boolean) -> Unit,
         onUpdate: (Widget) -> Unit,
         onSelect: (WidgetView) -> Unit,
         animationSettings: AnimationSettings,
         imageManager: ImageManager,
         game: String = "",
-        system: String
+        system: String,
+        forcedRefresh: Boolean,
+        pendingWidgetId: String?
     ) {
-
-
-        /**if (pageSwap) {
-            existingViews.forEach { view ->
-                view.onPageHide() // Stops videos/audio
-                view.visibility = View.GONE
-            }
-        }*/
-
         val existingViews = container.children.filterIsInstance<WidgetView>().toList()
         val dataIds = dataList.map { it.id }.toSet()
 
@@ -58,18 +51,22 @@ class WidgetViewBinder {
                 if (viewPool.isNotEmpty()) {
                     view = viewPool.removeAt(0)
                     view.visibility = View.VISIBLE
-                    view.updateContent(data, page, game, system)
+                    view.updateContent(data, page, game, system, forcedRefresh)
                 } else {
-                    view = WidgetView(container.context, lifecycleOwner, data, page, onUpdate, onSelect, animationSettings, imageManager, game, system)
+                    view = WidgetView(container.context, lifecycleOwner, data, page, onTouch, onUpdate, onSelect, animationSettings, imageManager, game, system)
                 }
                 container.addView(view)
             } else {
-                view.updateContent(data, page, game, system)
+                view.updateContent(data, page, game, system, forcedRefresh)
             }
 
             view.setSnapToGrid(snapToGrid, gridSize)
             view.setLocked(locked)
             view.bringToFront()
+
+            if(pendingWidgetId != null && view.widget.id == pendingWidgetId) {
+                view.setSelected()
+            }
         }
 
         while (viewPool.size > 8) {

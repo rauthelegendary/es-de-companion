@@ -10,6 +10,8 @@ import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.WidgetContext
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 class WidgetManager(
@@ -23,7 +25,12 @@ class WidgetManager(
         WidgetContext.SYSTEM -> systemJsonString
     }
     private val prefs = context.getSharedPreferences("widget_prefs", Context.MODE_PRIVATE)
-    private val gson = Gson()
+    private val jsonEngine = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        encodeDefaults = true
+        prettyPrint = false
+    }
     var pages = mutableStateListOf<WidgetPage>()
     var currentPageIndex: Int = 0
 
@@ -32,8 +39,7 @@ class WidgetManager(
         val json = prefs.getString(preferenceKey, null)
         try {
             if (json != null) {
-                val type = object : TypeToken<List<WidgetPage>>() {}.type
-                val loadedPages: List<WidgetPage> = gson.fromJson(json, type)
+                val loadedPages = jsonEngine.decodeFromString<List<WidgetPage>>(json)
 
                 pages.clear()
                 pages.addAll(loadedPages)
@@ -45,13 +51,12 @@ class WidgetManager(
         } catch (e: Exception) {
             Log.e("WidgetManager", "Failed to load pages, resetting to default", e)
             pages.clear()
-            pages.add(WidgetPage())
+            pages.add(WidgetPage(name = "Base"))
         }
     }
 
     private fun save() {
-        val listForGson = pages.toList()
-        val json = gson.toJson(listForGson)
+        val json = jsonEngine.encodeToString(pages.toList())
         prefs.edit { putString(preferenceKey, json) }
     }
 

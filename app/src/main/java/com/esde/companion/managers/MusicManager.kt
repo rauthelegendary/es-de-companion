@@ -633,7 +633,7 @@ class MusicManager(
         try {
             // 1. Create the MediaItem from your file
             val mediaItem = MediaItem.fromUri(Uri.fromFile(file))
-            val playImmediately =  allowedToPlay()
+            val playImmediately = allowedToPlay()
             musicPlayer?.apply {
                 stop()
                 clearMediaItems()

@@ -3,14 +3,16 @@ package com.esde.companion.data
 import android.R.attr.height
 import android.R.attr.x
 import android.R.attr.y
-import com.esde.companion.WidgetPage
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
 import com.esde.companion.ui.TextAlignment
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import java.io.File
 import java.util.UUID
 
+@Serializable
 data class Widget(
     val id: String = UUID.randomUUID().toString(),
     val contentType: ContentType,
@@ -47,7 +49,9 @@ data class Widget(
     @Transient
     var images: Map<MediaSlot, File?>? = emptyMap(),
     @Transient
-    var video: Boolean = false
+    var video: Boolean = false,
+    @Transient
+    var fallback: Boolean = false
 ) {
     /**
      * Convert absolute pixels to percentages based on screen dimensions

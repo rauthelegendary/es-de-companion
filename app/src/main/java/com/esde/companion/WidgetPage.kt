@@ -4,8 +4,10 @@ import com.esde.companion.data.Widget
 import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
+import kotlinx.serialization.Serializable
 import java.util.UUID
 
+@Serializable
 data class WidgetPage(
     val id: String = UUID.randomUUID().toString(),
     var name: String = "",

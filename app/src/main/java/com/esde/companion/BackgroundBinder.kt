@@ -139,7 +139,6 @@ class BackgroundBinder(
 
         if(page.backgroundType == PageContentType.CUSTOM_FOLDER && mediaFile != null) {
             if(mediaManager.isVideo(mediaFile)) {
-                page.isVideoMuted = true
                 showVideo(mediaFile)
             } else {
                 showImage(mediaFile)
@@ -395,6 +394,7 @@ class BackgroundBinder(
 
     private fun resetVideoPlayer() {
         isActivityVisible = true
+        player?.release()
         videoView.player = null
         buildVideoPlayer()
 
@@ -438,7 +438,7 @@ class BackgroundBinder(
 
     fun toggleMute(): Boolean {
         manualMuteInversion = !manualMuteInversion
-        if(currentPage!!.backgroundType == PageContentType.VIDEO && player?.isPlaying == true) {
+        if(player?.isPlaying == true) {
             if (player?.volume == 0f) {
                 AudioReferee.updateBackgroundState(true)
                 player?.volume = getAllowedAudioLevel()
