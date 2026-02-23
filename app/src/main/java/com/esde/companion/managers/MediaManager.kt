@@ -13,7 +13,10 @@ import com.esde.companion.ui.PageContentType
 import java.io.File
 import android.content.Context
 import android.provider.DocumentsContract
+import android.util.Log
 import android.webkit.MimeTypeMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Centralized media file location logic for ES-DE Companion.
@@ -38,37 +41,6 @@ class MediaManager(private val prefsManager: PreferencesManager) {
 
     }
 
-    fun findImageInFolder(
-        systemName: String,
-        gameFilename: String,
-        folderName: String,
-        slot: MediaSlot
-    ): File? {
-        val dir = getDir(systemName, folderName, slot)
-        return findFileInDirectory(dir, gameFilename, slot, IMAGE_EXTENSIONS)
-    }
-
-    fun findAnyMediaInFolder(
-        systemName: String,
-        gameFilename: String?,
-        folderName: String
-    ): File? {
-        val dir = getDir(systemName, folderName, MediaSlot.Default)
-        var found: File? = null
-        if(gameFilename != null) {
-            found = findFileInDirectory(dir, gameFilename, MediaSlot.Default, VIDEO_EXTENSIONS)
-                ?: return findFileInDirectory(
-                    dir,
-                    gameFilename,
-                    MediaSlot.Default,
-                    IMAGE_EXTENSIONS
-                )
-        } else {
-            found = getSystemMedia(systemName, folderName)
-        }
-        return found
-    }
-
     fun getDir(systemName: String, folderName: String, slot: MediaSlot = MediaSlot.Default): File {
         val mediaPath = getMediaPath(slot)
         val dir = File(mediaPath, "$systemName/$folderName")
@@ -85,7 +57,7 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         slot: MediaSlot = MediaSlot.Default
     ): File? {
         val fileFound = this.findMediaFileDefault(type, systemName, gameFilename, slot)
-        if(type != ContentType.VIDEO) {
+        if(fileFound != null && !isVideo(fileFound)) {
             return checkCroppedAlternative(fileFound)
         }
         return fileFound
@@ -94,14 +66,18 @@ class MediaManager(private val prefsManager: PreferencesManager) {
     fun findMediaFileDefault(
         type: ContentType,
         systemName: String,
-        gameFilename: String,
+        gameFilename: String?,
         slot: MediaSlot = MediaSlot.Default
     ): File? {
-        if(type == ContentType.VIDEO) {
-            return findVideoFile(systemName, gameFilename, slot)
+        val folderName = getFolderName(type)
+        val dir = getDir(systemName, folderName, slot)
+        var found: File? = null
+        if(gameFilename != null) {
+            found = findFileInDirectory(dir, gameFilename, slot)
         } else {
-            return findImageInFolder(systemName, gameFilename, getFolderName(type), slot)
+            found = getSystemMedia(systemName, folderName)
         }
+        return found
     }
 
     private fun checkCroppedAlternative(file: File?): File? {
@@ -129,16 +105,6 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         }
     }
 
-    fun findVideoFile(systemName: String, gameFilename: String, slot: MediaSlot = MediaSlot.Default): File? {
-        val dir = getDir(systemName, getFolderName(ContentType.VIDEO), slot)
-        if (!dir.exists()) {
-            android.util.Log.d("MediaFileLocator", "Video directory does not exist: ${dir.absolutePath}")
-            return null
-        }
-        val videoFile = findFileInDirectory(dir, gameFilename, slot, VIDEO_EXTENSIONS)
-        return videoFile
-    }
-
     private fun getMediaPath(slot: MediaSlot = MediaSlot.Default): String {
         var mediaPath = prefsManager.mediaPath
         if(slot != MediaSlot.Default) {
@@ -160,7 +126,7 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         val dir = File(folder)
         val matchingFiles = dir.listFiles { file ->
             file.nameWithoutExtension == baseFileName &&
-                    IMAGE_EXTENSIONS.contains(file.extension.lowercase())
+                    MEDIA_EXTENSIONS.contains(file.extension.lowercase())
         }
         return matchingFiles?.firstOrNull()
     }
@@ -183,8 +149,7 @@ class MediaManager(private val prefsManager: PreferencesManager) {
     private fun findFileInDirectory(
         dir: File,
         fullPath: String,
-        slot: MediaSlot,
-        extensions: List<String>
+        slot: MediaSlot
     ): File? {
         if (!dir.exists() || !dir.isDirectory) return null
         val nameWithoutExt = MediaFileHelper.extractGameFilenameWithoutExtension(sanitizeGameFilename(fullPath))
@@ -197,7 +162,7 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         if (subfolderPath != null) {
             val subDir = File(dir, subfolderPath)
             if (subDir.exists() && subDir.isDirectory) {
-                val file = tryFindFileWithExtensions(subDir, nameWithoutExt, rawName, slot, extensions)
+                val file = tryFindFile(subDir, nameWithoutExt, rawName, slot)
                 if (file != null) {
                     return file
                 }
@@ -205,23 +170,22 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         }
 
         // Try root level
-        val file = tryFindFileWithExtensions(dir, nameWithoutExt, rawName, slot, extensions)
+        val file = tryFindFile(dir, nameWithoutExt, rawName, slot)
         if (file != null) {
             return file
         }
         return null
     }
 
-    private fun tryFindFileWithExtensions(
+    private fun tryFindFile(
         dir: File,
         strippedName: String,
         rawName: String,
-        slot: MediaSlot,
-        extensions: List<String>
+        slot: MediaSlot
     ): File? {
         // Try both stripped name and raw name
         for (name in listOf(strippedName, rawName)) {
-            for (ext in extensions) {
+            for (ext in MEDIA_EXTENSIONS) {
                 val file = File(dir, "$name${slot.suffix}.$ext")
                 if (file.exists()) {
                     return file
@@ -281,6 +245,44 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         return File(dir, "$nameWithoutExt${slot.suffix}.$extension")
     }
 
+    suspend fun importFileToAltSlot(
+        context: Context,
+        sourceUri: Uri,
+        contentType: ContentType,
+        systemName: String,
+        gameFilename: String,
+        slot: MediaSlot
+    ): File? = withContext(Dispatchers.IO) {
+        val extension = resolveExtensionFromUri(context, sourceUri) ?: return@withContext null
+        val nameWithoutExt = MediaFileHelper.extractGameFilenameWithoutExtension(
+            sanitizeGameFilename(gameFilename)
+        )
+        val targetDir = getDir(systemName, getFolderName(contentType), slot)
+        val targetFile = File(targetDir, "$nameWithoutExt${slot.suffix}.$extension")
+
+        try {
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                targetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            targetFile
+        } catch (e: Exception) {
+            Log.e("MediaManager", "Failed to import file", e)
+            null
+        }
+    }
+
+    private fun resolveExtensionFromUri(context: Context, uri: Uri): String? {
+        val mimeType = context.contentResolver.getType(uri)
+        if (mimeType != null) {
+            val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            if (ext != null) return ext
+        }
+        val lastSegment = uri.lastPathSegment ?: return null
+        val ext = lastSegment.substringAfterLast('.', "")
+        return ext.ifEmpty { null }
+    }
 
     private fun sanitizeFilename(fullPath: String): String {
         val normalized = fullPath.replace("\\", "/")

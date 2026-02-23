@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.MediaStore
+import android.util.Half.toFloat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -31,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
@@ -42,6 +44,8 @@ import androidx.compose.material3.ButtonColors
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -197,6 +201,11 @@ fun WidgetMenuContent(
                                 draftPage.isRequired,
                                 { draftPage = draftPage.copy(isRequired = !draftPage.isRequired) })
                         }
+                        MenuChip(
+                            "Default page",
+                            draftPage.isDefault,
+                            { draftPage = draftPage.copy(isDefault = !draftPage.isDefault) })
+
                     }
                 }
             }
@@ -221,7 +230,6 @@ fun WidgetMenuContent(
             //Background content
             item {
                 MenuSection(title = "Background Content") {
-                    // Type Selector (Custom implementation of a dropdown or chips)
                     BackgroundTypeSelector(isSystemView,draftPage.backgroundType, draftPage.backgroundFallbackType,
                     { type ->
                         draftPage = draftPage.copy(backgroundType = type)
@@ -240,7 +248,6 @@ fun WidgetMenuContent(
                         }
                     }
 
-                    // Show slot selector if it's dynamic media
                     if (draftPage.backgroundType in listOf(
                             PageContentType.FANART,
                             PageContentType.SCREENSHOT,
@@ -252,13 +259,13 @@ fun WidgetMenuContent(
                         }
                     }
 
-                    if (draftPage.backgroundType == PageContentType.VIDEO || draftPage.backgroundType == PageContentType.CUSTOM_FOLDER) {
+                    if (draftPage.backgroundType != PageContentType.SOLID_COLOR && draftPage.backgroundType != PageContentType.CUSTOM_IMAGE ) {
                         MenuToggle("Mute Video", draftPage.isVideoMuted) {
                             draftPage = draftPage.copy(isVideoMuted = it)
                         }
                         MenuSlider(
                             "Video volume",
-                            draftPage.videoVolume.toFloat() * 100,
+                            draftPage.videoVolume * 100,
                             0f,
                             100f,
                             ""
@@ -298,6 +305,42 @@ fun WidgetMenuContent(
                 }
             }
 
+            item {
+                MenuSection(title = "Automatic page transition") {
+                        MenuToggle("Automatic transition", draftPage.transitionToPage) {
+                            draftPage = draftPage.copy(transitionToPage = it)
+                        }
+                        if(draftPage.transitionToPage) {
+                            PagePicker(
+                                currentPageIndex = currentPageIndex,
+                                pages = pages,
+                                selectedPage = pages.find { it.id == draftPage.transitionTargetPageId },
+                                onPageSelected = {
+                                    draftPage = draftPage.copy(transitionTargetPageId = it.id)
+                                }
+                            )
+
+                            MenuToggle(
+                                "Transition after video played",
+                                draftPage.transitionToPageAfterVideo
+                            ) {
+                                draftPage = draftPage.copy(transitionToPageAfterVideo = it)
+                            }
+                            MenuSlider(
+                                "Transition delay",
+                                draftPage.transitionDelay.toFloat(),
+                                2f,
+                                20f,
+                                "s"
+                            ) {
+                                draftPage = draftPage.copy(transitionDelay = it.toInt())
+                            }
+                        }
+
+
+                }
+            }
+
             //Background visual settings
             item {
                 MenuSection(title = "Visuals") {
@@ -307,7 +350,7 @@ fun WidgetMenuContent(
 
                     if (draftPage.backgroundType != PageContentType.VIDEO && draftPage.backgroundType != PageContentType.SOLID_COLOR) {
                         MenuSlider(
-                            "Blur Intensity",
+                            "Blur Intensity (image only)",
                             draftPage.blurRadius,
                             0f,
                             25f
@@ -813,7 +856,6 @@ fun PageHeaderSection(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isEditingName) {
-                    // 2. The Inline Input Box
                     OutlinedTextField(
                         value = editedName,
                         onValueChange = { editedName = it },
@@ -864,7 +906,6 @@ fun PageHeaderSection(
                 }
             }
 
-            // Subtitle remains unchanged
             Surface(
                 color = if (isSystemView) Color(0xFF5C6BC0) else Color(0xFF66BB6A),
                 shape = RoundedCornerShape(4.dp),
@@ -879,7 +920,6 @@ fun PageHeaderSection(
             }
         }
 
-        // "Manage" button stays on the far right
         if (!isEditingName) {
             OutlinedButton(
                 onClick = { showPageManager = true },
@@ -893,10 +933,8 @@ fun PageHeaderSection(
         }
     }
     if (showPageManager) {
-        // This Dialog creates a new window layer on top of everything
         androidx.compose.ui.window.Dialog(
             onDismissRequest = { showPageManager = false },
-            // This property forces the dialog to take up the ENTIRE screen
             properties = androidx.compose.ui.window.DialogProperties(
                 usePlatformDefaultWidth = false,
                 decorFitsSystemWindows = false
@@ -1032,6 +1070,52 @@ private fun <T> AnimationSelectionRow(
                         color = if (isSelected) Color.White else Color.Gray,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PagePicker(
+    currentPageIndex: Int,
+    pages: List<WidgetPage>,
+    selectedPage: WidgetPage?,
+    onPageSelected: (WidgetPage) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    fun pageLabel(index: Int, page: WidgetPage): String {
+        return if (page.name.isNotEmpty()) "Page ${index + 1} — ${page.name}"
+        else "Page ${index + 1}"
+    }
+
+    Box {
+        OutlinedButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+        ) {
+            val label = selectedPage
+                ?.let { pageLabel(pages.indexOf(it), it) }
+                ?: "Select page"
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            pages.forEachIndexed { index, page ->
+                if (index != currentPageIndex) {
+                    DropdownMenuItem(
+                        text = { Text(pageLabel(index, page)) },
+                        onClick = {
+                            onPageSelected(page)
+                            expanded = false
+                        }
                     )
                 }
             }

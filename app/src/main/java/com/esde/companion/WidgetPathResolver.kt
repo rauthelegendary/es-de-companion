@@ -19,6 +19,7 @@ import com.esde.companion.metadata.GameRepository
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.WidgetContext
+import com.esde.companion.ui.contextmenu.MediaSlotScreen
 import java.io.File
 
 class WidgetPathResolver(
@@ -49,8 +50,8 @@ class WidgetPathResolver(
         metrics: DisplayMetrics
     ): ResolutionResult {
         val resolvedWidget = rawWidget.copy()
-        var missingRequired = false
 
+        val resolutionResult = ResolutionResult(resolvedWidget, false)
         if (system != null) {
             var contentTypeToUse = resolvedWidget.contentType
             if(resolvedWidget.contentType == ContentType.CUSTOM_FOLDER && !resolvedWidget.customPath.isBlank()) {
@@ -81,61 +82,62 @@ class WidgetPathResolver(
                 }
                     resolveContentTypeForWidget(
                         contentTypeToUse,
-                        resolvedWidget,
+                        resolutionResult,
                         gameFilename,
-                        resolvedWidget,
                         system
                     )
             }
         }
         if(resolvedWidget.contentType.isTextWidget() && (resolvedWidget.text.isEmpty() && resolvedWidget.isRequired)) {
-            missingRequired = true
+            resolutionResult.missingRequired = true
         } else if(!resolvedWidget.contentType.isTextWidget() && resolvedWidget.contentType != ContentType.CUSTOM_FOLDER && resolvedWidget.contentType != ContentType.CUSTOM_IMAGE && resolvedWidget.contentType != ContentType.COLOR_BACKGROUND && resolvedWidget.isRequired && resolvedWidget.contentPath != null && resolvedWidget.contentPath!!.isEmpty()) {
-            missingRequired = true
+            resolutionResult.missingRequired = true
         }
 
         resolvedWidget.fromPercentages(metrics.widthPixels, metrics.heightPixels)
-        return ResolutionResult(resolvedWidget, missingRequired)
+        return resolutionResult
     }
 
     private suspend fun resolveContentTypeForWidget(
         contentType: ContentType,
-        rawWidget: Widget,
+        resolutionResult: ResolutionResult,
         gameFilename: String?,
-        resolvedWidget: Widget,
         system: String
     ) {
         if (contentType.isTextWidget() && gameFilename != null) {
-            resolvedWidget.text =
+            resolutionResult.widget.text =
                 getGameTextWidget(system, gameFilename, contentType) ?: ""
         } else if (contentType == ContentType.SYSTEM_LOGO) {
-            resolvedWidget.contentPath = findSystemLogo(system) ?: ""
+            resolutionResult.widget.contentPath = findSystemLogo(system) ?: ""
         } else if (contentType == ContentType.SYSTEM_IMAGE) {
-            resolvedWidget.contentPath =
+            resolutionResult.widget.contentPath =
                 getSystemImage(system, prefs.systemPath)?.path ?: ""
         } else if (gameFilename == null && (contentType == ContentType.FANART || contentType == ContentType.SCREENSHOT)) {
             val screenshotPref = contentType == ContentType.SCREENSHOT
-            resolvedWidget.contentPath = getRandomGameImageForSystem(system, screenshotPref)?.path
+            resolutionResult.widget.contentPath = getRandomGameImageForSystem(system, screenshotPref)?.path
         } else if (gameFilename != null && contentType != ContentType.CUSTOM_IMAGE && contentType != ContentType.COLOR_BACKGROUND) {
             val mediaFile = locateFileWithOverride(
                 contentType,
                 system,
                 gameFilename,
-                rawWidget.slot
+                resolutionResult.widget.slot,
+                resolutionResult
             )
             if (mediaFile != null) {
-                resolvedWidget.contentPath = mediaFile.absolutePath
+                resolutionResult.widget.contentPath = mediaFile.absolutePath
+                resolutionResult.widget.video = mediaLocator.isVideo(mediaFile)
             } else {
-                resolvedWidget.contentPath = ""
+                resolutionResult.widget.contentPath = ""
+                resolutionResult.widget.video = false
             }
-            if (resolvedWidget.cycle) {
-                resolvedWidget.images =
-                    getAllImagesForGameAndContentType(contentType, gameFilename, system)
+            if (resolutionResult.widget.cycle) {
+                resolutionResult.widget.files =
+                    getAllFilesForGameAndContentType(contentType, gameFilename, system)
             }
         }
     }
 
-    fun locateFileWithOverride(contentType: ContentType, system: String, gameFilename: String, givenSlot: MediaSlot): File? {
+    fun locateFileWithOverride(contentType: ContentType, system: String, gameFilename: String, givenSlot: MediaSlot, result: ResolutionResult? = null, pageResolution: PageResolution? = null): File? {
         var slot = givenSlot
         if(givenSlot == MediaSlot.Default) {
             val override = mediaOverrideRepository.getOverride(gameFilename, system, contentType)
@@ -143,15 +145,25 @@ class WidgetPathResolver(
                 slot = override.altSlot
             }
         }
-        return mediaLocator.findMediaFile(contentType,system, gameFilename, slot)
+        var file = mediaLocator.findMediaFile(contentType,system, gameFilename, slot)
+        //if we couldn't find anything or the given slot or existing override, go back to default as backup but mark required as failed
+        if(slot != MediaSlot.Default && (file == null || !file.exists())) {
+            file = mediaLocator.findMediaFile(contentType,system, gameFilename, MediaSlot.Default)
+            result?.missingRequired = true
+            pageResolution?.missingRequired = true
+        } else{
+            result?.missingRequired = false
+            pageResolution?.missingRequired = false
+        }
+        return file
     }
 
-    fun getAllImagesForGameAndContentType(type: ContentType, game: String, system: String): Map<MediaSlot, File?> {
-        val imageList = mutableMapOf<MediaSlot, File?>()
+    fun getAllFilesForGameAndContentType(type: ContentType, game: String, system: String): Map<MediaSlot, File?> {
+        val fileList = mutableMapOf<MediaSlot, File?>()
         MediaSlot.entries.forEach { slot ->
-            imageList[slot] = mediaLocator.findMediaFile(type,system, game, slot)
+            fileList[slot] = mediaLocator.findMediaFile(type,system, game, slot)
         }
-        return imageList
+        return fileList
     }
 
     private suspend fun getGameTextWidget(systemName: String, gameFilename: String, contentType: ContentType): String? {
@@ -223,13 +235,15 @@ class WidgetPathResolver(
         }
     }
 
-    fun resolvePage(page: WidgetPage, state: AppState): Any? {
+    fun resolvePage(page: WidgetPage, state: AppState): PageResolution {
         val systemName = state.getCurrentSystemName()
         val gameName = state.getCurrentGameFilename()
+        val pageResolution = PageResolution(null, false)
 
         if(systemName != null) {
             if (page.backgroundType == PageContentType.CUSTOM_FOLDER && page.customPath != null) {
-                return handleCustomFolderForPage(gameName, page.customPath, systemName, page)
+                pageResolution.content = handleCustomFolderForPage(gameName, page.customPath, systemName, page)
+                return pageResolution
             }
 
             if (page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_IMAGE) {
@@ -237,22 +251,26 @@ class WidgetPathResolver(
                     //if we're in a game state
                     if (state.toWidgetContext() == WidgetContext.GAME) {
                         if (gameName != null) {
-                            return resolvePageMediaPath(page, systemName, gameName)
+                            pageResolution.content = resolvePageMediaPath(page, systemName, gameName, pageResolution)
+                            return pageResolution
                         }
                     } else {
                         //If we're in system page
                         val screenshotPref = page.backgroundType == PageContentType.SCREENSHOT
                         //if we want to show a random game fanart or screenshot
+                        var content: Any?
                         if (page.backgroundType == PageContentType.FANART || screenshotPref) {
-                            return getRandomGameImageForSystem(systemName, screenshotPref)
+                            content = getRandomGameImageForSystem(systemName, screenshotPref)
                         } else {
-                            return getSystemImage(systemName, prefsManager.systemPath)
+                            content = getSystemImage(systemName, prefsManager.systemPath)
                         }
+                        pageResolution.content = content
+                        return pageResolution
                     }
                 }
             }
         }
-        return null
+        return pageResolution
     }
 
     private fun handleCustomFolderForPage(
@@ -300,27 +318,28 @@ class WidgetPathResolver(
         }
     }
 
-    fun resolvePageMediaPath(page: WidgetPage, system: String, gameFilename: String): File? {
+    fun resolvePageMediaPath(page: WidgetPage, system: String, gameFilename: String, pageResolution: PageResolution? = null): File? {
         if (page.backgroundType == PageContentType.CUSTOM_IMAGE && page.customPath != null) {
             return null
         } else {
-            return resolvePageMediaPath(page.backgroundType, system, gameFilename, page.slot, page.isRequired)
+            return resolvePageMediaPath(page.backgroundType, system, gameFilename, page.slot, page.isRequired, pageResolution)
         }
     }
 
-    fun resolvePageMediaPath(contentType: PageContentType, system: String, gameFilename: String, slot: MediaSlot, required: Boolean): File? {
+    fun resolvePageMediaPath(contentType: PageContentType, system: String, gameFilename: String, slot: MediaSlot, required: Boolean, pageResolution: PageResolution? = null): File? {
         var result: File? = null
         if (contentType == PageContentType.VIDEO) {
-            result = locateFileWithOverride(ContentType.VIDEO, system, gameFilename, slot)
+            result = locateFileWithOverride(ContentType.VIDEO, system, gameFilename, slot, pageResolution = pageResolution)
         } else if (contentType == PageContentType.FANART) {
-            result = locateFileWithOverride(ContentType.FANART, system, gameFilename, slot)
+            result = locateFileWithOverride(ContentType.FANART, system, gameFilename, slot, pageResolution = pageResolution)
         }
         //use screenshot as backup
         if (contentType == PageContentType.SCREENSHOT || ((result == null || !result.exists()) && !required)) {
-            result = locateFileWithOverride(ContentType.SCREENSHOT, system, gameFilename, slot)
+            result = locateFileWithOverride(ContentType.SCREENSHOT, system, gameFilename, slot, pageResolution = pageResolution)
         }
         return result
     }
 }
 
-data class ResolutionResult(val widget: Widget, val missingRequired: Boolean)
+data class ResolutionResult(val widget: Widget, var missingRequired: Boolean)
+data class PageResolution(var content: Any?, var missingRequired: Boolean)

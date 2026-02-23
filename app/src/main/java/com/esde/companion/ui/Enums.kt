@@ -66,6 +66,20 @@ enum class ContentType {
         RELEASE_DATE -> true
         else -> false
     }
+
+    fun hasAltSlots(): Boolean {
+        if(isTextWidget()) {
+            return false
+        }
+        return when(this) {
+            CUSTOM_IMAGE -> false
+            CUSTOM_FOLDER -> false
+            COLOR_BACKGROUND -> false
+            SYSTEM_IMAGE -> false
+            SYSTEM_LOGO -> false
+            else -> true
+        }
+    }
 }
 
 enum class TextAlignment {

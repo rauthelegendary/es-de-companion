@@ -35,6 +35,8 @@ import com.esde.companion.managers.MediaManager
 import com.esde.companion.ui.AnimationHelper
 import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.io.File
@@ -77,6 +79,9 @@ class BackgroundBinder(
     private var manualMuteInversion = false
     private var previousMediaFile: Any? = null
 
+    private var transitionJob: Job? = null
+    private var pendingTransitionCallback: (() -> Unit)? = null
+
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
         .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
@@ -95,13 +100,14 @@ class BackgroundBinder(
         }
     }
 
-    fun apply(page: WidgetPage, newState: AppState, mediaFile: Any?, widgetsLocked: Boolean, forcedRefresh: Boolean = false) {
+    fun apply(page: WidgetPage, newState: AppState, mediaFile: Any?, widgetsLocked: Boolean, onTransitionReady: (() -> Unit)? = null, forcedRefresh: Boolean = false) {
         val systemName = newState.getCurrentSystemName()
         val gameName = newState.getCurrentGameFilename()
 
         switchedSystem = previousSystem != systemName
         switchedGame = (previousGame != gameName) && gameName != null
         this.widgetsLocked = widgetsLocked
+        val isVideo = mediaFile != null && mediaManager.isVideo(mediaFile)
 
         dimmerView.alpha = 1.0f - page.backgroundOpacity
         if (page.blurRadius > 0) {
@@ -114,60 +120,51 @@ class BackgroundBinder(
         } else {
             imageView.setRenderEffect(null)
         }
-        if(page.backgroundType == PageContentType.VIDEO) {
+        if(page.backgroundType == PageContentType.VIDEO || isVideo) {
             updateVideoLayering(page.displayWidgetsOverVideo)
         } else {
             updateVideoLayering(true)
         }
-
+        manualMuteInversion = false
         if(sameContent(forcedRefresh, gameName, page, mediaFile)) {
             if(widgetsLocked && player != null && player!!.playbackState == Player.STATE_READY && !player!!.playWhenReady) {
                 player?.play()
             }
+            currentPage = page
+            updateVolume()
             return
         }
-        manualMuteInversion = false
+
         videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
         currentPage = page
+        state = newState
         val animationType = animationSettings.transitionTarget.value
         playAnimation = animationType == PageAnimation.PAGE || (animationType == PageAnimation.CONTEXT && (switchedGame || switchedSystem))
-        state = newState
 
         previousSystem = systemName ?: ""
         previousGame = gameName ?: ""
         previousMediaFile = mediaFile
 
-        if(page.backgroundType == PageContentType.CUSTOM_FOLDER && mediaFile != null) {
-            if(mediaManager.isVideo(mediaFile)) {
-                showVideo(mediaFile)
-            } else {
-                showImage(mediaFile)
-            }
-        } else if ((page.backgroundType != PageContentType.SOLID_COLOR || page.solidColor == null)) {
-            if(page.backgroundType != PageContentType.CUSTOM_IMAGE) {
-                if (page.backgroundType == PageContentType.VIDEO) {
-                    if(mediaFile != null) {
-                        showVideo(mediaFile)
-                    }
-                } else {
-                    showImage(mediaFile)
-                }
-            } else if(page.backgroundType == PageContentType.CUSTOM_IMAGE && page.customPath != null) {
-                showImage(page.customPath)
-            }
-        } else {
+        if (page.backgroundType == PageContentType.SOLID_COLOR && page.solidColor != null) {
             showSolidColor(page.solidColor!!)
+        } else if (page.backgroundType == PageContentType.CUSTOM_IMAGE && page.customPath != null) {
+            showImage(page.customPath)
+        } else if (isVideo) {
+            showVideo(mediaFile)
+        } else {
+            showImage(mediaFile)
+        }
+
+        if(onTransitionReady != null && page.transitionToPage && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)) {
+            scheduleTransition(page, isVideo, onTransitionReady)
         }
     }
 
     private fun sameContent(forcedRefresh: Boolean, gameName: String?, page: WidgetPage, mediaFile: Any?): Boolean {
-        return !forcedRefresh
-                && ((!switchedSystem && ((previousGame.isEmpty() && gameName == null) || !switchedGame))
-                && (currentPage != null
-                && page.hasSameVisualSettings(currentPage!!))
-                && (previousMediaFile == mediaFile
-                && mediaFile != null
-                && page.backgroundType != PageContentType.CUSTOM_IMAGE))
+        val sameSystemOrGame = (!switchedSystem && ((previousGame.isEmpty() && gameName == null) || !switchedGame))
+        val sameVisualSettings = (currentPage != null && page.hasSameVisualSettings(currentPage!!))
+        val mediaFileUnchanged = ((currentPage != null && page.slot == currentPage!!.slot) || (previousMediaFile == mediaFile && mediaFile != null && page.backgroundType != PageContentType.CUSTOM_IMAGE))
+        return !forcedRefresh && (sameSystemOrGame && sameVisualSettings && mediaFileUnchanged)
     }
 
     private fun showSolidColor(color: Int) {
@@ -265,6 +262,8 @@ class BackgroundBinder(
             stopVideoPlayer()
             if (player == null) buildVideoPlayer()
 
+            val transitionToPageAfterVideo = currentPage?.transitionToPage == true && currentPage?.transitionToPageAfterVideo == true && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)
+
             imageView.visibility = View.GONE
             var mediaItem: MediaItem? = null
             if(videoFile is Uri) {
@@ -293,7 +292,6 @@ class BackgroundBinder(
                             }
                         }
 
-                        // Cleanup self
                         videoFirstFrameListener?.let { player?.removeListener(it) }
                         videoFirstFrameListener = null
                     }
@@ -304,22 +302,32 @@ class BackgroundBinder(
                 player?.apply {
                     setMediaItem(mediaItem)
                     volume = 0f
-                    repeatMode = Player.REPEAT_MODE_ONE
+                    repeatMode = if (transitionToPageAfterVideo) {
+                        Player.REPEAT_MODE_OFF
+                    } else {
+                        Player.REPEAT_MODE_ONE
+                    }
                     prepare()
                     playWhenReady = true
                 }
 
-                // 4. Existing Audio Logic (Unchanged)
-                if (currentPage?.isVideoMuted == false) {
-                    AudioReferee.updateBackgroundState(true)
-                    allowedVolume = this.getAllowedAudioLevel()
-                    volumeFader.fadeTo(allowedVolume)
+                if (transitionToPageAfterVideo) {
+                    player?.addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(state: Int) {
+                            if (state == Player.STATE_ENDED) {
+                                pendingTransitionCallback?.invoke()
+                                pendingTransitionCallback = null
+                                player?.removeListener(this)
+                            }
+                        }
+                    })
                 }
+
+                updateVolume()
 
                 val runLayoutLogic = {
                     //updateVideoLayering(currentPage?.displayWidgetsOverVideo == true)
 
-                    // 5. Prepare the Stage
                     videoView.visibility = View.VISIBLE
                     videoView.alpha = if (playAnimation) 0f else 1f
 
@@ -342,6 +350,34 @@ class BackgroundBinder(
         } catch (e: Exception) {
             Log.e("MainActivity", "Error loading video: $videoFile", e)
             releasePlayer()
+        }
+    }
+
+    private fun scheduleTransition(page: WidgetPage, isVideo: Boolean, callback: () -> Unit) {
+        cancelTransition()
+        pendingTransitionCallback = callback
+
+        if ((!isVideo || !page.transitionToPageAfterVideo) && page.transitionDelay > 0) {
+            transitionJob = lifecycleOwner.lifecycleScope.launch {
+                delay(page.transitionDelay * 1000L)
+                callback()
+                pendingTransitionCallback = null
+            }
+        }
+    }
+
+    fun cancelTransition() {
+        transitionJob?.cancel()
+        transitionJob = null
+        pendingTransitionCallback = null
+    }
+
+    private fun updateVolume() {
+        AudioReferee.updateBackgroundState(true)
+        allowedVolume = this.getAllowedAudioLevel()
+        volumeFader.fadeTo(allowedVolume)
+        if(allowedVolume == 0f) {
+            AudioReferee.updateBackgroundState(false)
         }
     }
 
@@ -438,7 +474,7 @@ class BackgroundBinder(
 
     fun toggleMute(): Boolean {
         manualMuteInversion = !manualMuteInversion
-        if(player?.isPlaying == true) {
+        if(player?.isPlaying == true && videoHasAudioTrack()) {
             if (player?.volume == 0f) {
                 AudioReferee.updateBackgroundState(true)
                 player?.volume = getAllowedAudioLevel()
@@ -449,5 +485,12 @@ class BackgroundBinder(
             return true
         }
         return false
+    }
+
+    fun videoHasAudioTrack(): Boolean {
+        val tracks = player?.currentTracks
+        return tracks?.groups?.any { group ->
+            group.type == C.TRACK_TYPE_AUDIO && group.length > 0
+        } == true
     }
 }

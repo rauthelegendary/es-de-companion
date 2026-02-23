@@ -2,6 +2,8 @@ package com.esde.companion.ui.contextmenu
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +30,7 @@ import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.DriveFileMove
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -72,6 +75,7 @@ import com.esde.companion.art.mediaoverride.MediaOverrideKey
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.ui.ContentType
 import java.io.File
+import java.net.URI
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +89,8 @@ fun GameMediaContent(
     onCropSave: (File, Bitmap) -> Unit,
     removeCrop: (File) -> Unit,
     swapMedia: (String, ContentType, String, MediaSlot, MediaSlot) -> Unit,
-    deleteMedia: (String, ContentType, String, MediaSlot) -> Unit
+    deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
+    setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot) -> Unit
 ) {
     var selectedType by remember { mutableStateOf(ContentType.BOX_2D) }
     var selectedSlot by remember { mutableStateOf(MediaSlot.Default) }
@@ -109,12 +114,22 @@ fun GameMediaContent(
 
     val visibleTypes = remember {
         ContentType.entries.filter {
-            !it.isTextWidget() && it != ContentType.SYSTEM_LOGO && it != ContentType.SYSTEM_IMAGE && it != ContentType.COLOR_BACKGROUND && it != ContentType.CUSTOM_IMAGE
+            it.hasAltSlots()
         }
     }
 
     val selectedIndex = remember(selectedType, visibleTypes) {
         visibleTypes.indexOf(selectedType).coerceAtLeast(0)
+    }
+
+    val slotFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {it ->
+            setManualFileForSlot(it, selectedType, game, system, selectedSlot)
+            //TODO: this probably goes wrong
+            refreshKey++
+        }
     }
 
     var fileToCrop by remember { mutableStateOf<File?>(null) }
@@ -170,6 +185,7 @@ fun GameMediaContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         availableSlots.forEach { (slot, exists) ->
+                            val bgColor = if(exists) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.background
                             val isDefault = activeOverride?.altSlot == slot
                             FilterChip(
                                 selected = selectedSlot == slot,
@@ -180,11 +196,10 @@ fun GameMediaContent(
                                         Box(
                                             Modifier.padding(start = 4.dp).size(6.dp)
                                                 .clip(CircleShape)
-                                                .background(MaterialTheme.colorScheme.primary)
+                                                .background(bgColor)
                                         )
                                     }
-                                },
-                                enabled = exists
+                                }
                             )
                         }
                     }
@@ -237,7 +252,8 @@ fun GameMediaContent(
                     onCrop = { file -> fileToCrop = file },
                     removeCrop = removeCrop,
                     refreshKey = refreshKey,
-                    onRefreshRequest = { refreshKey++ }
+                    onRefreshRequest = { refreshKey++ },
+                    onManualFile = { slotFilePicker.launch(arrayOf("image/*", "video/*")) }
                 )
             }
         }
@@ -288,7 +304,7 @@ fun CompactPreview(
     onRefreshRequest: () -> Unit
 ) {
     val file = remember(game, system, type, slot, refreshKey) { mediaManager.findMediaFile(type, system, game, slot) }
-    val isVideo = file?.path?.let { it.endsWith(".mp4") || it.endsWith(".mkv") } ?: false
+    var isVideo = mediaManager.isVideo(file)
 
     val context = LocalContext.current
     val exoPlayer = remember {
@@ -298,7 +314,7 @@ fun CompactPreview(
         }
     }
     LaunchedEffect(file) {
-        val isVideo = file?.path?.let { it.endsWith(".mp4") || it.endsWith(".mkv") } ?: false
+        isVideo = mediaManager.isVideo(file)
         if(isVideo) {
             val mediaItem = MediaItem.fromUri(Uri.fromFile(file))
             exoPlayer.setMediaItem(mediaItem)
@@ -345,7 +361,7 @@ fun CompactPreview(
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(file)
-                            .allowHardware(false)
+                            .allowHardware(true)
                             .crossfade(true)
                             .memoryCacheKey("${file.absolutePath}_${file.lastModified()}")
                             .build(),
@@ -374,10 +390,11 @@ fun PreviewActions(
     onCrop: (File) -> Unit,
     removeCrop: (File) -> Unit,
     refreshKey: Int,
-    onRefreshRequest: () -> Unit
+    onRefreshRequest: () -> Unit,
+    onManualFile: () -> Unit
 ) {
     val file = remember(game, type, slot, refreshKey) { mediaManager.findMediaFileDefault(type, system, game, slot) }
-    val isVideo = file?.path?.let { it.endsWith(".mp4") || it.endsWith(".mkv") } ?: false
+    val isVideo = mediaManager.isVideo(file)
     val isCurrentDefault = activeOverride?.altSlot == slot
     val croppedFile = remember(file) {
         file?.let { File(it.parent, "${it.nameWithoutExtension}_cropped.png") }
@@ -388,48 +405,67 @@ fun PreviewActions(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (isCurrentDefault) {
-            Button(
-                onClick = { onRemoveOverride(activeOverride!!) },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-            ) {
-                Icon(Icons.Default.Delete, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Remove Default")
+        if (file != null) {
+            if (isCurrentDefault) {
+                Button(
+                    onClick = { onRemoveOverride(activeOverride!!) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Icon(Icons.Default.Delete, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Remove Default")
+                }
+            } else {
+                Button(
+                    onClick = {
+                        onSetDefault(
+                            MediaOverride(
+                                MediaOverrideKey(game, system, type),
+                                slot
+                            )
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = slot != MediaSlot.Default && file?.exists() == true
+                ) {
+                    Icon(Icons.Default.Star, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Set Default")
+                }
             }
-        } else {
-            Button(
-                onClick = { onSetDefault(MediaOverride(MediaOverrideKey(game, system, type), slot)) },
-                modifier = Modifier.weight(1f),
-                enabled = slot != MediaSlot.Default && file?.exists() == true
-            ) {
-                Icon(Icons.Default.Star, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Set Default")
+
+            if (!hasCrop && !isVideo && slot != MediaSlot.Default && file?.exists() == true) {
+                OutlinedButton(
+                    onClick = { onCrop(file) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Crop, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Crop")
+                }
+            } else if (hasCrop) {
+                OutlinedButton(
+                    onClick = {
+                        removeCrop(croppedFile!!)
+                        onRefreshRequest()
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = "Remove Crop")
+                    Spacer(Modifier.width(8.dp))
+                    Text("Remove Crop")
+                }
             }
         }
-
-        if (!hasCrop && !isVideo && slot != MediaSlot.Default && file?.exists() == true) {
-            OutlinedButton(
-                onClick = { onCrop(file) },
+        if(slot != MediaSlot.Default) {
+            Button(
+                onClick = { onManualFile() },
                 modifier = Modifier.weight(1f)
             ) {
-                Icon(Icons.Default.Crop, null)
+                Icon(Icons.Default.UploadFile, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Crop")
-            }
-        } else if (hasCrop) {
-            OutlinedButton(
-                onClick = {
-                    removeCrop(croppedFile!!)
-                    onRefreshRequest()
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Icon(Icons.Default.RestartAlt, contentDescription = "Remove Crop")
-                Spacer(Modifier.width(8.dp))
-                Text("Remove Crop")
+                Text("Set file manually")
             }
         }
     }

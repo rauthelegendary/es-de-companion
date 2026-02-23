@@ -64,7 +64,7 @@ fun SaveMediaStep(
     gameName: String,
     systemName: String
     ) {
-    val selectableMediaTypes = listOf<ContentType>(
+    val selectableMediaTypes = listOf(
         ContentType.BOX_2D,
         ContentType.BOX_3D,
         ContentType.MARQUEE,

@@ -20,11 +20,15 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.View.TEXT_ALIGNMENT_CENTER
+import android.view.View.TEXT_ALIGNMENT_TEXT_END
+import android.view.View.TEXT_ALIGNMENT_TEXT_START
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.RelativeLayout
 import android.widget.TextView
 import androidx.compose.ui.unit.dp
+import androidx.core.os.HandlerCompat.postDelayed
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -34,11 +38,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import be.tarsos.dsp.beatroot.Peaks.post
 import coil.dispose
 import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.animators.GlintDrawable
 import com.esde.companion.data.Widget
 import com.esde.companion.managers.ImageManager
+import com.esde.companion.managers.MediaManager
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.GlintView
 import com.esde.companion.ui.PageContentType
@@ -85,7 +91,8 @@ class WidgetView(
     private val animationSettings: AnimationSettings,
     private val imageManager: ImageManager,
     private var system: String,
-    private var game: String
+    private var game: String,
+    private var mediaManager: MediaManager
 ) : RelativeLayout(context) {
 
     var currentMode = WidgetMode.IDLE
@@ -358,10 +365,10 @@ class WidgetView(
     }
 
     private fun cycleImage() {
-        if(widget.images != null && widget.cycle) {
+        if(widget.files != null && widget.cycle) {
             val activeSlots = MediaSlot.entries.filter { slot ->
-                widget.images!!.containsKey(slot)
-                widget.images!![slot] != null
+                widget.files!!.containsKey(slot)
+                widget.files!![slot] != null
             }
 
             if (activeSlots.isEmpty()) return
@@ -374,10 +381,16 @@ class WidgetView(
             if(currentActiveIndex != nextIndex) {
                 currentImageIndex = nextSlot
 
-                val imageFile = widget.images!![nextSlot]
+                val file = widget.files!![nextSlot]
+                var video = mediaManager.isVideo(file)
 
-                imageFile?.let {
-                    loadImage(it, true)
+                file?.let {
+                    if(video) {
+                        loadVideo(file.path)
+                    } else
+                    {
+                        loadImage(it, true)
+                    }
                 }
             }
         }
@@ -449,48 +462,31 @@ class WidgetView(
        playerView.visibility = GONE
        scrollView.visibility = GONE
 
-        if (widget.contentType.isTextWidget()) {
-            handleTextWidget()
-            AudioReferee.updateWidgetState(widget.id,false)
-            return
-        }
-
-        if (widget.contentType == ContentType.VIDEO) {
-            loadVideo(widget.contentPath!!)
-            return
-        }
-
-        val path = widget.contentPath
-
-       if(widget.contentType == ContentType.CUSTOM_FOLDER) {
-            if(widget.video || (widget.fallback && widget.contentFallbackType == ContentType.VIDEO)) {
-                loadVideo(path!!)
-            } else {
-                loadImage(path)
-            }
+       val path = widget.contentPath
+       if (widget.contentType == ContentType.COLOR_BACKGROUND) {
+           loadImage(widget.solidColor!!)
+       } else if (widget.contentType == ContentType.CUSTOM_IMAGE) {
+           loadImage(path)
+       } else if (widget.contentType == ContentType.CUSTOM_FOLDER) {
+           if (widget.video || (widget.fallback && widget.contentFallbackType == ContentType.VIDEO)) {
+               loadVideo(path!!)
+           } else {
+               loadImage(path)
+           }
+       } else {
+           if (widget.video && !path.isNullOrEmpty()) {
+               loadVideo(path)
+           } else {
+               var currentFile = if (path != null) File(path) else null
+               //TODO: cycle for videos?
+               if (widget.cycle && widget.files != null) {
+                   currentFile = widget.files!![currentImageIndex] ?: currentFile
+               }
+               loadImage(currentFile)
+           }
        }
-        else if(widget.contentType == ContentType.COLOR_BACKGROUND) {
-            loadImage(widget.solidColor!!)
-        } else if (widget.contentType == ContentType.CUSTOM_IMAGE) {
-            loadImage(path)
-         //else if (path!!.isEmpty() || (path.startsWith("/") && !File(path).exists())) {
-          //  imageView.dispose()
-           // imageView.setImageDrawable(null)        }
-        //else if (path != null && path.startsWith("builtin://")) {
-       //     val systemName = path.removePrefix("builtin://")
-        //    val drawable = mainActivity?.loadSystemLogoFromAssets(
-        //        systemName, widget.width.toInt(), widget.height.toInt()
-       //     )
-       //     loadImage(drawable)
-        } else {
-            var currentFile = if(path != null) File(path) else null
-            if(widget.cycle && widget.images != null) {
-                currentFile = widget.images!![currentImageIndex] ?: currentFile
-            }
-            loadImage(currentFile)
-        }
-       AudioReferee.updateWidgetState(widget.id,false)
-    }
+       AudioReferee.updateWidgetState(widget.id, false)
+   }
 
     private fun loadImage(data: Any?, animate: Boolean = animationSettings.animateWidgets.value) {
         val viewToUse = if(widget.glint && (widget.contentType == ContentType.MARQUEE || (widget.fallback && widget.contentFallbackType == ContentType.MARQUEE))) glintView else imageView

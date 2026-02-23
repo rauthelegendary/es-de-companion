@@ -83,12 +83,7 @@ fun WidgetSettingsOverlay(
                 Text("Edit ${liveWidget.contentType.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White)
 
                 Spacer(Modifier.height(12.dp))
-                if (!liveWidget.contentType.isTextWidget()
-                    && liveWidget.contentType != ContentType.COLOR_BACKGROUND
-                    && liveWidget.contentType != ContentType.SYSTEM_IMAGE
-                    && liveWidget.contentType != ContentType.SYSTEM_LOGO
-                    && liveWidget.contentType != ContentType.CUSTOM_IMAGE
-                    && liveWidget.contentType != ContentType.CUSTOM_FOLDER
+                if (liveWidget.contentType.hasAltSlots()
                     && (!inSystemView
                             || (liveWidget.contentType != ContentType.FANART
                             || liveWidget.contentType != ContentType.SCREENSHOT)
@@ -188,11 +183,7 @@ fun WidgetSettingsOverlay(
 
                 if (!liveWidget.contentType.isTextWidget()
                     && liveWidget.contentType != ContentType.VIDEO
-                    && liveWidget.contentType != ContentType.COLOR_BACKGROUND
-                    && liveWidget.contentType != ContentType.SYSTEM_IMAGE
-                    && liveWidget.contentType != ContentType.SYSTEM_LOGO
-                    && liveWidget.contentType != ContentType.CUSTOM_IMAGE
-                    && liveWidget.contentType != ContentType.CUSTOM_FOLDER
+                    && liveWidget.contentType.hasAltSlots()
                     && (!inSystemView
                             || (liveWidget.contentType != ContentType.FANART
                             || liveWidget.contentType != ContentType.SCREENSHOT)
@@ -323,7 +314,7 @@ fun WidgetSettingsOverlay(
 
                 }
 
-                if (liveWidget.contentType == ContentType.VIDEO || liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
+                if (liveWidget.contentType.hasAltSlots() || liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
                     MenuToggle("Mute video", !liveWidget.playAudio) { muted ->
                         liveWidget = liveWidget.copy(playAudio = !muted)
                         onUpdate(liveWidget)

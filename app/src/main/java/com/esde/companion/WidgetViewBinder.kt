@@ -6,6 +6,7 @@ import androidx.core.view.children
 import androidx.lifecycle.LifecycleOwner
 import com.esde.companion.data.Widget
 import com.esde.companion.managers.ImageManager
+import com.esde.companion.managers.MediaManager
 
 class WidgetViewBinder {
     private val viewPool = mutableListOf<WidgetView>()
@@ -30,7 +31,8 @@ class WidgetViewBinder {
         game: String = "",
         system: String,
         forcedRefresh: Boolean,
-        pendingWidgetId: String?
+        pendingWidgetId: String?,
+        mediaManager: MediaManager
     ) {
         val existingViews = container.children.filterIsInstance<WidgetView>().toList()
         val dataIds = dataList.map { it.id }.toSet()
@@ -53,7 +55,7 @@ class WidgetViewBinder {
                     view.visibility = View.VISIBLE
                     view.updateContent(data, page, game, system, forcedRefresh)
                 } else {
-                    view = WidgetView(container.context, lifecycleOwner, data, page, onTouch, onUpdate, onSelect, animationSettings, imageManager, game, system)
+                    view = WidgetView(container.context, lifecycleOwner, data, page, onTouch, onUpdate, onSelect, animationSettings, imageManager, game, system, mediaManager)
                 }
                 container.addView(view)
             } else {

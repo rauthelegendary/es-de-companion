@@ -145,6 +145,7 @@ import com.esde.companion.ui.contextmenu.WidgetUiState
 import com.esde.companion.ui.widget.WidgetControlMenu
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import org.schabi.newpipe.extractor.timeago.patterns.it
 import java.util.EventListener
 
 
@@ -294,6 +295,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private var scriptVerificationHandler: Handler? = null
     private var scriptVerificationRunnable: Runnable? = null
     private var currentVerificationDialog: AlertDialog? = null
+
+    private var autoTransitionJob: Job? = null
     private var currentErrorDialog: AlertDialog? = null
     private val SCRIPT_VERIFICATION_TIMEOUT = 15000L  // 15 seconds
 
@@ -873,7 +876,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                                  )
                              },
                              currentGameVolume = currentGameVolume,
-                             onVolumeChanged = {volume -> onGameVolumeSaved(volume)}
+                             onVolumeChanged = { volume -> onGameVolumeSaved(volume) },
+                             setManualFileForSlot = { uri, type, game, system, slot -> setManualFileForSlot(uri, type, game, system, slot)}
                          )
                      }
                     if (menuState.widgetToEditState != null) {
@@ -1098,6 +1102,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     }
 
     private fun onPageUpdated(updated: WidgetPage) {
+        updated.resetValuesForType()
         currentWidgetManager().updatePage(updated)
         refreshWidgets(pageSwap = true)
     }
@@ -2805,6 +2810,7 @@ Access this help anytime from the widget menu!
     }
 
     private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false, forcedRefresh: Boolean = false, pendingWidgetId: String? = null) {
+        cancelAutoTransition()
         Log.d("TEMP_DEBUG", "Widget Refreshing for: ${state.getCurrentGameFilename()}")
         val currentWidgetContext = state.toWidgetContext()
         if(previousWidgetContext != null && previousWidgetContext != currentWidgetContext) {
@@ -2838,7 +2844,8 @@ Access this help anytime from the widget menu!
             }
 
             val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
-            backgroundBinder.apply(processPage, state, pageMediaFile, widgetsLocked, forcedRefresh)
+            backgroundBinder.apply(processPage, state, pageMediaFile.content, widgetsLocked,
+                { startPageTransition(processPage) }, forcedRefresh)
 
             if (processPage.displayWidgets) {
                 val resolved = widgetPathResolver.resolve(
@@ -2870,7 +2877,8 @@ Access this help anytime from the widget menu!
                     onSelect = {widget -> showMenuForWidget(widget)},
                     forcedRefresh = forcedRefresh,
                     pendingWidgetId = pendingWidgetId,
-                    onTouch = {widget, drag -> onStartWidgetTouch(widget, drag)}
+                    onTouch = {widget, drag -> onStartWidgetTouch(widget, drag)},
+                    mediaManager = mediaManager
                 )
             } else {
                 hideWidgets()
@@ -2989,14 +2997,28 @@ Access this help anytime from the widget menu!
     }
 
     fun showMenuForWidget(widget: WidgetView) {
-        if (activeWidget == widget) {
-            menuState.widgetSelected = WidgetUiState(isVisible = true, mode = widget.currentMode)
-        }
-
-        activeWidget = widget
         menuState.widgetSelected = WidgetUiState(isVisible = true, mode = widget.currentMode)
+        cancelAutoTransition()
     }
 
+    fun setManualFileForSlot(sourceUri: Uri, type: ContentType, game: String, system: String, slot: MediaSlot) {
+        lifecycleScope.launch {
+            mediaService.deleteMedia(game, type, system, slot)
+            val imported = mediaManager.importFileToAltSlot(
+                context = this@MainActivity,
+                sourceUri = sourceUri,
+                contentType = type,
+                systemName = system,
+                gameFilename = game,
+                slot = slot
+            )
+            if (imported != null) {
+                Toast.makeText(this@MainActivity, "Saved file!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    //used for flipping pages forwards or backwards
     private fun flipPage(next: Boolean): Boolean {
         if (activeWidget != null && activeWidget?.currentMode != WidgetMode.IDLE) {
             return false
@@ -3021,6 +3043,7 @@ Access this help anytime from the widget menu!
             }
 
             if (foundValidPage && currentManager.currentPageIndex != nextIndex) {
+                cancelAutoTransition()
                 currentManager.currentPageIndex = nextIndex
                 refreshWidgets(pagePreValidated = true, pageSwap = true)
             }
@@ -3028,19 +3051,60 @@ Access this help anytime from the widget menu!
         return foundValidPage
     }
 
+    //used to forcibly flip to a page without checking required content (for defaults)
+    private fun flipToPage(page: WidgetPage?, forcedRefresh: Boolean = false) {
+        if (page != null) {
+            if (menuState.isActive() || (activeWidget != null && activeWidget?.currentMode != WidgetMode.IDLE)) {
+                return
+            }
+            val currentManager = currentWidgetManager()
+            currentManager.currentPageIndex = currentManager.pages.indexOf(page)
+            refreshWidgets(pagePreValidated = true, pageSwap = true, forcedRefresh = forcedRefresh)
+        }
+    }
+
+    //used to flip to page with specific id (automated transition), does check for required
+    private suspend fun flipToPage(id: String) {
+        if(menuState.isActive() || (activeWidget != null && activeWidget?.currentMode != WidgetMode.IDLE)) {
+            return
+        }
+        val currentManager = currentWidgetManager()
+        val page = currentManager.getPageById(id)
+        if(page != null) {
+            if (isPageValid(page)) {
+                val index = currentManager.pages.indexOf(page)
+                currentManager.currentPageIndex = index
+                refreshWidgets(pagePreValidated = true, pageSwap = true)
+            }
+        }
+    }
+
+    fun startPageTransition(from: WidgetPage) {
+        lifecycleScope.launch {
+            flipToPage(from.transitionTargetPageId)
+        }
+    }
+
+    fun cancelAutoTransition() {
+        backgroundBinder.cancelTransition()
+    }
+
     suspend fun isPageValid(page: WidgetPage): Boolean {
         if(!widgetsLocked) return true
         val bgFile = widgetPathResolver.resolvePage(page, state)
         //TODO; this might crash
-        if (page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_FOLDER && page.backgroundType != PageContentType.CUSTOM_IMAGE && page.isRequired && (bgFile == null || !(bgFile as File).exists())) {
+        if (page.isRequired && page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_FOLDER && page.backgroundType != PageContentType.CUSTOM_IMAGE && (bgFile == null || !(bgFile as File).exists())) {
             return false
         }
 
         val system = state.getCurrentSystemName()
         val game = state.getCurrentGameFilename()
         page.widgets.forEach { widget ->
-            val result = widgetPathResolver.resolveSingle(widget, system, game, resources.displayMetrics)
-            if (result.missingRequired) return false
+            if(widget.isRequired) {
+                val result =
+                    widgetPathResolver.resolveSingle(widget, system, game, resources.displayMetrics)
+                if (result.missingRequired) return false
+            }
         }
         return true
     }
@@ -3067,7 +3131,12 @@ Access this help anytime from the widget menu!
 
             // Update state tracking
             updateState(AppState.SystemBrowsing(systemName))
-            refreshWidgets()
+            val defPage = currentWidgetManager().getDefaultPage()
+            if(defPage != null) {
+                flipToPage(defPage)
+            } else {
+                refreshWidgets()
+            }
         } catch (e: Exception) {
 
         }
@@ -3126,7 +3195,12 @@ Access this help anytime from the widget menu!
                     }
 
                     updateCurrentGameVolume()
-                    refreshWidgets(forcedRefresh = switchingFromPlaying)
+                    val defPage = currentWidgetManager().getDefaultPage()
+                    if(defPage != null) {
+                        flipToPage(defPage, forcedRefresh = switchingFromPlaying)
+                    } else {
+                        refreshWidgets(forcedRefresh = switchingFromPlaying)
+                    }
                 }
             }
         }
@@ -3308,153 +3382,6 @@ Access this help anytime from the widget menu!
                 bottomSheetBehavior.state = BottomSheetBehavior.STATE_HIDDEN
             }
         }
-    }
-
-    fun loadSystemLogoFromAssets(systemName: String, width: Int = -1, height: Int = -1): Drawable? {
-        return try {
-            // Handle ES-DE auto-collections
-            val baseFileName = when (systemName.lowercase()) {
-                "allgames" -> "auto-allgames"
-                "favorites" -> "auto-favorites"
-                "lastplayed" -> "auto-lastplayed"
-                else -> systemName.lowercase()
-            }
-
-            // First check user-provided system logos path with multiple format support
-            val userLogosDir: File = File(getSystemLogosPath())
-            if (userLogosDir.exists() && userLogosDir.isDirectory) {
-                val extensions = listOf("svg", "png", "jpg", "jpeg", "webp", "gif")
-
-                for (ext in extensions) {
-                    val logoFile: File = File(userLogosDir, "$baseFileName.$ext")
-                    if (logoFile.exists()) {
-                        Log.d("MainActivity", "Found custom logo: $logoFile (extension: $ext)")
-
-                        return when (ext) {
-                            "svg" -> {
-                                // Handle SVG files directly (as before)
-                                Log.d("MainActivity", "Loading SVG logo from user path")
-                                val svg = SVG.getFromInputStream(logoFile.inputStream())
-
-                                if (width > 0 && height > 0) {
-                                    // Create bitmap at target dimensions
-                                    val bitmap = Bitmap.createBitmap(
-                                        width,
-                                        height,
-                                        Bitmap.Config.ARGB_8888
-                                    )
-                                    val canvas = Canvas(bitmap)
-
-                                    val viewBox = svg.documentViewBox
-                                    if (viewBox != null) {
-                                        // SVG has viewBox - let AndroidSVG handle scaling
-                                        svg.setDocumentWidth(width.toFloat())
-                                        svg.setDocumentHeight(height.toFloat())
-                                        svg.renderToCanvas(canvas)
-                                        Log.d("MainActivity", "User SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
-                                    } else {
-                                        // No viewBox - manually scale using document dimensions
-                                        val docWidth = svg.documentWidth
-                                        val docHeight = svg.documentHeight
-
-                                        if (docWidth > 0 && docHeight > 0) {
-                                            val scaleX = width.toFloat() / docWidth
-                                            val scaleY = height.toFloat() / docHeight
-                                            val scale = minOf(scaleX, scaleY)
-
-                                            val scaledWidth = docWidth * scale
-                                            val scaledHeight = docHeight * scale
-                                            val translateX = (width - scaledWidth) / 2f
-                                            val translateY = (height - scaledHeight) / 2f
-
-                                            canvas.translate(translateX, translateY)
-                                            canvas.scale(scale, scale)
-                                            svg.renderToCanvas(canvas)
-                                            Log.d("MainActivity", "User SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
-                                        }
-                                    }
-
-                                    // Return drawable with no intrinsic dimensions
-                                    object : BitmapDrawable(resources, bitmap) {
-                                        override fun getIntrinsicWidth(): Int = -1
-                                        override fun getIntrinsicHeight(): Int = -1
-                                    }
-                                } else {
-                                    PictureDrawable(svg.renderToPicture())
-                                }
-                            }
-                            else -> {
-                                // For bitmap formats (PNG, JPG, WEBP, GIF), return null
-                                // Caller will use Glide to load them, which supports animation
-                                Log.d("MainActivity", "Bitmap-based custom logo detected - delegating to Glide for loading")
-                                return null  // Signal to caller to use Glide
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fall back to built-in SVG assets
-            val svgPath = "system_logos/$baseFileName.svg"
-            val svg = SVG.getFromAsset(assets, svgPath)
-
-            if (width > 0 && height > 0) {
-                // Create bitmap at target dimensions
-                val bitmap = Bitmap.createBitmap(
-                    width,
-                    height,
-                    Bitmap.Config.ARGB_8888
-                )
-                val canvas = Canvas(bitmap)
-
-                val viewBox = svg.documentViewBox
-                if (viewBox != null) {
-                    // SVG has viewBox - let AndroidSVG handle scaling
-                    svg.setDocumentWidth(width.toFloat())
-                    svg.setDocumentHeight(height.toFloat())
-                    svg.renderToCanvas(canvas)
-                    Log.d("MainActivity", "Built-in SVG ($baseFileName) with viewBox rendered at ${width}x${height}")
-                } else {
-                    // No viewBox - manually scale using document dimensions
-                    val docWidth = svg.documentWidth
-                    val docHeight = svg.documentHeight
-
-                    if (docWidth > 0 && docHeight > 0) {
-                        val scaleX = width.toFloat() / docWidth
-                        val scaleY = height.toFloat() / docHeight
-                        val scale = minOf(scaleX, scaleY)
-
-                        val scaledWidth = docWidth * scale
-                        val scaledHeight = docHeight * scale
-                        val translateX = (width - scaledWidth) / 2f
-                        val translateY = (height - scaledHeight) / 2f
-
-                        canvas.translate(translateX, translateY)
-                        canvas.scale(scale, scale)
-                        svg.renderToCanvas(canvas)
-                        Log.d("MainActivity", "Built-in SVG ($baseFileName) no viewBox, scaled from ${docWidth}x${docHeight} to ${width}x${height}, scale: $scale")
-                    }
-                }
-
-                // Return drawable with no intrinsic dimensions
-                object : BitmapDrawable(resources, bitmap) {
-                    override fun getIntrinsicWidth(): Int = -1
-                    override fun getIntrinsicHeight(): Int = -1
-                }
-            } else {
-                PictureDrawable(svg.renderToPicture())
-            }
-        } catch (e: Exception) {
-            Log.w("MainActivity", "Failed to load logo for $systemName", e)
-            return null
-        }
-    }
-
-    private fun getSystemLogosPath(): String {
-        val customPath = if (prefsManager.systemLogosPath.isEmpty()) null else prefsManager.systemLogosPath
-        val path = customPath ?: "${Environment.getExternalStorageDirectory()}/ES-DE Companion/system_logos"
-        Log.d("ESDESecondScreen", "System logos path: $path")
-        return path
     }
 
     /**
@@ -4085,6 +4012,7 @@ Access this help anytime from the widget menu!
         if(state !is AppState.GamePlaying && state !is AppState.Screensaver)
         {
             if(this::artRepository.isInitialized ) {
+                cancelAutoTransition()
                 runOnUiThread {
                     widgetMenuShowing = true
                     menuState.showMenu = true
@@ -4118,6 +4046,7 @@ Access this help anytime from the widget menu!
 
     private fun openWidgetSettings(widget: Widget?) {
         if(widget != null) {
+            cancelAutoTransition()
             runOnUiThread {
                 menuState.widgetSelected = WidgetUiState()
                 activeWidget?.currentMode = WidgetMode.IDLE

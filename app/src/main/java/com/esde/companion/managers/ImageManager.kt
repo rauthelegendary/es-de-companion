@@ -130,15 +130,7 @@ class ImageManager(
                         },
                         onSuccess = { result ->
                             activeRequests.remove(imageView)
-                            //imageView.setLayerType(
-                            ///    View.LAYER_TYPE_HARDWARE, //if (useGlint) View.LAYER_TYPE_SOFTWARE else
-                             //   null
-                            //)
-                            val finalDrawable = result//if (useGlint && !CoilUtils.isAnimated(result)) {
-                                //GlintDrawable(result.mutate()).apply { start() }
-                            //} else {
-                                //result
-                            //}
+                            val finalDrawable = result
                             imageView.setImageDrawable(finalDrawable)
 
                             if(isBackground) {

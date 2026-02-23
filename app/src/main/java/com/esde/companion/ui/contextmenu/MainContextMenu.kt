@@ -1,6 +1,7 @@
 package com.esde.companion.ui.contextmenu
 
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -87,7 +88,8 @@ fun MainContextMenu(
     isSearchingMusic: Boolean,
     musicResults: List<StreamInfoItem>,
     currentGameVolume: Double,
-    onVolumeChanged: (Double) -> Unit
+    onVolumeChanged: (Double) -> Unit,
+    setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot) -> Unit
     ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var fileName = ""
@@ -174,7 +176,8 @@ fun MainContextMenu(
                             onCropSave = onCropSave,
                             mediaOverrideRepository = mediaOverrideRepository,
                             swapMedia = swapMedia,
-                            deleteMedia = deleteMedia
+                            deleteMedia = deleteMedia,
+                            setManualFileForSlot = setManualFileForSlot
                         )
 
                         "Music" -> {

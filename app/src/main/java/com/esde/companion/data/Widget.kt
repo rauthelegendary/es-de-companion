@@ -47,7 +47,7 @@ data class Widget(
     var customPath: String = "",
     var contentFallbackType: ContentType = ContentType.MARQUEE,
     @Transient
-    var images: Map<MediaSlot, File?>? = emptyMap(),
+    var files: Map<MediaSlot, File?>? = emptyMap(),
     @Transient
     var video: Boolean = false,
     @Transient

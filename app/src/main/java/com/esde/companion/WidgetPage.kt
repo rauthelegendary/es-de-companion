@@ -25,27 +25,46 @@ data class WidgetPage(
     var videoDelay: Int = 0,
     var displayWidgets: Boolean = true,
     var isRequired: Boolean = false,
-    var displayWidgetsOverVideo: Boolean = false,
-    var backgroundFallbackType: PageContentType = PageContentType.FANART
+    var displayWidgetsOverVideo: Boolean = true,
+    var backgroundFallbackType: PageContentType = PageContentType.FANART,
+    var transitionTargetPageId: String = "",
+    var transitionToPage: Boolean = false,
+    var transitionToPageAfterVideo: Boolean = false,
+    var transitionDelay: Int = 8,
+    var isDefault: Boolean = false
 )
 
 fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
     if(this.backgroundType == other.backgroundType) {
-        if(this.backgroundType == PageContentType.VIDEO) {
-            return this.isVideoMuted == other.isVideoMuted &&
-                    this.videoDelay == other.videoDelay &&
-                    this.videoVolume == other.videoVolume &&
-                    this.backgroundPath == other.backgroundPath &&
-                    this.slot == other.slot
-        } else if (this.panZoomAnimation == other.panZoomAnimation) {
-            if (this.backgroundType == PageContentType.SOLID_COLOR) {
-                if(this.solidColor == other.solidColor) return true
-            } else if(this.backgroundType == PageContentType.CUSTOM_IMAGE) {
-                if(this.customPath == other.customPath) return true
-            } else if(this.slot == other.slot && this.backgroundPath == other.backgroundPath) {
-                return true
+        return when (this.backgroundType) {
+            PageContentType.SOLID_COLOR -> {
+                this.solidColor == other.solidColor
+            }
+            PageContentType.CUSTOM_IMAGE -> {
+                this.customPath == other.customPath && panZoomAnimation == other.panZoomAnimation
+            }
+            PageContentType.CUSTOM_FOLDER -> {
+                customPath == other.customPath && backgroundFallbackType == other.backgroundFallbackType && panZoomAnimation == other.panZoomAnimation
+            }
+            else -> {
+                panZoomAnimation == other.panZoomAnimation
             }
         }
     }
     return false
+}
+
+fun WidgetPage.resetValuesForType() {
+    if(backgroundType == PageContentType.SOLID_COLOR) {
+        backgroundPath = null
+        slot = MediaSlot.Default
+        panZoomAnimation = true
+        customPath = null
+    } else if(backgroundType == PageContentType.CUSTOM_IMAGE || backgroundType == PageContentType.CUSTOM_FOLDER) {
+        slot = MediaSlot.Default
+        solidColor = null
+    } else {
+        customPath = null
+        solidColor = null
+    }
 }

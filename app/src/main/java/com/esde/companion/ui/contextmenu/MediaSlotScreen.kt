@@ -32,7 +32,7 @@ fun MediaSlotScreen(
             style = MaterialTheme.typography.labelSmall
         )
         Text(
-            text = "Select \"Default\" to use ES-DE as image source. Alternatives can be set through the scraper!",
+            text = "Select \"Default\" to use ES-DE as image source. Alternatives can be set through the scraper/manually!",
             color = Color.Gray.copy(alpha = 0.6f),
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(bottom = 8.dp)
