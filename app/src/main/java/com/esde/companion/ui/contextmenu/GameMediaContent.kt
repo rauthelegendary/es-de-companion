@@ -1,5 +1,6 @@
 package com.esde.companion.ui.contextmenu
 
+import android.R.attr.value
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
@@ -52,6 +54,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,8 +63,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -74,6 +80,7 @@ import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideKey
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.ui.ContentType
+import org.schabi.newpipe.extractor.timeago.patterns.it
 import java.io.File
 import java.net.URI
 
@@ -90,7 +97,7 @@ fun GameMediaContent(
     removeCrop: (File) -> Unit,
     swapMedia: (String, ContentType, String, MediaSlot, MediaSlot) -> Unit,
     deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
-    setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot) -> Unit
+    setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot, () -> Unit) -> Unit
 ) {
     var selectedType by remember { mutableStateOf(ContentType.BOX_2D) }
     var selectedSlot by remember { mutableStateOf(MediaSlot.Default) }
@@ -101,14 +108,16 @@ fun GameMediaContent(
     var refreshKey by remember { mutableStateOf(0) }
     val scrollState = rememberScrollState()
 
+
     LaunchedEffect(game, selectedType, refreshKey) {
         activeOverride = mediaOverrideRepository.getOverride(game, system, selectedType)
     }
 
-    val availableSlots = remember(game, system, selectedType, refreshKey) {
-        MediaSlot.entries.map { slot ->
-            slot to (mediaManager.findMediaFile(selectedType, system, game, slot)
-                ?.exists() == true)
+    var availableSlots by remember { mutableStateOf(emptyList<Pair<MediaSlot, Boolean>>()) }
+
+    LaunchedEffect(game, system, selectedType, refreshKey) {
+        availableSlots = MediaSlot.entries.map { slot ->
+            slot to (mediaManager.findMediaFile(selectedType, system, game, slot)?.exists() == true)
         }
     }
 
@@ -126,9 +135,9 @@ fun GameMediaContent(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {it ->
-            setManualFileForSlot(it, selectedType, game, system, selectedSlot)
-            //TODO: this probably goes wrong
-            refreshKey++
+            setManualFileForSlot(it, selectedType, game, system, selectedSlot) {
+                refreshKey++
+            }
         }
     }
 
@@ -185,19 +194,16 @@ fun GameMediaContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         availableSlots.forEach { (slot, exists) ->
-                            val bgColor = if(exists) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.background
                             val isDefault = activeOverride?.altSlot == slot
                             FilterChip(
                                 selected = selectedSlot == slot,
                                 onClick = { selectedSlot = slot },
-                                label = {
-                                    Text(slot.name)
+                                label = { Text(slot.name) },
+                                trailingIcon = {
                                     if (isDefault) {
-                                        Box(
-                                            Modifier.padding(start = 4.dp).size(6.dp)
-                                                .clip(CircleShape)
-                                                .background(bgColor)
-                                        )
+                                        Icon(Icons.Default.Star, contentDescription = "Default", modifier = Modifier.size(14.dp))
+                                    } else if (exists) {
+                                        Icon(Icons.Default.Circle, contentDescription = "Has file", modifier = Modifier.size(10.dp))
                                     }
                                 }
                             )
@@ -226,6 +232,8 @@ fun GameMediaContent(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
+
+                val selectedSlotHasFile = availableSlots.find { it.first == selectedSlot }?.second == true
                 SlotManagementActions(
                     slot = selectedSlot,
                     onDelete = {showDeleteConfirm = true},
@@ -233,7 +241,8 @@ fun GameMediaContent(
                         swapMedia(game, selectedType, system, selectedSlot, targetSlot)
                         selectedSlot = targetSlot
                         refreshKey++
-                    }
+                    },
+                    hasFile = selectedSlotHasFile
                 )
                 PreviewActions(
                     game = game, system = system, type = selectedType,
@@ -304,7 +313,7 @@ fun CompactPreview(
     onRefreshRequest: () -> Unit
 ) {
     val file = remember(game, system, type, slot, refreshKey) { mediaManager.findMediaFile(type, system, game, slot) }
-    var isVideo = mediaManager.isVideo(file)
+    val isVideo = remember(file) { mediaManager.isVideo(file) }
 
     val context = LocalContext.current
     val exoPlayer = remember {
@@ -313,8 +322,10 @@ fun CompactPreview(
             volume = 0f
         }
     }
-    LaunchedEffect(file) {
-        isVideo = mediaManager.isVideo(file)
+    
+    LaunchedEffect(file, refreshKey) {
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
         if(isVideo) {
             val mediaItem = MediaItem.fromUri(Uri.fromFile(file))
             exoPlayer.setMediaItem(mediaItem)
@@ -327,6 +338,25 @@ fun CompactPreview(
         onDispose {
             exoPlayer.stop()
             exoPlayer.release()
+        }
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> exoPlayer.pause()
+                Lifecycle.Event.ON_RESUME -> {
+                    if (isVideo) exoPlayer.play()
+                }
+
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -475,9 +505,10 @@ fun PreviewActions(
 fun SlotManagementActions(
     slot: MediaSlot,
     onDelete: () -> Unit,
-    onMove: (MediaSlot) -> Unit
+    onMove: (MediaSlot) -> Unit,
+    hasFile: Boolean
 ) {
-    if (slot == MediaSlot.Default) return
+    if (slot == MediaSlot.Default || !hasFile) return
 
     var showMoveMenu by remember { mutableStateOf(false) }
 

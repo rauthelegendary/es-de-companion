@@ -3,6 +3,7 @@ package com.esde.companion.data
 import android.R.attr.height
 import android.R.attr.x
 import android.R.attr.y
+import androidx.compose.ui.graphics.SolidColor
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType

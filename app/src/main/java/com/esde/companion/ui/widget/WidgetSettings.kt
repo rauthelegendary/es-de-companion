@@ -83,12 +83,7 @@ fun WidgetSettingsOverlay(
                 Text("Edit ${liveWidget.contentType.name}", style = MaterialTheme.typography.headlineSmall, color = Color.White)
 
                 Spacer(Modifier.height(12.dp))
-                if (liveWidget.contentType.hasAltSlots()
-                    && (!inSystemView
-                            || (liveWidget.contentType != ContentType.FANART
-                            || liveWidget.contentType != ContentType.SCREENSHOT)
-                            )
-                ) {
+                if (liveWidget.contentType.hasAltSlots() && !inSystemView) {
                     MediaSlotScreen(currentSlot = liveWidget.slot) { newSlot ->
                         liveWidget = liveWidget.copy(slot = newSlot)
                         onUpdate(liveWidget)
@@ -167,7 +162,7 @@ fun WidgetSettingsOverlay(
 
                 Spacer(Modifier.height(2.dp))
 
-                if(currentPageIndex != 0) {
+                if(currentPageIndex != 0 && liveWidget.contentType.canBeRequired()) {
                     MenuChip("Required content", liveWidget.isRequired, {
                         liveWidget = liveWidget.copy(isRequired = !liveWidget.isRequired)
                         onUpdate(liveWidget)
@@ -181,13 +176,10 @@ fun WidgetSettingsOverlay(
                     })
                 }
 
-                if (!liveWidget.contentType.isTextWidget()
+                if (!inSystemView
+                    && !liveWidget.contentType.isTextWidget()
                     && liveWidget.contentType != ContentType.VIDEO
                     && liveWidget.contentType.hasAltSlots()
-                    && (!inSystemView
-                            || (liveWidget.contentType != ContentType.FANART
-                            || liveWidget.contentType != ContentType.SCREENSHOT)
-                            )
                     ) {
                     MenuChip("Cycle image slot on touch", liveWidget.cycle, {
                         liveWidget = liveWidget.copy(cycle = !liveWidget.cycle)
@@ -314,7 +306,7 @@ fun WidgetSettingsOverlay(
 
                 }
 
-                if (liveWidget.contentType.hasAltSlots() || liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
+                if ((liveWidget.contentType.hasAltSlots() && !inSystemView) || liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
                     MenuToggle("Mute video", !liveWidget.playAudio) { muted ->
                         liveWidget = liveWidget.copy(playAudio = !muted)
                         onUpdate(liveWidget)

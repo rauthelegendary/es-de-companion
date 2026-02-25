@@ -877,7 +877,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                              },
                              currentGameVolume = currentGameVolume,
                              onVolumeChanged = { volume -> onGameVolumeSaved(volume) },
-                             setManualFileForSlot = { uri, type, game, system, slot -> setManualFileForSlot(uri, type, game, system, slot)}
+                             setManualFileForSlot = { uri, type, game, system, slot, onComplete -> setManualFileForSlot(uri, type, game, system, slot, onComplete)}
                          )
                      }
                     if (menuState.widgetToEditState != null) {
@@ -1614,9 +1614,9 @@ Access this help anytime from the widget menu!
             } else {
                 // Normal reload - this will reload both images and videos
                 if (state is AppState.SystemBrowsing) {
-                    loadSystemImage()
+                    loadSystemImage(ignoreDefault = true)
                 } else {
-                    loadGameInfo()  // This calls handleVideoForGame() internally
+                    loadGameInfo(ignoreDefault = true)
                 }
             }
         }
@@ -1755,6 +1755,7 @@ Access this help anytime from the widget menu!
         // Stop video immediately
         backgroundBinder.releasePlayer()
         musicManager.onBlackOverlayChanged(true)
+        widgetViewBinder.onBlackscreen(widgetContainer)
 
         // Show overlay instantly without animation
         blackOverlay.visibility = View.VISIBLE
@@ -1776,7 +1777,7 @@ Access this help anytime from the widget menu!
         val displayHeight = resources.displayMetrics.heightPixels.toFloat()
         blackOverlay.translationY = -displayHeight
 
-        onStateChangedMusicHandler(state)
+        //onStateChangedMusicHandler(state)
         refreshWidgets(forcedRefresh = true)
     }
 
@@ -2997,11 +2998,13 @@ Access this help anytime from the widget menu!
     }
 
     fun showMenuForWidget(widget: WidgetView) {
+        activeWidget?.currentMode == WidgetMode.IDLE
+        activeWidget = widget
         menuState.widgetSelected = WidgetUiState(isVisible = true, mode = widget.currentMode)
         cancelAutoTransition()
     }
 
-    fun setManualFileForSlot(sourceUri: Uri, type: ContentType, game: String, system: String, slot: MediaSlot) {
+    fun setManualFileForSlot(sourceUri: Uri, type: ContentType, game: String, system: String, slot: MediaSlot, onComplete: () -> Unit) {
         lifecycleScope.launch {
             mediaService.deleteMedia(game, type, system, slot)
             val imported = mediaManager.importFileToAltSlot(
@@ -3014,6 +3017,7 @@ Access this help anytime from the widget menu!
             )
             if (imported != null) {
                 Toast.makeText(this@MainActivity, "Saved file!", Toast.LENGTH_SHORT).show()
+                onComplete()
             }
         }
     }
@@ -3090,10 +3094,9 @@ Access this help anytime from the widget menu!
     }
 
     suspend fun isPageValid(page: WidgetPage): Boolean {
-        if(!widgetsLocked) return true
-        val bgFile = widgetPathResolver.resolvePage(page, state)
-        //TODO; this might crash
-        if (page.isRequired && page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_FOLDER && page.backgroundType != PageContentType.CUSTOM_IMAGE && (bgFile == null || !(bgFile as File).exists())) {
+        if(!widgetsLocked || page.isDefault) return true
+        val result = widgetPathResolver.resolvePage(page, state)
+        if (page.isRequired && result.missingRequired && page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_FOLDER && page.backgroundType != PageContentType.CUSTOM_IMAGE ) {
             return false
         }
 
@@ -3110,7 +3113,7 @@ Access this help anytime from the widget menu!
     }
 
 
-    private fun loadSystemImage() {
+    private fun loadSystemImage(ignoreDefault: Boolean = false) {
         // Don't reload images if game is currently playing - respect game launch behavior
         if (state is AppState.GamePlaying) {
             Log.d(
@@ -3132,7 +3135,7 @@ Access this help anytime from the widget menu!
             // Update state tracking
             updateState(AppState.SystemBrowsing(systemName))
             val defPage = currentWidgetManager().getDefaultPage()
-            if(defPage != null) {
+            if(!ignoreDefault && defPage != null) {
                 flipToPage(defPage)
             } else {
                 refreshWidgets()
@@ -3143,7 +3146,7 @@ Access this help anytime from the widget menu!
 
     }
 
-    private fun loadGameInfo(switchingFromPlaying: Boolean = false) {
+    private fun loadGameInfo(switchingFromPlaying: Boolean = false, ignoreDefault: Boolean = false) {
         // Don't reload images if game is currently playing - respect game launch behavior
         if (state is AppState.GamePlaying && !switchingFromPlaying) {
             Log.d(
@@ -3196,7 +3199,7 @@ Access this help anytime from the widget menu!
 
                     updateCurrentGameVolume()
                     val defPage = currentWidgetManager().getDefaultPage()
-                    if(defPage != null) {
+                    if(!ignoreDefault && defPage != null) {
                         flipToPage(defPage, forcedRefresh = switchingFromPlaying)
                     } else {
                         refreshWidgets(forcedRefresh = switchingFromPlaying)
@@ -3216,28 +3219,6 @@ Access this help anytime from the widget menu!
         }
         return null
     }
-
-   /** private fun loadGameMusic() {
-        try {
-            val s = state as AppState.GameBrowsing
-            val gameFileNameName = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
-
-            //ADDED FOR MUSIC
-            musicSearchJob?.cancel()
-            musicSearchJob = lifecycleScope.launch {
-                Log.d("MainActivity", "about to go to music player ")
-                if (s.gameName?.isNotEmpty() ?: false) {
-                    val found = musicPlayer.onGameFocused(s.gameName, gameFileNameName, s.systemName)
-                    if(found) {
-                        listeningToAudioRef = true
-                        musicManager.sta
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("MainActivity", "Error loading game music", e)
-        }
-    }*/
 
     /**
      * Get the display ID that this activity is currently running on
@@ -4009,7 +3990,7 @@ Access this help anytime from the widget menu!
             }
         }
 
-        if(state !is AppState.GamePlaying && state !is AppState.Screensaver)
+        if(state !is AppState.GamePlaying && state !is AppState.Screensaver && !menuState.isActive())
         {
             if(this::artRepository.isInitialized ) {
                 cancelAutoTransition()

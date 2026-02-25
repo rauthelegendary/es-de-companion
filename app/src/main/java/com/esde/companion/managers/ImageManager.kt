@@ -52,7 +52,8 @@ class ImageManager(
         textFallback: Boolean = false,
         glint: Boolean = false,
         system: String = "",
-        game: String = ""
+        game: String = "",
+        isSystemLogo: Boolean = false
     ) {
         activeRequests[imageView]?.dispose()
         activeRequests.remove(imageView)
@@ -74,6 +75,9 @@ class ImageManager(
         attempts.add(data)
         if(isBackground) {
             attempts.add(getBackgroundData(context))
+        }
+        if(isSystemLogo) {
+            attempts.add(getDefaultLogo(system, context))
         }
         if(textFallback) {
             attempts.add(getTextDrawable(system, game))
@@ -222,6 +226,32 @@ class ImageManager(
             }
         }
         return fallbackFile
+    }
+
+    fun getDefaultLogo(systemName: String, context: Context): File? {
+        val baseName = getBaseName(systemName)
+        val fallbackFile = File(context.cacheDir, "${baseName}.svg")
+        if (!fallbackFile.exists()) {
+            try {
+                context.assets.open("system_logos/${baseName}.svg").use { input ->
+                    fallbackFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            } catch (e: Exception) {
+                return null
+            }
+        }
+        return fallbackFile
+    }
+
+    private fun getBaseName(systemName: String): String {
+        return when (systemName.lowercase()) {
+            "allgames" -> "auto-allgames"
+            "all" -> "auto-allgames"
+            "favorites" -> "auto-favorites"
+            "lastplayed" -> "auto-lastplayed"
+            "recent" -> "auto-lastplayed"
+            else -> systemName.lowercase()
+        }
     }
 
     fun getTextDrawable(systemName: String, gameName: String): Drawable {

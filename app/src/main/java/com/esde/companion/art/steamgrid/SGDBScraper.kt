@@ -40,18 +40,22 @@ class SGDBScraper (apiKey: String) : ArtScraper {
         return categories
     }
 
-    override suspend fun fetchImages(gameId: String, categoryKey: String): List<MediaSearchResult> {
+    override suspend fun fetchImages(gameId: String, categoryKey: String, pageNumber: Int?): List<MediaSearchResult> {
+        var page = pageNumber
+        if(page == null) {
+            page = 0
+        }
         return try {
             var response: SGDBResponse<List<SGDBImage>>? = null
             when(categoryKey) {
                 "heroes" -> {
-                    response = service.getHeroes(gameId)
+                    response = service.getHeroes(gameId, page)
                 }
                 "grid" -> {
-                    response = service.getGrids(gameId)
+                    response = service.getGrids(gameId, page)
                 }
                 "logos" -> {
-                    response = service.getLogos(gameId)
+                    response = service.getLogos(gameId, page)
                 }
             }
 

@@ -89,7 +89,7 @@ fun MainContextMenu(
     musicResults: List<StreamInfoItem>,
     currentGameVolume: Double,
     onVolumeChanged: (Double) -> Unit,
-    setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot) -> Unit
+    setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot, () -> Unit) -> Unit
     ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var fileName = ""

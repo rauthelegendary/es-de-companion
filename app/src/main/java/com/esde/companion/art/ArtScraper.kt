@@ -7,7 +7,7 @@ interface ArtScraper {
     suspend fun getAvailableMediaTypes(gameId: String): List<MediaCategory>
 
     // 2. Updated: Fetch images based on a category ID/Key
-    suspend fun fetchImages(gameId: String, categoryKey: String): List<MediaSearchResult>
+    suspend fun fetchImages(gameId: String, categoryKey: String, pageNumber: Int?): List<MediaSearchResult>
 }
 
 data class MediaCategory(

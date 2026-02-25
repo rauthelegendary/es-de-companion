@@ -33,6 +33,7 @@ import com.esde.companion.data.getCurrentSystemName
 import com.esde.companion.managers.ImageManager
 import com.esde.companion.managers.MediaManager
 import com.esde.companion.ui.AnimationHelper
+import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
 import kotlinx.coroutines.Job

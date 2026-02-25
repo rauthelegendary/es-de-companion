@@ -35,7 +35,7 @@ class LaunchBoxScraper(
         }
     }
 
-    override suspend fun fetchImages(gameId: String, categoryKey: String): List<MediaSearchResult> {
+    override suspend fun fetchImages(gameId: String, categoryKey: String, pageNumber: Int?): List<MediaSearchResult> {
         val images = dao.getImagesForGame(gameId).filter { it.type == categoryKey }
 
         return images.map { img ->

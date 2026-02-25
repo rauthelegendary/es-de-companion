@@ -34,7 +34,7 @@ class WidgetManager(
     var pages = mutableStateListOf<WidgetPage>()
     var currentPageIndex: Int = 0
 
-    private var defaultPage: WidgetPage? = null
+    private var defaultPageId: String? = null
 
 
     fun load() {
@@ -56,7 +56,7 @@ class WidgetManager(
             pages.add(WidgetPage(name = "Base"))
         }
 
-        defaultPage = pages.firstOrNull { it.isDefault }
+        defaultPageId = pages.firstOrNull { it.isDefault }?.id
 
     }
 
@@ -176,19 +176,23 @@ class WidgetManager(
             //this is a bit of a hack, names are getting updated elsewhere and overwritten by the update method, so we force it to the name in our state
             updated.name = pages[idx].name
             pages[idx] = updated
-            if(updated.isDefault) {
-                if(defaultPage != null) {
-                    defaultPage!!.isDefault = false
-                    updatePage(defaultPage!!)
+            if (updated.isDefault) {
+                if (defaultPageId != null && defaultPageId != updated.id) {
+                    val oldIdx = pages.indexOfFirst { it.id == defaultPageId }
+                    if (oldIdx != -1) {
+                        pages[oldIdx] = pages[oldIdx].copy(isDefault = false)
+                    }
                 }
-                defaultPage = pages[idx]
+                defaultPageId = updated.id
+            } else if (defaultPageId == updated.id) {
+                defaultPageId = null
             }
             save()
         }
     }
 
     fun getDefaultPage(): WidgetPage? {
-        return defaultPage
+        return pages.firstOrNull { it.isDefault && it.id == defaultPageId }
     }
 
     fun getAllPages(): List<WidgetPage> {

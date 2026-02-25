@@ -117,15 +117,6 @@ class WidgetViewBinder {
         }
     }
 
-    fun isAnyWidgetBusy(container: ResizableWidgetContainer): Boolean {
-        //return (0 until container.childCount)
-        //    .map { container.getChildAt(it) }
-         //   .filterIsInstance<WidgetView>()
-        //    .any { it.isDragging || it.isResizing || it.isWidgetSelected}
-        //TODO: needed?
-        return false
-    }
-
     /**
      * Utility to find which widget is under a touch coordinate.
      * Searches in reverse order to respect Z-index (top-most widget first).
@@ -145,13 +136,13 @@ class WidgetViewBinder {
         return results
     }
 
-    fun isWidgetOnLocation(container: ResizableWidgetContainer, x: Float, y: Float): Boolean {
-        return findWidgetAt(container, x, y).isNotEmpty()
-    }
-
     fun syncSingleWidget(widget: Widget, widgetContainer: ResizableWidgetContainer, widgetPage: WidgetPage, game: String, system: String) {
         val existingViews = widgetContainer.children.filterIsInstance<WidgetView>().toList()
         val view = existingViews.find { it.widget.id == widget.id }
         view?.updateContent(widget, widgetPage, game, system)
+    }
+
+    fun onBlackscreen(widgetContainer: ResizableWidgetContainer) {
+        widgetContainer.children.filterIsInstance<WidgetView>().forEach { it.onBlackScreen() }
     }
 }

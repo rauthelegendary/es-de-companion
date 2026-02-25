@@ -80,7 +80,7 @@ class IgdbArtScraper() : ArtScraper {
         }
     }
 
-    override suspend fun fetchImages(gameId: String, categoryKey: String): List<MediaSearchResult> = withContext(Dispatchers.IO) {
+    override suspend fun fetchImages(gameId: String, categoryKey: String, pageNumber: Int?): List<MediaSearchResult> = withContext(Dispatchers.IO) {
         try {
             val apiQuery = APICalypse()
                 .fields("$categoryKey.*")

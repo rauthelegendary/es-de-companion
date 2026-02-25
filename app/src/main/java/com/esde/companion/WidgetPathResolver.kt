@@ -80,12 +80,13 @@ class WidgetPathResolver(
                 if(resolvedWidget.contentType == ContentType.CUSTOM_FOLDER) {
                     resolvedWidget.fallback = true
                 }
-                    resolveContentTypeForWidget(
-                        contentTypeToUse,
-                        resolutionResult,
-                        gameFilename,
-                        system
-                    )
+
+                resolveContentTypeForWidget(
+                    contentTypeToUse,
+                    resolutionResult,
+                    gameFilename,
+                    system
+                )
             }
         }
         if(resolvedWidget.contentType.isTextWidget() && (resolvedWidget.text.isEmpty() && resolvedWidget.isRequired)) {
@@ -109,9 +110,11 @@ class WidgetPathResolver(
                 getGameTextWidget(system, gameFilename, contentType) ?: ""
         } else if (contentType == ContentType.SYSTEM_LOGO) {
             resolutionResult.widget.contentPath = findSystemLogo(system) ?: ""
+            markIfVideo(resolutionResult.widget.contentPath, resolutionResult)
         } else if (contentType == ContentType.SYSTEM_IMAGE) {
             resolutionResult.widget.contentPath =
                 getSystemImage(system, prefs.systemPath)?.path ?: ""
+            markIfVideo(resolutionResult.widget.contentPath, resolutionResult)
         } else if (gameFilename == null && (contentType == ContentType.FANART || contentType == ContentType.SCREENSHOT)) {
             val screenshotPref = contentType == ContentType.SCREENSHOT
             resolutionResult.widget.contentPath = getRandomGameImageForSystem(system, screenshotPref)?.path
@@ -123,13 +126,9 @@ class WidgetPathResolver(
                 resolutionResult.widget.slot,
                 resolutionResult
             )
-            if (mediaFile != null) {
-                resolutionResult.widget.contentPath = mediaFile.absolutePath
-                resolutionResult.widget.video = mediaLocator.isVideo(mediaFile)
-            } else {
-                resolutionResult.widget.contentPath = ""
-                resolutionResult.widget.video = false
-            }
+            markIfVideo(mediaFile, resolutionResult)
+            resolutionResult.widget.contentPath = mediaFile?.absolutePath ?: ""
+
             if (resolutionResult.widget.cycle) {
                 resolutionResult.widget.files =
                     getAllFilesForGameAndContentType(contentType, gameFilename, system)
@@ -137,18 +136,22 @@ class WidgetPathResolver(
         }
     }
 
+    private fun markIfVideo(input: Any?, resolutionResult: ResolutionResult) {
+        resolutionResult.widget.video = false
+        if (input != null) {
+            resolutionResult.widget.video = mediaLocator.isVideo(input)
+        }
+    }
+
     fun locateFileWithOverride(contentType: ContentType, system: String, gameFilename: String, givenSlot: MediaSlot, result: ResolutionResult? = null, pageResolution: PageResolution? = null): File? {
         var slot = givenSlot
         if(givenSlot == MediaSlot.Default) {
-            val override = mediaOverrideRepository.getOverride(gameFilename, system, contentType)
-            if (override != null) {
-                slot = override.altSlot
-            }
+            slot = getDefaultSlotOverride(gameFilename, system, contentType)
         }
         var file = mediaLocator.findMediaFile(contentType,system, gameFilename, slot)
         //if we couldn't find anything or the given slot or existing override, go back to default as backup but mark required as failed
         if(slot != MediaSlot.Default && (file == null || !file.exists())) {
-            file = mediaLocator.findMediaFile(contentType,system, gameFilename, MediaSlot.Default)
+            file = mediaLocator.findMediaFile(contentType,system, gameFilename, getDefaultSlotOverride(gameFilename, system, contentType))
             result?.missingRequired = true
             pageResolution?.missingRequired = true
         } else{
@@ -156,6 +159,14 @@ class WidgetPathResolver(
             pageResolution?.missingRequired = false
         }
         return file
+    }
+
+    private fun getDefaultSlotOverride(gameFilename: String, system: String, contentType: ContentType): MediaSlot {
+        val override = mediaOverrideRepository.getOverride(gameFilename, system, contentType)
+        if (override != null) {
+            return override.altSlot
+        }
+        return MediaSlot.Default
     }
 
     fun getAllFilesForGameAndContentType(type: ContentType, game: String, system: String): Map<MediaSlot, File?> {
@@ -211,7 +222,6 @@ class WidgetPathResolver(
         return null
     }
 
-    //TODO: refactor this to mediamanager
     private fun findSystemLogo(systemName: String): String? {
         if(prefsManager.systemLogosPath != null && prefsManager.systemLogosPath.isNotEmpty()) {
             val result = getSystemImage(systemName, prefsManager.systemLogosPath)
@@ -219,20 +229,7 @@ class WidgetPathResolver(
                 return result.path
             }
         }
-
-        val baseFileName = getBaseName(systemName)
-        return "system_logos/$baseFileName.svg"
-    }
-
-    private fun getBaseName(systemName: String): String {
-        return when (systemName.lowercase()) {
-            "allgames" -> "auto-allgames"
-            "all" -> "auto-allgames"
-            "favorites" -> "auto-favorites"
-            "lastplayed" -> "auto-lastplayed"
-            "recent" -> "auto-lastplayed"
-            else -> systemName.lowercase()
-        }
+        return ""
     }
 
     fun resolvePage(page: WidgetPage, state: AppState): PageResolution {

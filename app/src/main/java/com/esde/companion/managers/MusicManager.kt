@@ -200,9 +200,7 @@ class MusicManager(
     }
 
     private fun onAudioPriorityChanged() {
-        if((AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC
-            && !AudioReferee.getMenuState())
-            || (isPaused() && allowedToPlay())) {
+        if(allowedToPlay()) {
             onPriorityGained()
         } else {
             onPriorityLost()
@@ -667,7 +665,7 @@ class MusicManager(
     private fun allowedToPlay(): Boolean {
         return (AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC
                 || prefsManager.musicVideoBehavior != "pause")
-                && !AudioReferee.getMenuState()
+                && !AudioReferee.getMenuState() && !isBlackOverlayShown
     }
 
     private fun getVolumeForPriority(): Float {

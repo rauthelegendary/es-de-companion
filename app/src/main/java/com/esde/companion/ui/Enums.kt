@@ -80,6 +80,18 @@ enum class ContentType {
             else -> true
         }
     }
+
+    fun canBeRequired(): Boolean {
+        if(isTextWidget()) {
+            return false
+        }
+        return when(this) {
+            CUSTOM_IMAGE -> false
+            CUSTOM_FOLDER -> false
+            COLOR_BACKGROUND -> false
+            else -> true
+        }
+    }
 }
 
 enum class TextAlignment {

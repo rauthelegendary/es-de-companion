@@ -367,8 +367,9 @@ class WidgetView(
     private fun cycleImage() {
         if(widget.files != null && widget.cycle) {
             val activeSlots = MediaSlot.entries.filter { slot ->
-                widget.files!!.containsKey(slot)
-                widget.files!![slot] != null
+                widget.files!!.containsKey(slot) &&
+                widget.files!![slot] != null &&
+                !mediaManager.isVideo(widget.files!![slot])
             }
 
             if (activeSlots.isEmpty()) return
@@ -377,20 +378,17 @@ class WidgetView(
 
             val nextIndex = (currentActiveIndex + 1) % activeSlots.size
             val nextSlot = activeSlots[nextIndex]
+            val nextFile = widget.files!![nextSlot]
+            val fallback = currentActiveIndex == -1
 
             if(currentActiveIndex != nextIndex) {
                 currentImageIndex = nextSlot
-
-                val file = widget.files!![nextSlot]
-                var video = mediaManager.isVideo(file)
-
-                file?.let {
-                    if(video) {
-                        loadVideo(file.path)
-                    } else
-                    {
+                if(!fallback) {
+                    nextFile?.let {
                         loadImage(it, true)
                     }
+                } else {
+                    cycleImage()
                 }
             }
         }
@@ -470,12 +468,14 @@ class WidgetView(
        } else if (widget.contentType == ContentType.CUSTOM_FOLDER) {
            if (widget.video || (widget.fallback && widget.contentFallbackType == ContentType.VIDEO)) {
                loadVideo(path!!)
+               return
            } else {
                loadImage(path)
            }
        } else {
            if (widget.video && !path.isNullOrEmpty()) {
                loadVideo(path)
+               return
            } else {
                var currentFile = if (path != null) File(path) else null
                //TODO: cycle for videos?
@@ -502,7 +502,8 @@ class WidgetView(
             glint = widget.glint,
             system = system,
             game = game,
-            textFallback = widget.contentType == ContentType.MARQUEE || widget.contentType == ContentType.SYSTEM_LOGO
+            textFallback = widget.contentType == ContentType.MARQUEE || widget.contentType == ContentType.SYSTEM_LOGO,
+            isSystemLogo = widget.contentType == ContentType.SYSTEM_LOGO
         )
         viewToUse.visibility = VISIBLE
     }
@@ -838,30 +839,34 @@ class WidgetView(
         prepareForReuse()
     }
 
-    fun prepareForReuse() {
-        playerView.player = null
-        player?.let {
-            it.stop()
-            it.release()
-        }
-        player = null
-        currentVideoPath = ""
-        imageList = emptyList<File?>()
-
+    private fun resetImage() {
         (imageView.drawable as? GlintDrawable)?.let { glint ->
             glint.stop()
         }
         (imageView.drawable as? Animatable)?.stop()
         imageView.setImageDrawable(null)
         imageView.dispose()
-
         (glintView.drawable as? Animatable)?.stop()
         glintView.setImageDrawable(null)
         glintView.dispose()
+    }
+
+    private fun resetVideo() {
+        playerView.player = null
+        player?.let {
+            it.stop()
+            it.release()
+        }
+        player = null
+    }
+
+    fun prepareForReuse() {
+        resetVideo()
+        currentVideoPath = ""
+        imageList = emptyList()
+        resetImage()
         volumeFader.setPlayer(null)
-
         stopAutoScroll()
-
         AudioReferee.updateWidgetState(widget.id, false)
     }
 
@@ -881,5 +886,7 @@ class WidgetView(
         }
     }
 
-
+    fun onBlackScreen() {
+        prepareForReuse()
+    }
 }

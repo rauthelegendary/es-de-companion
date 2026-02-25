@@ -188,7 +188,7 @@ fun ScraperMenuContent(
                             isLoading = true
                             val scraper = repository.getScraper(selectedScraper!!)
                             galleryImages =
-                                scraper?.fetchImages(id, selectedCategoryKey) ?: emptyList()
+                                scraper?.fetchImages(id, selectedCategoryKey, null) ?: emptyList()
                             isLoading = false
                         }
                     }
