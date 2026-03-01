@@ -153,8 +153,12 @@ class WidgetPathResolver(
         if(slot != MediaSlot.Default && (file == null || !file.exists())) {
             file = mediaLocator.findMediaFile(contentType,system, gameFilename, getDefaultSlotOverride(gameFilename, system, contentType))
             result?.missingRequired = true
+            result?.widget?.fallback = true
             pageResolution?.missingRequired = true
-        } else{
+        } else if(file == null || !file.exists()) {
+            result?.missingRequired = true
+            pageResolution?.missingRequired = true
+        } else {
             result?.missingRequired = false
             pageResolution?.missingRequired = false
         }
@@ -244,26 +248,27 @@ class WidgetPathResolver(
             }
 
             if (page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_IMAGE) {
-                if (systemName != null) {
-                    //if we're in a game state
-                    if (state.toWidgetContext() == WidgetContext.GAME) {
-                        if (gameName != null) {
-                            pageResolution.content = resolvePageMediaPath(page, systemName, gameName, pageResolution)
-                            return pageResolution
-                        }
-                    } else {
-                        //If we're in system page
-                        val screenshotPref = page.backgroundType == PageContentType.SCREENSHOT
-                        //if we want to show a random game fanart or screenshot
-                        var content: Any?
-                        if (page.backgroundType == PageContentType.FANART || screenshotPref) {
-                            content = getRandomGameImageForSystem(systemName, screenshotPref)
-                        } else {
-                            content = getSystemImage(systemName, prefsManager.systemPath)
-                        }
-                        pageResolution.content = content
+                //if we're in a game state
+                if (state.toWidgetContext() == WidgetContext.GAME) {
+                    if (gameName != null) {
+                        pageResolution.content = resolvePageMediaPath(page, systemName, gameName, pageResolution)
                         return pageResolution
                     }
+                } else {
+                    //If we're in system page
+                    val screenshotPref = page.backgroundType == PageContentType.SCREENSHOT
+                    //if we want to show a random game fanart or screenshot
+                    var content: Any?
+                    if (page.backgroundType == PageContentType.FANART || screenshotPref) {
+                        content = getRandomGameImageForSystem(systemName, screenshotPref)
+                    } else {
+                        content = getSystemImage(systemName, prefsManager.systemPath)
+                    }
+                    pageResolution.content = content
+                    if(content == null) {
+                        pageResolution.missingRequired = true
+                    }
+                    return pageResolution
                 }
             }
         }

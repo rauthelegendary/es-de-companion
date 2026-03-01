@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
+import com.esde.companion.PlayerDebug
 import com.esde.companion.ost.khinsider.KhAlbum
 import com.esde.companion.ost.khinsider.KhSong
 
@@ -84,13 +85,15 @@ fun KhMenuContent(
     var isDownloading by remember { mutableStateOf(false) }
 
     // ExoPlayer Setup
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
+    val exoPlayer = remember { ExoPlayer.Builder(context).build().also {
+        PlayerDebug.created("KhMenuContent")} }
     val listState = rememberLazyListState()
 
     DisposableEffect(Unit) {
         onDispose {
             exoPlayer.stop()
             exoPlayer.release()
+            PlayerDebug.released("KhMenuContent")
         }
     }
 

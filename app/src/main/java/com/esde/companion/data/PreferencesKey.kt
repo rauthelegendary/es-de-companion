@@ -59,7 +59,7 @@ object PreferenceKeys {
     const val DEFAULT_MUSIC_VIDEO_BEHAVIOR = "duck"
 
     const val KEY_MUSIC_SONG_TITLE_ENABLED = "music.song_title_enabled"
-    const val DEFAULT_MUSIC_SONG_TITLE_ENABLED = true
+    const val DEFAULT_MUSIC_SONG_TITLE_ENABLED = false
 
     const val KEY_MUSIC_SONG_TITLE_SYSTEM_ONLY_ENABLED = "music.song_title_system_only_enabled"
     const val DEFAULT_MUSIC_SONG_TITLE_SYSTEM_ONLY_ENABLED = true

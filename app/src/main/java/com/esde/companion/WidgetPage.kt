@@ -1,9 +1,11 @@
 package com.esde.companion
 
+import android.widget.ImageView
 import com.esde.companion.data.Widget
 import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
+import com.esde.companion.ui.ScaleType
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -30,8 +32,10 @@ data class WidgetPage(
     var transitionTargetPageId: String = "",
     var transitionToPage: Boolean = false,
     var transitionToPageAfterVideo: Boolean = false,
-    var transitionDelay: Int = 8,
-    var isDefault: Boolean = false
+    var transitionDelay: Int = 2,
+    var isDefault: Boolean = false,
+    var scaleType: ScaleType = ScaleType.CROP,
+    var transitionOnly: Boolean = false
 )
 
 fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {

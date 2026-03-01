@@ -85,6 +85,7 @@ import com.esde.companion.ui.AnimationStyle
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
+import com.esde.companion.ui.ScaleType
 import com.esde.companion.ui.contextmenu.pagemanager.PageManagerScreen
 import org.schabi.newpipe.extractor.timeago.patterns.it
 
@@ -205,6 +206,15 @@ fun WidgetMenuContent(
                             "Default page",
                             draftPage.isDefault,
                             { draftPage = draftPage.copy(isDefault = !draftPage.isDefault) })
+                        if(currentPageIndex != 0) {
+                            MenuChip(
+                                "Auto transition only",
+                                draftPage.transitionOnly,
+                                {
+                                    draftPage =
+                                        draftPage.copy(transitionOnly = !draftPage.transitionOnly)
+                                })
+                        }
 
                     }
                 }
@@ -260,6 +270,23 @@ fun WidgetMenuContent(
                     }
 
                     if (draftPage.backgroundType != PageContentType.SOLID_COLOR && draftPage.backgroundType != PageContentType.CUSTOM_IMAGE ) {
+                        Text("Scale Type", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(ScaleType.FIT, ScaleType.CROP).forEach { type ->
+                                val isSelected = draftPage.scaleType == type
+                                Button(
+                                    onClick = {
+                                        draftPage = draftPage.copy(scaleType = type)
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isSelected) Color(0xFF03DAC6) else Color(0xFF333333)
+                                    )
+                                ) {
+                                    Text(type.name, color = if (isSelected) Color.Black else Color.White)
+                                }
+                            }
+                        }
                         MenuToggle("Mute Video", draftPage.isVideoMuted) {
                             draftPage = draftPage.copy(isVideoMuted = it)
                         }
@@ -278,7 +305,8 @@ fun WidgetMenuContent(
                         MenuSlider("Start Delay", draftPage.videoDelay.toFloat(), 0f, 5f, "s") {
                             draftPage = draftPage.copy(videoDelay = it.toInt())
                         }
-                    } else if(draftPage.backgroundType == PageContentType.FANART || draftPage.backgroundType == PageContentType.SYSTEM_IMAGE || draftPage.backgroundType == PageContentType.CUSTOM_IMAGE  ) {
+                    }
+                    if(draftPage.backgroundType != PageContentType.VIDEO && draftPage.backgroundType != PageContentType.SOLID_COLOR) {
                         MenuToggle(
                             "Pan & Zoom", draftPage.panZoomAnimation,
                             { draftPage = draftPage.copy(panZoomAnimation = it) })
@@ -330,7 +358,7 @@ fun WidgetMenuContent(
                                 "Transition delay",
                                 draftPage.transitionDelay.toFloat(),
                                 2f,
-                                20f,
+                                30f,
                                 "s"
                             ) {
                                 draftPage = draftPage.copy(transitionDelay = it.toInt())
@@ -869,7 +897,6 @@ fun PageHeaderSection(
                         )
                     )
 
-                    // Save Button
                     IconButton(onClick = {
                         onRenamePage(editedName)
                         isEditingName = false
@@ -877,7 +904,6 @@ fun PageHeaderSection(
                         Icon(Icons.Default.Check, "Save", tint = Color(0xFF66BB6A))
                     }
 
-                    // Cancel Button
                     IconButton(onClick = {
                         isEditingName = false
                         editedName = currentPage.name // Reset
@@ -885,7 +911,6 @@ fun PageHeaderSection(
                         Icon(Icons.Default.Close, "Cancel", tint = Color.LightGray)
                     }
                 } else {
-                    // 3. The Static Display
                     Text(
                         text = "Page ${currentPageIndex + 1} - ${currentPage.name}",
                         style = MaterialTheme.typography.headlineSmall,
@@ -953,13 +978,15 @@ fun PageHeaderSection(
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if(!locked) {
-                ActionButton(label = "+ Page", onClick = actions.onAddPage)
+                ActionButton(label = "Add page", onClick = actions.onAddPage)
 
-                ActionButton(
-                    label = "Delete",
-                    onClick = onDeleteClick,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
-                )
+                if (currentPageIndex != 0) {
+                    ActionButton(
+                        label = "Delete",
+                        onClick = onDeleteClick,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                    )
+                }
             }
         }
     }

@@ -51,6 +51,7 @@ class GlintView @JvmOverloads constructor(
 
     private val animator = ValueAnimator.ofFloat(-1f, 2f).apply {
         duration = 1800
+        startDelay = 1000
         interpolator = LinearInterpolator()
         addUpdateListener {
             glintOffset = it.animatedValue as Float

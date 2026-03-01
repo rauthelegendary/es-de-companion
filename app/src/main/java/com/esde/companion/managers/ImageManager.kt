@@ -1,6 +1,5 @@
 package com.esde.companion.managers
 
-import android.R.attr.height
 import android.content.Context
 import android.graphics.Matrix
 import android.graphics.drawable.Animatable
@@ -8,24 +7,19 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.view.View
 import android.widget.ImageView
-import androidx.media3.ui.PlayerNotificationManager
-import coil.dispose
 import coil.imageLoader
-import coil.load
 import coil.request.CachePolicy
 import coil.request.Disposable
 import coil.request.ImageRequest
 import coil.size.Precision
-import coil.size.Scale
-import coil.size.Size
 import com.esde.companion.AnimationSettings
 import com.esde.companion.CoilUtils
 import com.esde.companion.R
 import com.esde.companion.TextDrawable
-import com.esde.companion.animators.GlintDrawable
 import com.esde.companion.animators.PanZoomAnimator
 import com.esde.companion.ui.AnimationHelper
 import com.esde.companion.ui.AnimationStyle
+import com.esde.companion.ui.ScaleType
 import java.io.File
 
 class ImageManager(
@@ -35,8 +29,7 @@ class ImageManager(
 ) {
     private val activeRequests = mutableMapOf<ImageView, Disposable>()
 
-    private val backupSizeBackground = 1000
-    private val backupSize = 300
+    private val backupSize = 500
 
     /**
      * The primary entry point.
@@ -53,7 +46,8 @@ class ImageManager(
         glint: Boolean = false,
         system: String = "",
         game: String = "",
-        isSystemLogo: Boolean = false
+        isSystemLogo: Boolean = false,
+        scaleType: ScaleType? = null
     ) {
         activeRequests[imageView]?.dispose()
         activeRequests.remove(imageView)
@@ -83,7 +77,7 @@ class ImageManager(
             attempts.add(getTextDrawable(system, game))
         }
 
-        executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation)
+        executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType)
     }
 
     private fun executeLoadChain(
@@ -92,7 +86,8 @@ class ImageManager(
         isBackground: Boolean,
         panZoom: Boolean,
         useGlint: Boolean,
-        playAnimation: Boolean
+        playAnimation: Boolean,
+        scaleType: ScaleType?
     ) {
         val current = attempts.removeFirstOrNull()
         if(current == null) {
@@ -100,7 +95,7 @@ class ImageManager(
                 imageView.alpha = 0f
                 return
             } else {
-                executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation)
+                executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType)
                 return
             }
         }
@@ -134,16 +129,16 @@ class ImageManager(
                         },
                         onSuccess = { result ->
                             activeRequests.remove(imageView)
-                            val finalDrawable = result
-                            imageView.setImageDrawable(finalDrawable)
+                            imageView.setImageDrawable(result)
 
                             if(isBackground) {
-                                applySmartScale(imageView)
+                                applySmartScale(imageView, scaleType)
                             }
-                            handleEntranceAnimation(imageView, finalDrawable, isBackground, panZoom, useGlint, playAnimation)
+                            handleEntranceAnimation(imageView,
+                                result, isBackground, panZoom, useGlint, playAnimation)
                         },
                         onError = { error ->
-                            executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation)
+                            executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType)
                         }
                     )
                     .build()
@@ -232,11 +227,14 @@ class ImageManager(
         val baseName = getBaseName(systemName)
         val fallbackFile = File(context.cacheDir, "${baseName}.svg")
         if (!fallbackFile.exists()) {
+            val tempFile = File(context.cacheDir, "${baseName}_tmp.svg")
             try {
                 context.assets.open("system_logos/${baseName}.svg").use { input ->
-                    fallbackFile.outputStream().use { output -> input.copyTo(output) }
+                    tempFile.outputStream().use { output -> input.copyTo(output) }
                 }
+                tempFile.renameTo(fallbackFile)
             } catch (e: Exception) {
+                tempFile.delete()
                 return null
             }
         }
@@ -266,10 +264,10 @@ class ImageManager(
         return TextDrawable(text)
     }
 
-    fun applySmartScale(view: ImageView) {
+    fun applySmartScale(view: ImageView, scaleType: ScaleType?) {
         val drawable = view.drawable ?: return
         if (view.width == 0 || view.height == 0) {
-            view.post { applySmartScale(view) }
+            view.post { applySmartScale(view, scaleType) }
             return
         }
 
@@ -281,20 +279,22 @@ class ImageManager(
         val widthRatio = vw / dw
         val heightRatio = vh / dh
 
-        val viewAspect = vw / vh
-        val imageAspect = dw / dh
-
-        val baseScale = if (imageAspect > viewAspect) {
-            //image is wider than view -> fill/crop
-            widthRatio.coerceAtLeast(heightRatio)
-        } else {
-            //image is taller than or equal to view -> fit/letterbox
-            widthRatio.coerceAtMost(heightRatio)
+        val baseScale = when (scaleType) {
+            ScaleType.FIT -> widthRatio.coerceAtMost(heightRatio)
+            ScaleType.CROP -> widthRatio.coerceAtLeast(heightRatio)
+            else -> {
+                val viewAspect = vw / vh
+                val imageAspect = dw / dh
+                if (imageAspect > viewAspect) {
+                    widthRatio.coerceAtLeast(heightRatio)
+                } else {
+                    widthRatio.coerceAtMost(heightRatio)
+                }
+            }
         }
 
         view.scaleType = ImageView.ScaleType.MATRIX
         val matrix = Matrix()
-
         matrix.setTranslate((vw - dw) / 2f, (vh - dh) / 2f)
         matrix.postScale(baseScale, baseScale, vw / 2f, vh / 2f)
 

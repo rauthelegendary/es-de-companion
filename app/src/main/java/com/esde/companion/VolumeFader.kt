@@ -10,6 +10,8 @@ class VolumeFader(private var player: Any?) {
     private var animator: ValueAnimator? = null
     private var defaultDuration: Long = 400
 
+    private var pendingCallback: (() -> Unit)? = null
+
     var targetVolume: Float = 1f
         private set
 
@@ -35,6 +37,7 @@ class VolumeFader(private var player: Any?) {
         val startVol = getVolume()
         targetVolume = goal
         animator?.cancel()
+        pendingCallback = onComplete
 
         animator = ValueAnimator.ofFloat(startVol, goal).apply {
             this.duration = duration
@@ -45,13 +48,28 @@ class VolumeFader(private var player: Any?) {
             }
 
             addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: Animator) {
+                    cancelled = true
+                    pendingCallback = null
+                }
+
                 override fun onAnimationEnd(animation: Animator) {
-                    if (getVolume() == targetVolume) {
-                        onComplete?.invoke()
+                    if (!cancelled) {
+                        val cb = pendingCallback
+                        pendingCallback = null
+                        cb?.invoke()
                     }
                 }
             })
             start()
         }
+    }
+
+    fun cancel() {
+        animator?.cancel()
+        animator = null
+        pendingCallback = null
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,6 +48,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import com.esde.companion.PlayerDebug
 import com.esde.companion.managers.MediaManager
 import com.esde.companion.data.Widget
 import com.esde.companion.art.MediaSearchResult
@@ -89,17 +91,23 @@ fun SaveMediaStep(
     val displayMetrics = context.resources.displayMetrics
     val maxScreenDimension = maxOf(displayMetrics.widthPixels, displayMetrics.heightPixels)
 
-    val exoPlayer = remember(resolvedUrl) {
-        if (isVideo && resolvedUrl != null && resolvedUrl.startsWith("http")) {
-            ExoPlayer.Builder(context).build().apply {
-                val mediaItem = MediaItem.fromUri(resolvedUrl)
-                setMediaItem(mediaItem)
-                prepare()
-                playWhenReady = true
-                repeatMode = Player.REPEAT_MODE_ONE
-                volume = 0.7f
+    val exoPlayer = remember {
+        if (isVideo) {
+            ExoPlayer.Builder(context).build().also {
+                it.repeatMode = Player.REPEAT_MODE_ONE
+                it.volume = 0.7f
+            }.also {
+                PlayerDebug.created("SaveMediaStep")
             }
         } else null
+    }
+
+    LaunchedEffect(resolvedUrl, exoPlayer) {
+        if (resolvedUrl != null && exoPlayer != null) {
+            exoPlayer.setMediaItem(MediaItem.fromUri(resolvedUrl))
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+        }
     }
 
     val slotStatus = remember(selectedType, gameName, systemName) {
@@ -114,13 +122,14 @@ fun SaveMediaStep(
         }
     }
 
-    DisposableEffect(exoPlayer) {
+    DisposableEffect(Unit) {
         onDispose {
             exoPlayer?.apply {
-                playWhenReady = false
                 stop()
                 clearMediaItems()
                 release()
+
+                PlayerDebug.released("SaveMediaStep")
             }
         }
     }

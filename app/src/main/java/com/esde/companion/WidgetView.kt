@@ -385,6 +385,10 @@ class WidgetView(
                 currentImageIndex = nextSlot
                 if(!fallback) {
                     nextFile?.let {
+                        imageView.visibility = GONE
+                        glintView.visibility = GONE
+                        playerView.visibility = GONE
+                        scrollView.visibility = GONE
                         loadImage(it, true)
                     }
                 } else {
@@ -461,35 +465,45 @@ class WidgetView(
        scrollView.visibility = GONE
 
        val path = widget.contentPath
-       if (widget.contentType == ContentType.COLOR_BACKGROUND) {
-           loadImage(widget.solidColor!!)
-       } else if (widget.contentType == ContentType.CUSTOM_IMAGE) {
-           loadImage(path)
-       } else if (widget.contentType == ContentType.CUSTOM_FOLDER) {
-           if (widget.video || (widget.fallback && widget.contentFallbackType == ContentType.VIDEO)) {
-               loadVideo(path!!)
-               return
-           } else {
+       if(!(widget.fallback && widget.ignoreFallback)) {
+           if (widget.contentType.isTextWidget()) {
+               handleTextWidget()
+           } else if (widget.contentType == ContentType.COLOR_BACKGROUND) {
+               loadImage(widget.solidColor!!)
+           } else if (widget.contentType == ContentType.CUSTOM_IMAGE) {
                loadImage(path)
-           }
-       } else {
-           if (widget.video && !path.isNullOrEmpty()) {
-               loadVideo(path)
-               return
-           } else {
-               var currentFile = if (path != null) File(path) else null
-               //TODO: cycle for videos?
-               if (widget.cycle && widget.files != null) {
-                   currentFile = widget.files!![currentImageIndex] ?: currentFile
+           } else if (widget.contentType == ContentType.CUSTOM_FOLDER) {
+               if (widget.video || (widget.fallback && widget.contentFallbackType == ContentType.VIDEO)) {
+                   loadVideo(path!!)
+                   return
+               } else {
+                   loadImage(path)
                }
-               loadImage(currentFile)
+           } else {
+               if (widget.video && !path.isNullOrEmpty()) {
+                   loadVideo(path)
+                   return
+               } else {
+                   var currentFile = if (path != null) File(path) else null
+                   //TODO: cycle for videos?
+                   if (widget.cycle && widget.files != null) {
+                       currentFile = widget.files!![currentImageIndex] ?: currentFile
+                   }
+                   loadImage(currentFile)
+               }
            }
        }
        AudioReferee.updateWidgetState(widget.id, false)
    }
 
     private fun loadImage(data: Any?, animate: Boolean = animationSettings.animateWidgets.value) {
-        val viewToUse = if(widget.glint && (widget.contentType == ContentType.MARQUEE || (widget.fallback && widget.contentFallbackType == ContentType.MARQUEE))) glintView else imageView
+        val potentialAnim = when (data) {
+            is File -> CoilUtils.isPotentialAnimation(data)
+            is String -> CoilUtils.isPotentialAnimation(context, data)
+            else -> false
+        }
+        val isMarquee = widget.contentType == ContentType.MARQUEE || (widget.contentType == ContentType.CUSTOM_FOLDER && widget.contentFallbackType == ContentType.MARQUEE && widget.fallback)
+        val viewToUse = if(!potentialAnim && widget.glint && isMarquee) glintView else imageView
         viewToUse.scaleType = when (widget.scaleType) {
             ScaleType.FIT -> ImageView.ScaleType.FIT_CENTER
             ScaleType.CROP -> ImageView.ScaleType.CENTER_CROP
@@ -498,7 +512,7 @@ class WidgetView(
             imageView = viewToUse,
             data = data,
             playAnimation = animate,
-            isMarquee = (widget.contentType == ContentType.MARQUEE || (widget.contentType == ContentType.CUSTOM_FOLDER && widget.contentFallbackType == ContentType.MARQUEE && widget.fallback)),
+            isMarquee = isMarquee,
             glint = widget.glint,
             system = system,
             game = game,
@@ -581,6 +595,8 @@ class WidgetView(
                 repeatMode = Player.REPEAT_MODE_ALL
                 playWhenReady = true
             }
+
+            PlayerDebug.created("widgetview: " + widget.id)
             playerView.player = player
             volumeFader.setPlayer(player)
         }
@@ -856,6 +872,7 @@ class WidgetView(
         player?.let {
             it.stop()
             it.release()
+            PlayerDebug.released("widgetview: " + widget.id)
         }
         player = null
     }

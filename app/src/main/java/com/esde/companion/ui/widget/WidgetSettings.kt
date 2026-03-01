@@ -307,6 +307,10 @@ fun WidgetSettingsOverlay(
                 }
 
                 if ((liveWidget.contentType.hasAltSlots() && !inSystemView) || liveWidget.contentType == ContentType.CUSTOM_FOLDER) {
+                    MenuToggle("Use default when alt slot is empty", !liveWidget.ignoreFallback) { ignoreFallback ->
+                        liveWidget = liveWidget.copy(ignoreFallback = !ignoreFallback)
+                        onUpdate(liveWidget)
+                    }
                     MenuToggle("Mute video", !liveWidget.playAudio) { muted ->
                         liveWidget = liveWidget.copy(playAudio = !muted)
                         onUpdate(liveWidget)

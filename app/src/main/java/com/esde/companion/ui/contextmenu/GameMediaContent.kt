@@ -1,6 +1,5 @@
 package com.esde.companion.ui.contextmenu
 
-import android.R.attr.value
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -54,7 +52,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,15 +71,14 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.esde.companion.PlayerDebug
 import com.esde.companion.managers.MediaManager
 import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideKey
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.ui.ContentType
-import org.schabi.newpipe.extractor.timeago.patterns.it
 import java.io.File
-import java.net.URI
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -320,9 +316,11 @@ fun CompactPreview(
         ExoPlayer.Builder(context).build().apply {
             repeatMode = Player.REPEAT_MODE_ALL
             volume = 0f
+        }.also {
+            PlayerDebug.created("GameMediaContent")
         }
     }
-    
+
     LaunchedEffect(file, refreshKey) {
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
@@ -338,6 +336,8 @@ fun CompactPreview(
         onDispose {
             exoPlayer.stop()
             exoPlayer.release()
+
+            PlayerDebug.released("GameMediaContent")
         }
     }
 
@@ -438,7 +438,7 @@ fun PreviewActions(
         if (file != null) {
             if (isCurrentDefault) {
                 Button(
-                    onClick = { onRemoveOverride(activeOverride!!) },
+                    onClick = { onRemoveOverride(activeOverride) },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer)
                 ) {

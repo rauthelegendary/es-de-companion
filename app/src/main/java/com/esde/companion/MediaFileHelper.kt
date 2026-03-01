@@ -14,18 +14,18 @@ object MediaFileHelper {
         val fileName = file.name
         val lastDotIndex = fileName.lastIndexOf('.')
 
-        val cleanName = if (lastDotIndex != -1 && (lastDotIndex + 1) < fileName.length) {
-            val nextChar = fileName[lastDotIndex + 1]
-            // If there is a space or '(' right after the dot, it's NOT an extension
-            if (nextChar == ' ' || nextChar == '(') {
-                fileName
-            } else {
-                file.nameWithoutExtension
-            }
+        if (lastDotIndex == -1) return fileName
+
+        val potentialExtension = fileName.substring(lastDotIndex + 1)
+
+        val isRealExtension = potentialExtension.length in 1..5
+                && potentialExtension.all { it.isLetterOrDigit() }
+
+        return if (isRealExtension) {
+            fileName.take(lastDotIndex)
         } else {
             fileName
         }
-        return cleanName
     }
 
     fun extractGameFilename(path: String): String {

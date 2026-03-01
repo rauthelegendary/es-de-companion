@@ -983,7 +983,6 @@ class SettingsActivity() : AppCompatActivity() {
                 prefsManager.musicSongTitleEnabled = enabled
 
                 // Show/hide duration section
-                binding.musicSongTitleDurationSection.visibility = if (enabled) View.VISIBLE else View.GONE
                 binding.musicSongTitleSystemOnlySection.visibility = if (enabled) View.VISIBLE else View.GONE
                 android.util.Log.d("SettingsActivity", "Song title display: $enabled")
             }

@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import com.esde.companion.PlayerDebug
 import com.esde.companion.ost.YoutubeMediaService
 import kotlinx.coroutines.delay
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -72,7 +73,8 @@ fun YoutubeMenuContent(
     var playingItem by remember { mutableStateOf<StreamInfoItem?>(null) }
     var resolvedPreviewUrl by remember { mutableStateOf<String?>(null) }
 
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
+    val exoPlayer = remember { ExoPlayer.Builder(context).build().also {
+        PlayerDebug.created("YoutubeMenuContent") } }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var isDownloading by remember { mutableStateOf(false) }
 
@@ -80,6 +82,8 @@ fun YoutubeMenuContent(
         onDispose {
             exoPlayer.stop()
             exoPlayer.release()
+
+            PlayerDebug.released("YoutubeMenuContent")
         }
     }
 

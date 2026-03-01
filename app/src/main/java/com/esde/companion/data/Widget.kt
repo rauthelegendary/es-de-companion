@@ -47,6 +47,7 @@ data class Widget(
     var glint: Boolean = true,
     var customPath: String = "",
     var contentFallbackType: ContentType = ContentType.MARQUEE,
+    var ignoreFallback: Boolean = false,
     @Transient
     var files: Map<MediaSlot, File?>? = emptyMap(),
     @Transient

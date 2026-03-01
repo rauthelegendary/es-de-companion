@@ -195,6 +195,13 @@ class WidgetManager(
         return pages.firstOrNull { it.isDefault && it.id == defaultPageId }
     }
 
+    fun getFirstPage(): WidgetPage? {
+        if(pages.isNotEmpty()) {
+            return pages[0]
+        }
+        return null
+    }
+
     fun getAllPages(): List<WidgetPage> {
         return pages
     }

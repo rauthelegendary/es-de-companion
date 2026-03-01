@@ -564,14 +564,13 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
      * Show song title overlay with current settings.
      */
     private fun showSongTitle(songName: String, source: MusicSource) {
-        // Check if feature is enabled
+        // Update text
+        songTitleText.text = songName
+
         if (!prefsManager.musicSongTitleEnabled || (prefsManager.musicSongTitleSystemOnlyEnabled && source is MusicSource.Game)) {
             Log.d("MainActivity", "Song title display disabled in settings")
             return
         }
-
-        // Update text
-        songTitleText.text = songName
 
         // Show overlay with timeout
         showSongTitleOverlay()
@@ -584,9 +583,7 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         // Cancel any pending hide
         songTitleRunnable?.let { songTitleHandler?.removeCallbacks(it) }
 
-        val songTitleSystemOnly = prefsManager.musicSongTitleSystemOnlyEnabled
-
-        if(!AudioReferee.getMenuState() && AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC && (!songTitleSystemOnly || (songTitleSystemOnly && state !is AppState.GameBrowsing))) {
+        if(!AudioReferee.getMenuState() && AudioReferee.currentPriority.value == AudioReferee.AudioSource.MUSIC) {
             // Apply background opacity setting
             val opacity = prefsManager.musicSongTitleOpacity
             val alpha = (opacity * 255 / 100).coerceIn(0, 255)
@@ -1790,12 +1787,11 @@ Access this help anytime from the widget menu!
 
         if (!isDrawerOpen) {
             val musicEnabled = prefsManager.musicEnabled
-            val songTitleEnabled = prefsManager.musicSongTitleEnabled
 
-            Log.d("MainActivity", "Two-finger check: pointerCount=${ev.pointerCount}, action=${ev.action}, musicEnabled=$musicEnabled, songTitleEnabled=$songTitleEnabled, hasActiveMusic=${musicManager.isPlaying() || musicManager.isPaused()}")
+            Log.d("MainActivity", "Two-finger check: pointerCount=${ev.pointerCount}, action=${ev.action}, musicEnabled=$musicEnabled, hasActiveMusic=${musicManager.isPlaying() || musicManager.isPaused()}")
 
             // Only process two-finger gestures when music and song title are enabled
-            if (!menuState.isActive() && musicEnabled && songTitleEnabled && ev.pointerCount == 2 && ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            if (!menuState.isActive() && musicEnabled && ev.pointerCount == 2 && ev.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
                 val currentTime = System.currentTimeMillis()
                 val timeSinceLast = currentTime - lastTwoFingerTapTime
 
@@ -2810,7 +2806,7 @@ Access this help anytime from the widget menu!
         }
     }
 
-    private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false, forcedRefresh: Boolean = false, pendingWidgetId: String? = null) {
+    private fun refreshWidgets(pagePreValidated: Boolean = false, pageSwap: Boolean = false, forcedRefresh: Boolean = false, pendingWidgetId: String? = null, transitionInvalid: Boolean = false) {
         cancelAutoTransition()
         Log.d("TEMP_DEBUG", "Widget Refreshing for: ${state.getCurrentGameFilename()}")
         val currentWidgetContext = state.toWidgetContext()
@@ -2842,6 +2838,12 @@ Access this help anytime from the widget menu!
                 processPage = wrapperPage
             } else {
                 processPage = currentPage
+            }
+
+            //if we have an instant transition, skip loading the current page if possible
+            if(widgetsLocked && !transitionInvalid && processPage.transitionToPage && processPage.transitionDelay == 0 && !processPage.transitionToPageAfterVideo) {
+                startPageTransition(processPage)
+                return@launch
             }
 
             val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
@@ -3040,7 +3042,7 @@ Access this help anytime from the widget menu!
                 nextIndex = (nextIndex + direction + totalPages) % totalPages
                 val candidatePage = allPages[nextIndex]
 
-                if (isPageValid(candidatePage)) {
+                if ((!candidatePage.transitionOnly || !widgetsLocked) && isPageValid(candidatePage)) {
                     foundValidPage = true
                     break
                 }
@@ -3055,37 +3057,35 @@ Access this help anytime from the widget menu!
         return foundValidPage
     }
 
-    //used to forcibly flip to a page without checking required content (for defaults)
-    private fun flipToPage(page: WidgetPage?, forcedRefresh: Boolean = false) {
+    private suspend fun flipToPage(page: WidgetPage?, forcedRefresh: Boolean = false, fromTransition: Boolean = false): Boolean {
         if (page != null) {
             if (menuState.isActive() || (activeWidget != null && activeWidget?.currentMode != WidgetMode.IDLE)) {
-                return
+                return false
             }
-            val currentManager = currentWidgetManager()
-            currentManager.currentPageIndex = currentManager.pages.indexOf(page)
-            refreshWidgets(pagePreValidated = true, pageSwap = true, forcedRefresh = forcedRefresh)
+            if (isPageValid(page) && ((!page.transitionOnly || fromTransition) || !widgetsLocked)) {
+                val currentManager = currentWidgetManager()
+                currentManager.currentPageIndex = currentManager.pages.indexOf(page)
+                refreshWidgets(
+                    pagePreValidated = true,
+                    pageSwap = true,
+                    forcedRefresh = forcedRefresh
+                )
+                return true
+            }
         }
+        if(!fromTransition) {
+            refreshWidgets(pagePreValidated = false, pageSwap = true)
+        }
+        return false
     }
 
-    //used to flip to page with specific id (automated transition), does check for required
-    private suspend fun flipToPage(id: String) {
-        if(menuState.isActive() || (activeWidget != null && activeWidget?.currentMode != WidgetMode.IDLE)) {
-            return
-        }
-        val currentManager = currentWidgetManager()
-        val page = currentManager.getPageById(id)
-        if(page != null) {
-            if (isPageValid(page)) {
-                val index = currentManager.pages.indexOf(page)
-                currentManager.currentPageIndex = index
-                refreshWidgets(pagePreValidated = true, pageSwap = true)
-            }
-        }
+    private suspend fun flipToPage(id: String, fromTransition: Boolean = false): Boolean {
+        return flipToPage(currentWidgetManager().getPageById(id), fromTransition = fromTransition)
     }
 
     fun startPageTransition(from: WidgetPage) {
         lifecycleScope.launch {
-            flipToPage(from.transitionTargetPageId)
+            flipToPage(from.transitionTargetPageId, fromTransition = true)
         }
     }
 
@@ -3094,7 +3094,7 @@ Access this help anytime from the widget menu!
     }
 
     suspend fun isPageValid(page: WidgetPage): Boolean {
-        if(!widgetsLocked || page.isDefault) return true
+        if(!widgetsLocked) return true
         val result = widgetPathResolver.resolvePage(page, state)
         if (page.isRequired && result.missingRequired && page.backgroundType != PageContentType.SOLID_COLOR && page.backgroundType != PageContentType.CUSTOM_FOLDER && page.backgroundType != PageContentType.CUSTOM_IMAGE ) {
             return false
@@ -3136,7 +3136,9 @@ Access this help anytime from the widget menu!
             updateState(AppState.SystemBrowsing(systemName))
             val defPage = currentWidgetManager().getDefaultPage()
             if(!ignoreDefault && defPage != null) {
-                flipToPage(defPage)
+                lifecycleScope.launch {
+                    flipToPage(defPage)
+                }
             } else {
                 refreshWidgets()
             }

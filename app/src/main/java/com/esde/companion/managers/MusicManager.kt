@@ -22,6 +22,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.esde.companion.AudioReferee
+import com.esde.companion.PlayerDebug
 import com.esde.companion.VolumeFader
 import com.esde.companion.data.AppConstants
 import com.esde.companion.data.AppState
@@ -82,6 +83,7 @@ class MusicManager(
     // ========== PLAYBACK STATE ==========
 
     private var musicPlayer: ExoPlayer? = null
+    private var pendingOldPlayer: ExoPlayer? = null
     private var enhancer: LoudnessEnhancer? = null
     private var volumeFader: VolumeFader? = null
     private var currentMusicSource: MusicSource? = null
@@ -121,6 +123,8 @@ class MusicManager(
     private val managerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var currentLoadingJob: Job? = null
 
+    private var previousFader: VolumeFader? = null
+
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -143,6 +147,7 @@ class MusicManager(
 
     private fun buildNewMusicPlayer(): ExoPlayer {
         val player = ExoPlayer.Builder(context).build()
+        PlayerDebug.created("MusicManager")
         player.setAudioAttributes(
             audioAttributes,
             true
@@ -185,6 +190,15 @@ class MusicManager(
         try {
             enhancer?.release()
             enhancer = LoudnessEnhancer(sessionId).apply { enabled = true }
+
+            if (currentTrackMaxVolume > 1.0f) {
+                val boostDecibels = (currentTrackMaxVolume - 1.0f) * 8.0f
+                try {
+                    enhancer?.setTargetGain((boostDecibels * 100).toInt())
+                } catch (e: Exception) {
+                    Log.e(TAG, "Boost restore failed: ${e.message}")
+                }
+            }
         } catch (e: Exception) {
             Log.e("MusicPlayer", "LoudnessEnhancer not supported: ${e.message}")
         }
@@ -223,7 +237,6 @@ class MusicManager(
     fun onStateChanged(newState: AppState) {
         Log.d(TAG, "━━━ STATE CHANGE ━━━")
         Log.d(TAG, "New state: $newState")
-
         currentLoadingJob?.cancel()
         currentLoadingJob = managerScope.launch {
 
@@ -367,6 +380,8 @@ class MusicManager(
             restoreMusicVolume()
         } else if (wasMusicPausedForVideo) {
             resumeMusicFromVideo()
+        } else if(lastState != null){
+            onStateChanged(lastState!!)
         }
     }
 
@@ -455,6 +470,8 @@ class MusicManager(
 
         // Release player
         musicPlayer?.release()
+
+        PlayerDebug.released("MusicManager")
         musicPlayer = null
 
         currentMusicSource = null
@@ -548,45 +565,53 @@ class MusicManager(
     /**
      * Cross-fade from current source to a new source.
      */
-    private fun crossFadeToSource(newSource: MusicSource) {
-        Log.d(TAG, "Cross-fading to source: $newSource")
+    private var crossFadeJob: Job? = null
 
-        // Save reference to old player BEFORE changing musicPlayer
+    private fun crossFadeToSource(newSource: MusicSource) {
+        crossFadeJob?.cancel()
+        previousFader?.cancel()
+        pendingOldPlayer?.let {
+            it.stop()
+            it.release()
+            PlayerDebug.released("MusicManager - cancelled pending")
+        }
+        pendingOldPlayer = null
+
         val oldPlayer = musicPlayer
         val oldFader = volumeFader
+        previousFader = oldFader
 
-        // Load new playlist
         val newPlaylist = loadPlaylist(newSource)
         if (newPlaylist.isEmpty()) {
-            Log.d(TAG, "No music files found for new source")
             stopMusic()
             return
         }
 
-        // Update state
         currentMusicSource = newSource
         currentPlaylist = newPlaylist
         currentTrackIndex = 0
-
         currentVolume = 0f
         targetVolume = NORMAL_VOLUME
 
         musicPlayer = buildNewMusicPlayer()
+        pendingOldPlayer = oldPlayer
         playTrack(newPlaylist[0])
         isMusicPlaying = true
 
         if (oldPlayer != null && oldPlayer.isPlaying) {
-            Log.d(TAG, "Fading out old player via captured reference")
-
-            oldFader?.fadeTo(0f, CROSS_FADE_DURATION) {
-                try {
+            crossFadeJob = managerScope.launch {
+                oldFader?.fadeTo(0f, CROSS_FADE_DURATION) {
                     oldPlayer.stop()
                     oldPlayer.release()
-                    Log.d(TAG, "Old player released successfully after fade")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error releasing old player: ${e.message}")
+                    PlayerDebug.released("MusicManager - crossfade complete")
+                    pendingOldPlayer = null
                 }
             }
+        } else {
+            oldPlayer?.stop()
+            oldPlayer?.release()
+            PlayerDebug.released("MusicManager - not playing, released immediately")
+            pendingOldPlayer = null
         }
     }
 

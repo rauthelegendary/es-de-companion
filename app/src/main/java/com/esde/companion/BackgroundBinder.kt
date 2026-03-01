@@ -12,6 +12,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import androidx.annotation.OptIn
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.graphics.drawable.toDrawable
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -23,7 +24,11 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+import androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
 import androidx.media3.ui.PlayerView
 import coil.dispose
 import com.esde.companion.data.Widget.MediaSlot
@@ -36,6 +41,7 @@ import com.esde.companion.ui.AnimationHelper
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
+import com.esde.companion.ui.ScaleType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -133,27 +139,27 @@ class BackgroundBinder(
             }
             currentPage = page
             updateVolume()
-            return
-        }
-
-        videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
-        currentPage = page
-        state = newState
-        val animationType = animationSettings.transitionTarget.value
-        playAnimation = animationType == PageAnimation.PAGE || (animationType == PageAnimation.CONTEXT && (switchedGame || switchedSystem))
-
-        previousSystem = systemName ?: ""
-        previousGame = gameName ?: ""
-        previousMediaFile = mediaFile
-
-        if (page.backgroundType == PageContentType.SOLID_COLOR && page.solidColor != null) {
-            showSolidColor(page.solidColor!!)
-        } else if (page.backgroundType == PageContentType.CUSTOM_IMAGE && page.customPath != null) {
-            showImage(page.customPath)
-        } else if (isVideo) {
-            showVideo(mediaFile)
         } else {
-            showImage(mediaFile)
+            videoDelayRunnable?.let { videoDelayHandler?.removeCallbacks(it) }
+            currentPage = page
+            state = newState
+            val animationType = animationSettings.transitionTarget.value
+            playAnimation =
+                animationType == PageAnimation.PAGE || (animationType == PageAnimation.CONTEXT && (switchedGame || switchedSystem))
+
+            previousSystem = systemName ?: ""
+            previousGame = gameName ?: ""
+            previousMediaFile = mediaFile
+
+            if (page.backgroundType == PageContentType.SOLID_COLOR && page.solidColor != null) {
+                showSolidColor(page.solidColor!!)
+            } else if (page.backgroundType == PageContentType.CUSTOM_IMAGE && page.customPath != null) {
+                showImage(page.customPath)
+            } else if (isVideo) {
+                showVideo(mediaFile)
+            } else {
+                showImage(mediaFile)
+            }
         }
 
         if(onTransitionReady != null && page.transitionToPage && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)) {
@@ -177,22 +183,26 @@ class BackgroundBinder(
         if(stopVideo) {
             stopVideoPlayer()
         }
-        imageView.scaleType = ImageView.ScaleType.CENTER
+
         imageView.setTag(R.id.tag_base_scale_applied, false)
         imageManager.load(
             imageView = imageView,
             data = data,
             playAnimation = playAnimation,
             isBackground = true,
-            panZoom = currentPage?.panZoomAnimation == true && currentPage?.backgroundType != PageContentType.SCREENSHOT
+            panZoom = currentPage?.panZoomAnimation == true && currentPage?.backgroundType != PageContentType.SCREENSHOT,
+            scaleType = currentPage?.scaleType
         )
-
     }
 
     fun stopVideoPlayer() {
         videoView.visibility = View.GONE
         player?.stop()
         player?.clearMediaItems()
+        player?.trackSelectionParameters = player!!.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+            .build()
         AudioReferee.updateBackgroundState(false)
     }
 
@@ -258,6 +268,7 @@ class BackgroundBinder(
 
     private var videoFirstFrameListener: Player.Listener? = null
 
+    @OptIn(UnstableApi::class)
     private fun loadVideo(videoFile: Any) {
         try {
             stopVideoPlayer()
@@ -271,6 +282,12 @@ class BackgroundBinder(
                 mediaItem = MediaItem.fromUri(videoFile)
             } else if (videoFile is File) {
                 mediaItem = MediaItem.fromUri(videoFile.absolutePath)
+            }
+
+            if(currentPage?.scaleType == ScaleType.CROP) {
+                videoView.resizeMode = RESIZE_MODE_ZOOM
+            } else {
+                videoView.resizeMode = RESIZE_MODE_FIT
             }
 
             if(mediaItem != null) {
@@ -299,7 +316,10 @@ class BackgroundBinder(
                 }
 
                 player?.addListener(videoFirstFrameListener!!)
-
+                player?.trackSelectionParameters = player!!.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                    .build()
                 player?.apply {
                     setMediaItem(mediaItem)
                     volume = 0f
@@ -358,7 +378,7 @@ class BackgroundBinder(
         cancelTransition()
         pendingTransitionCallback = callback
 
-        if ((!isVideo || !page.transitionToPageAfterVideo) && page.transitionDelay > 0) {
+        if ((!isVideo || !page.transitionToPageAfterVideo) && page.transitionDelay >= 0) {
             transitionJob = lifecycleOwner.lifecycleScope.launch {
                 delay(page.transitionDelay * 1000L)
                 callback()
@@ -402,6 +422,7 @@ class BackgroundBinder(
             try {
                 p.stop()
                 p.release()
+                PlayerDebug.released("backgroundbinder")
             } catch (e: IllegalStateException) {
                 Log.e("BackgroundBinder", "Player already dead, skipping release: ${e.message}")
             } finally {
@@ -431,7 +452,7 @@ class BackgroundBinder(
 
     private fun resetVideoPlayer() {
         isActivityVisible = true
-        player?.release()
+        releasePlayer()
         videoView.player = null
         buildVideoPlayer()
 
@@ -451,16 +472,43 @@ class BackgroundBinder(
     }
 
     private fun buildVideoPlayer() {
-        player = ExoPlayer.Builder(context).build()
-        player?.setAudioAttributes(audioAttributes, false)
-        videoView.player = player
-        volumeFader = VolumeFader(player)
+        try {
+            player = ExoPlayer.Builder(context).build()
+            PlayerDebug.created("backgroundbinder")
+            player?.setAudioAttributes(audioAttributes, false)
+            player?.addListener(object : Player.Listener {
+                @OptIn(UnstableApi::class)
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    val isAudioSinkError = error.cause is androidx.media3.exoplayer.audio.AudioSink.InitializationException
+                            || error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED
+                    if (isAudioSinkError) {
+                        Log.w("BackgroundBinder", "AudioTrack init failed, rebuilding player")
+                        releasePlayer()
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            buildVideoPlayer()
+                        }, 1000)
+                    }
+                }
+            })
+            videoView.player = player
+            volumeFader = VolumeFader(player)
+        } catch (e: Exception) {
+            // existing retry logic
+        }
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) {
         if (hasFocus) {
-            Log.d("AppFocus", "Window regained focus - Recovering Background")
-            resetVideoPlayer()
+            if (player == null || player?.playerError != null) {
+                resetVideoPlayer()
+            } else if (!isActivityVisible) {
+                // Just resume if we have a healthy player
+                isActivityVisible = true
+                if (wasPlayingOnPause) {
+                    player?.play()
+                    wasPlayingOnPause = false
+                }
+            }
         }
     }
 
