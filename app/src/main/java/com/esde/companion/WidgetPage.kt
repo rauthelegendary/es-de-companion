@@ -38,7 +38,7 @@ data class WidgetPage(
     var transitionOnly: Boolean = false
 )
 
-fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
+fun WidgetPage.hasSameVisualSettings(other: WidgetPage, isVideo: Boolean = false): Boolean {
     if(this.backgroundType == other.backgroundType) {
         return when (this.backgroundType) {
             PageContentType.SOLID_COLOR -> {
@@ -51,7 +51,10 @@ fun WidgetPage.hasSameVisualSettings(other: WidgetPage): Boolean {
                 customPath == other.customPath && backgroundFallbackType == other.backgroundFallbackType && panZoomAnimation == other.panZoomAnimation
             }
             else -> {
-                panZoomAnimation == other.panZoomAnimation
+                if(!isVideo) {
+                    return panZoomAnimation == other.panZoomAnimation
+                }
+                return true
             }
         }
     }

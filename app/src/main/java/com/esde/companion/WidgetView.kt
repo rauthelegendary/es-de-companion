@@ -487,6 +487,7 @@ class WidgetView(
                    var currentFile = if (path != null) File(path) else null
                    //TODO: cycle for videos?
                    if (widget.cycle && widget.files != null) {
+                       currentImageIndex = widget.slot
                        currentFile = widget.files!![currentImageIndex] ?: currentFile
                    }
                    loadImage(currentFile)

@@ -133,7 +133,7 @@ class BackgroundBinder(
             updateVideoLayering(true)
         }
         manualMuteInversion = false
-        if(sameContent(forcedRefresh, gameName, page, mediaFile)) {
+        if(sameContent(forcedRefresh, gameName, page, mediaFile, isVideo)) {
             if(widgetsLocked && player != null && player!!.playbackState == Player.STATE_READY && !player!!.playWhenReady) {
                 player?.play()
             }
@@ -167,9 +167,9 @@ class BackgroundBinder(
         }
     }
 
-    private fun sameContent(forcedRefresh: Boolean, gameName: String?, page: WidgetPage, mediaFile: Any?): Boolean {
+    private fun sameContent(forcedRefresh: Boolean, gameName: String?, page: WidgetPage, mediaFile: Any?, isVideo: Boolean): Boolean {
         val sameSystemOrGame = (!switchedSystem && ((previousGame.isEmpty() && gameName == null) || !switchedGame))
-        val sameVisualSettings = (currentPage != null && page.hasSameVisualSettings(currentPage!!))
+        val sameVisualSettings = (currentPage != null && page.hasSameVisualSettings(currentPage!!, isVideo))
         val mediaFileUnchanged = ((currentPage != null && page.slot == currentPage!!.slot) || (previousMediaFile == mediaFile && mediaFile != null && page.backgroundType != PageContentType.CUSTOM_IMAGE))
         return !forcedRefresh && (sameSystemOrGame && sameVisualSettings && mediaFileUnchanged)
     }

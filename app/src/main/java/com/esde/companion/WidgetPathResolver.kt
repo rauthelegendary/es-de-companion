@@ -149,6 +149,7 @@ class WidgetPathResolver(
             slot = getDefaultSlotOverride(gameFilename, system, contentType)
         }
         var file = mediaLocator.findMediaFile(contentType,system, gameFilename, slot)
+        result?.widget?.fallback = false
         //if we couldn't find anything or the given slot or existing override, go back to default as backup but mark required as failed
         if(slot != MediaSlot.Default && (file == null || !file.exists())) {
             file = mediaLocator.findMediaFile(contentType,system, gameFilename, getDefaultSlotOverride(gameFilename, system, contentType))
