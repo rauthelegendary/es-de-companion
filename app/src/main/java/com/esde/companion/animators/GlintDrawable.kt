@@ -130,23 +130,22 @@ class GlintDrawable(private val original: Drawable) : Drawable(), Animatable {
 
     override fun draw(canvas: Canvas) {
         if (cachedBitmap == null || cachedBitmap?.isRecycled == true) {
-            if (!bounds.isEmpty) {
-                updateCache(bounds)
-            }
+            if (!bounds.isEmpty) updateCache(bounds)
         }
 
         val bitmap = cachedBitmap ?: return
         val gShader = glintShader ?: return
+        val logoRect = RectF(actualLogoRect)
         if (bitmap.isRecycled) return
 
         canvas.drawBitmap(bitmap, 0f, 0f, bitmapPaint)
 
-        val shineWidth = actualLogoRect.width() * 0.4f
-        val currentX = actualLogoRect.left + (actualLogoRect.width() * offset)
+        val shineWidth = logoRect.width() * 0.4f
+        val currentX = logoRect.left + (logoRect.width() * offset)
 
         glintMatrix.reset()
         glintMatrix.setTranslate(currentX, 0f)
-        glintMatrix.preRotate(25f, shineWidth / 2f, actualLogoRect.height() / 2f)
+        glintMatrix.preRotate(25f, shineWidth / 2f, logoRect.height() / 2f)
         gShader.setLocalMatrix(glintMatrix)
 
         canvas.drawRect(bounds, paint)
