@@ -21,6 +21,47 @@ A companion app for [ES-DE](https://es-de.org/) that displays beautiful game art
 
 [![Watch the video](https://img.youtube.com/vi/sMCEDMRibs0/0.jpg)](https://youtu.be/sMCEDMRibs0)
 
+## New Features (in beta)
+- **Pagination** - Can now set up multiple pages displaying different types of artwork or videos
+    - Pages/widgets are now separated by systems and games
+    - Pages have various functions to account for different available media and preferences in navigation
+- **Scrapers** - Added support for YouTube, [SteamgridDB](https://www.steamgriddb.com/login) and [IGDB](https://api-docs.igdb.com/#getting-started), the API keys for the latter two can be set in the app drawer settings menu
+- **Media Management** - You can now set alternatives to media from ES-DE through either the scrapers or manual selection
+- **Automatic Music Scraping** - If activated will automatically search on YouTube for the OST of the game and play it in the background. Can be manually overridden through the scraper or turned off.
+- **Improved widget editing** - It's now easier to select, move, resize and stack widgets when there's multiple or large widgets on a page
+- **More text widgets for ES-DE game data** - Now has separate text widgets for title, release date, description, developer, etc.
+
+### Detailed description:
+- **Alt slots** - all the ES-DE media types (marquee, fanart, 2D boxart, etc.) now have alt slots. These can be set either through the scraper or manually to add additional media for a game. Alt slots can be marked as default (meaning it will always be loaded instead of ES-DE's media) on a per game basis
+  - **Manual set**: copies the selected file into the ES-DE companion folder. This can be used to select videos or animated images for types that would normally be image only. Webp or mp4 is recommended over gifs. 
+  - **ES-DE**: any media within the ES-DE folder remains untouched. The alt slots and any media management are purely limited to the companion app.
+- **Page modifiers**
+  - **Default:** when scrolling between games/systems you'll automatically return to this page
+  - **Required:** only displays the page if the background media actually exists, can also be set on a widget level
+    - Can be used to, for example, set up a page that only shows when the game in question has an image for alt slot 1 for fanart
+    - The custom folder and image options override this check whether they exist or not
+  - **Auto transition**: You can set automatic transitions between pages either on a timer or on video end (takes precedence). This respects the required tag if the page in question is missing content.
+  - **Manual transition**: Simply tap on the right or left of the screen to go to the next/previous page. Will automatically skip past invalid required pages or pages marked as auto transition only. When in edit mode (widgets unlocked), you can manually transition to every page and the tap region will be a bit smaller.
+- **Page management**: You can name pages (purely for your own convenience) and use the page manager to swap page order.
+- **Automatic Music Scraping**: Searches for the first result on YouTube, downloads it to a local folder and plays it automatically. While scrolling the music file for the selected game will automatically play. Keep in mind the automatic scraper can give false positives. The music file can be overridden through the YouTube scraper or even by manually replacing the music file. Volume can be adjusted on a per game basis. The app supports a single music file per game.
+- **Pan/zoom animation**: Optional zoom in animation for background images. Helps to make fanart in particular feel less static.
+- **Glint animation**: Optional animation for marquees. Adds a shine/glint animation that plays on page load and then on a slow interval.
+- **Custom Folder/Image** Allows you to set a specific folder or image as your media source. Folders require more manual setup compared to other options and are only recommended if the alt slots, system images or system icons aren't enough to achieve your vision. The main use for this is when you want multiple video pages in the systems view. Both custom folders and images are ignored by the required tag on pages.
+
+#### Custom folder
+Custom folders require a specific folder structure corresponding to ES-DE. For game media the file will have to be in the correct platform folder and have the same filename as the game file. System media needs to be in the systems folder and have the platform name as filename. Here's an example:
+```
+YourCustomFolder/
+├── snes/                                       # Game media for platform
+│   └── Chrono Trigger (U).png                  # Filename needs to match the game filename in ES-DE minus extension
+├── gba/
+│   └── Fire Emblem (E).mp4          
+└── systems/                                    # System media
+    └── wii.mp4             
+    └── n64.png
+```
+
+
 ## 🎮 Features
 
 ### Dynamic Display

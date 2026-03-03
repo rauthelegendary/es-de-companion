@@ -95,7 +95,7 @@ fun GameMediaContent(
     deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
     setManualFileForSlot: (Uri, ContentType, String, String, MediaSlot, () -> Unit) -> Unit
 ) {
-    var selectedType by remember { mutableStateOf(ContentType.BOX_2D) }
+    var selectedType by remember { mutableStateOf(ContentType.MARQUEE) }
     var selectedSlot by remember { mutableStateOf(MediaSlot.Default) }
 
     var activeOverride by remember { mutableStateOf<MediaOverride?>(null) }
@@ -103,7 +103,6 @@ fun GameMediaContent(
 
     var refreshKey by remember { mutableStateOf(0) }
     val scrollState = rememberScrollState()
-
 
     LaunchedEffect(game, selectedType, refreshKey) {
         activeOverride = mediaOverrideRepository.getOverride(game, system, selectedType)

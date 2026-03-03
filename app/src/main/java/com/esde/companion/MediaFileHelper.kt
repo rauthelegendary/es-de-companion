@@ -18,7 +18,7 @@ object MediaFileHelper {
 
         val potentialExtension = fileName.substring(lastDotIndex + 1)
 
-        val isRealExtension = potentialExtension.length in 1..5
+        val isRealExtension = potentialExtension.length in 1..6
                 && potentialExtension.all { it.isLetterOrDigit() }
 
         return if (isRealExtension) {
