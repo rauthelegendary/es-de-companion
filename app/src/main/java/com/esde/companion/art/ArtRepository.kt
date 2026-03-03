@@ -1,17 +1,13 @@
 package com.esde.companion.art
 
-import com.esde.companion.art.LaunchBox.LaunchBoxScraper
-
 class ArtRepository(
     private var sgdbScraper: ArtScraper?,
-    private var igdbScraper: ArtScraper?,
-    private var launchBoxScraper: LaunchBoxScraper?
+    private var igdbScraper: ArtScraper?
 ) {
     fun getScraper(type: ScraperType): ArtScraper? {
         return when(type) {
             ScraperType.SGDB -> sgdbScraper
             ScraperType.IGDB -> igdbScraper
-            ScraperType.LaunchBox -> launchBoxScraper
         }
     }
 
@@ -23,9 +19,6 @@ class ArtRepository(
         if(igdbScraper != null) {
             typesAvailable.add(ScraperType.IGDB)
         }
-        if(launchBoxScraper != null) {
-            typesAvailable.add(ScraperType.LaunchBox)
-        }
         return typesAvailable
     }
 
@@ -34,11 +27,6 @@ class ArtRepository(
             when (type) {
                 ScraperType.SGDB -> sgdbScraper = newScraper
                 ScraperType.IGDB -> igdbScraper = newScraper
-                ScraperType.LaunchBox -> {
-                    if (newScraper is LaunchBoxScraper) {
-                        launchBoxScraper = newScraper
-                    }
-                }
             }
         }
     }
@@ -46,6 +34,5 @@ class ArtRepository(
 
 enum class ScraperType {
     SGDB,
-    IGDB,
-    LaunchBox
+    IGDB
 }

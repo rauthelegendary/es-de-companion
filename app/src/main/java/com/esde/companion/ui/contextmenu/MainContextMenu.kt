@@ -42,7 +42,6 @@ import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.PageEditorItem
 import com.esde.companion.WidgetPage
 import com.esde.companion.art.ArtRepository
-import com.esde.companion.art.LaunchBox.LaunchBoxDao
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideRepository
 import com.esde.companion.data.getCurrentSystemName
@@ -50,7 +49,6 @@ import com.esde.companion.data.isInGameBrowsingMode
 import com.esde.companion.data.isInSystemBrowsingMode
 import com.esde.companion.ost.GameMusicRepository
 import com.esde.companion.ost.YoutubeMediaService
-import com.esde.companion.ost.khinsider.KhSong
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.contextmenu.scraper.ScraperMenuContent
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
@@ -81,10 +79,8 @@ fun MainContextMenu(
     onRenamePage: (String) -> Unit,
     swapMedia: (String, ContentType, String, MediaSlot, MediaSlot) -> Unit,
     deleteMedia: (String, ContentType, String, MediaSlot) -> Unit,
-    launchBoxDao: LaunchBoxDao,
     animationSettings: AnimationSettings,
     musicRepository: GameMusicRepository,
-    onKhMusicSelect: (KhSong, String, (Float) -> Unit) -> Unit,
     isSearchingMusic: Boolean,
     musicResults: List<StreamInfoItem>,
     currentGameVolume: Double,
@@ -189,7 +185,6 @@ fun MainContextMenu(
                                 initialYtSearchQuery = "\"${s.gameName} ${YoutubeMediaService.searchString}\"",
                                 onMusicSearch = onMusicSearch,
                                 onSaveYoutube = onMusicSelect,
-                                onSaveKh = onKhMusicSelect,
                                 musicResults = musicResults,
                                 isSearchingMusic = isSearchingMusic
                             )
@@ -204,7 +199,6 @@ fun MainContextMenu(
                                 mediaManager = mediaManager,
                                 gameFileName = fileName,
                                 systemName = system,
-                                launchBoxDao = launchBoxDao
                             )
                         }
                     }

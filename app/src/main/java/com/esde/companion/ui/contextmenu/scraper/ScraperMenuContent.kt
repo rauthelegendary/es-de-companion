@@ -32,14 +32,13 @@ import androidx.compose.ui.unit.dp
 import com.esde.companion.managers.MediaManager
 import com.esde.companion.art.ArtRepository
 import com.esde.companion.art.GameSearchResult
-import com.esde.companion.art.LaunchBox.LaunchBoxDao
 import com.esde.companion.art.MediaCategory
 import com.esde.companion.art.MediaSearchResult
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ui.ContentType
 import kotlinx.coroutines.launch
 
-enum class ScraperStep { SEARCH, TYPES, GALLERY, SAVE, LB_UPDATE }
+enum class ScraperStep { SEARCH, TYPES, GALLERY, SAVE }
 
 @Composable
 fun ScraperMenuContent(
@@ -49,8 +48,7 @@ fun ScraperMenuContent(
     systemName: String,
     mediaManager: MediaManager,
     onSave: (url: String, contentType: ContentType, slot: Int) -> Unit,
-    mediaService: YoutubeMediaService,
-    launchBoxDao: LaunchBoxDao
+    mediaService: YoutubeMediaService
 ) {
     val scope = rememberCoroutineScope()
     var currentStep by remember { mutableStateOf(ScraperStep.SEARCH) }
@@ -133,28 +131,7 @@ fun ScraperMenuContent(
                                 }
                             )
                         }
-                        if (selectedScraper?.name == "LaunchBox") {
-                            Button(
-                                onClick = { currentStep = ScraperStep.LB_UPDATE },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
-                            ) {
-                                Icon(Icons.Default.Refresh, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("UPDATE METADATA DATABASE")
-                            }
-                        }
                     }
-                }
-
-                ScraperStep.LB_UPDATE -> {
-                    DatabaseUpdateContent(
-                        onComplete = { },
-                        onBack = { currentStep = ScraperStep.SEARCH },
-                        dao = launchBoxDao
-                    )
                 }
                 //after we've selected our game, select an image type
                 ScraperStep.TYPES -> {

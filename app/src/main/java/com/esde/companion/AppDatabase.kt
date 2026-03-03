@@ -9,9 +9,6 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.esde.companion.art.LaunchBox.LaunchBoxDao
-import com.esde.companion.art.LaunchBox.LaunchBoxGame
-import com.esde.companion.art.LaunchBox.LaunchBoxImage
 import com.esde.companion.art.mediaoverride.MediaOverride
 import com.esde.companion.art.mediaoverride.MediaOverrideDao
 import com.esde.companion.data.Widget
@@ -23,13 +20,12 @@ import com.esde.companion.ost.loudness.LoudnessDao
 import com.esde.companion.ost.loudness.LoudnessMetadata
 import com.esde.companion.ui.ContentType
 
-@Database(entities = [LoudnessMetadata::class, MediaOverride::class, LaunchBoxGame::class, LaunchBoxImage::class, ESGameEntity::class, SyncLog::class], version = 6, exportSchema = false)
+@Database(entities = [LoudnessMetadata::class, MediaOverride::class, ESGameEntity::class, SyncLog::class], version = 7, exportSchema = false)
 @TypeConverters(AppConverters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun loudnessDao(): LoudnessDao
     abstract fun mediaOverrideDao(): MediaOverrideDao
-    abstract fun launchBoxDao(): LaunchBoxDao
 
     abstract fun syncDao(): SyncDao
     abstract fun gameDao(): GameDao

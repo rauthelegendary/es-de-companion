@@ -2,17 +2,13 @@ package com.esde.companion.ost
 
 import android.os.Environment
 import com.esde.companion.MediaFileHelper
-import com.esde.companion.ost.khinsider.KhAlbum
-import com.esde.companion.ost.khinsider.KhRepository
-import com.esde.companion.ost.khinsider.KhSong
 import com.esde.companion.ost.loudness.LoudnessService
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
 
 class GameMusicRepository(
     private val downloader: YoutubeMediaService,
-    private val loudnessService: LoudnessService,
-    private val khRepository: KhRepository
+    private val loudnessService: LoudnessService
 ) {
     private val musicDir: File? = File("${Environment.getExternalStorageDirectory()}/ES-DE Companion/music/")
     private val supportedExtensions = listOf("m4a", "mp3", "ogg", "opus", "wav")
@@ -68,19 +64,6 @@ class GameMusicRepository(
 
     private fun deleteExistingFile(gameFilename: String, systemDir: File?) {
         findExistingMusicFile(gameFilename, systemDir)?.delete()
-    }
-
-    //album type is 1 for soundtrack, 2 for gamerip
-    suspend fun getAlbums(query: String, albumType: Int = 1 ): List<KhAlbum> {
-        return khRepository.search(query, albumType)
-    }
-
-    suspend fun getSongsFromAlbum(album: KhAlbum): List<KhSong> {
-        return khRepository.getTracks(album)
-    }
-
-    suspend fun getPlayableUrlForSong(song: KhSong): String {
-        return khRepository.getStreamableUrl(song) ?: ""
     }
 
     suspend fun manualKhSelection(

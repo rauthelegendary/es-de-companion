@@ -22,14 +22,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.esde.companion.ost.GameMusicRepository
 import com.esde.companion.ost.YoutubeMediaService
-import com.esde.companion.ost.khinsider.KhAlbum
-import com.esde.companion.ost.khinsider.KhSong
 import kotlinx.coroutines.launch
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 
 enum class MusicScraperType {
-    YOUTUBE,
-    KHINSIDER
+    YOUTUBE
 }
 
 @Composable
@@ -41,15 +38,11 @@ fun MusicMenuContent(
     onMusicSearch: (String) -> Unit,
     musicResults: List<StreamInfoItem>,
     isSearchingMusic: Boolean,
-    onSaveYoutube: (StreamInfoItem, (Float) -> Unit) -> Unit,
-    onSaveKh: (KhSong, String, (Float) -> Unit) -> Unit
+    onSaveYoutube: (StreamInfoItem, (Float) -> Unit) -> Unit
 ) {
     var selectedScraper by remember { mutableStateOf(MusicScraperType.YOUTUBE) }
 
     var isLoading by remember { mutableStateOf(false) }
-
-    var khAlbumResults by remember { mutableStateOf<List<KhAlbum>?>(null) }
-    var khSongResults by remember { mutableStateOf<List<KhSong>?>(null) }
 
     val scope = rememberCoroutineScope()
 
@@ -66,10 +59,6 @@ fun MusicMenuContent(
                         .clickable {
                             if (selectedScraper != type) {
                                 selectedScraper = type
-                                // Optional: Clear results on switch to keep UI clean
-                                // youtubeResults = emptyList()
-                                // khAlbumResults = null
-                                // khSongResults = null
                             }
                         }
                         .background(if (selectedScraper == type) Color(0xFF444444) else Color.Transparent)
@@ -77,7 +66,7 @@ fun MusicMenuContent(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (type == MusicScraperType.KHINSIDER) "KH" else type.name,
+                        text = type.name,
                         color = if (selectedScraper == type) Color.Cyan else Color.White,
                         fontWeight = FontWeight.Bold
                     )
@@ -103,38 +92,8 @@ fun MusicMenuContent(
                         onVideoSelected = onSaveYoutube
                     )
                 }
-                MusicScraperType.KHINSIDER -> {
-                    KhMenuContent(
-                        initialQuery = initialKhSearchQuery,
-                        isLoading = isLoading,
-                        albumResults = khAlbumResults,
-                        songResults = khSongResults,
-                        onSearch = { query, album ->
-                            scope.launch {
-                                isLoading = true
-                                khSongResults = null
-                                khAlbumResults = musicRepository.getAlbums(query, album)
-                                isLoading = false
-                            }
-                        },
-                        onAlbumSelected = { album ->
-                            scope.launch {
-                                isLoading = true
-                                khSongResults = musicRepository.getSongsFromAlbum(album)
-                                isLoading = false
-                            }
-                        },
-                        onBackToAlbums = {
-                            khSongResults = null
-                        },
-                        onPlaySong = { song, callback ->
-                            scope.launch {
-                                val url = musicRepository.getPlayableUrlForSong(song)
-                                callback(url)
-                            }
-                        },
-                        onSaveSong = onSaveKh
-                    )
+                else -> {
+
                 }
             }
         }

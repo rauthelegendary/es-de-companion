@@ -2,8 +2,6 @@ package com.esde.companion
 
 import android.app.ActivityOptions
 import android.content.BroadcastReceiver
-import android.content.ComponentCallbacks2
-import android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -12,13 +10,8 @@ import android.content.pm.ResolveInfo
 import android.content.res.ColorStateList
 import com.esde.companion.managers.ScriptManager
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Rect
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
-import android.graphics.drawable.PictureDrawable
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
@@ -60,7 +53,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.core.content.edit
 import androidx.core.view.GestureDetectorCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.AudioAttributes
@@ -71,17 +63,14 @@ import androidx.recyclerview.widget.RecyclerView
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.annotation.ExperimentalCoilApi
-import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.decode.SvgDecoder
 import coil.imageLoader
 import com.api.igdb.request.IGDBWrapper
-import com.caverock.androidsvg.SVG
 import com.esde.companion.MediaFileHelper.extractGameFilenameWithoutExtension
 import com.esde.companion.MediaFileHelper.sanitizeGameFilename
 import com.esde.companion.data.Widget.MediaSlot
 import com.esde.companion.art.ArtRepository
-import com.esde.companion.art.LaunchBox.LaunchBoxScraper
 import com.esde.companion.art.MediaService
 import com.esde.companion.art.SystemColorMapper
 import com.esde.companion.art.igdb.IgdbArtScraper
@@ -104,8 +93,6 @@ import com.esde.companion.metadata.GameListSyncManager
 import com.esde.companion.metadata.GameRepository
 import com.esde.companion.ost.GameMusicRepository
 import com.esde.companion.ost.YoutubeMediaService
-import com.esde.companion.ost.khinsider.KhRepository
-import com.esde.companion.ost.khinsider.KhSong
 import com.esde.companion.ost.loudness.LoudnessService
 import com.esde.companion.ui.ContentType
 import com.esde.companion.ui.PageContentType
@@ -130,12 +117,9 @@ import java.io.IOException
 import kotlin.math.abs
 import androidx.core.view.isVisible
 import coil.Coil
-import coil.decode.DecodeResult
 import coil.memory.MemoryCache
-import coil.request.ImageRequest
 import com.esde.companion.art.ApiKeyManager
 import com.esde.companion.art.ArtScraper
-import com.esde.companion.art.LaunchBox.LaunchBoxDao
 import com.esde.companion.art.ScraperType
 import com.esde.companion.data.MusicSource
 import com.esde.companion.data.ScraperCredentials
@@ -145,8 +129,6 @@ import com.esde.companion.ui.contextmenu.WidgetUiState
 import com.esde.companion.ui.widget.WidgetControlMenu
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import org.schabi.newpipe.extractor.timeago.patterns.it
-import java.util.EventListener
 
 
 class ContextMenuStateHolder {
@@ -191,7 +173,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
     private lateinit var menuComposeView: ComposeView
     private lateinit var widgetToolbarMenuView: ComposeView
     private lateinit var artRepository: ArtRepository
-    private lateinit var launchBoxDao: LaunchBoxDao
     private lateinit var mediaOverrideRepository: MediaOverrideRepository
     private lateinit var rootLayout: RelativeLayout
     private lateinit var appDrawer: View
@@ -669,7 +650,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         val database = AppDatabase.getDatabase(this)
         val loudnessDao = database.loudnessDao()
         val mediaOverrideDao = database.mediaOverrideDao()
-        launchBoxDao = database.launchBoxDao()
         val apiKeyManager = ApiKeyManager.getInstance(this)
         mediaOverrideRepository = MediaOverrideRepository(mediaOverrideDao)
 
@@ -682,9 +662,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         }
 
         val youtubeService = YoutubeMediaService(NetworkClientManager.baseClient)
-        val khRepository = KhRepository()
         loudnessService = LoudnessService(loudnessDao)
-        gameMusicRepository = GameMusicRepository(youtubeService,loudnessService, khRepository)
+        gameMusicRepository = GameMusicRepository(youtubeService,loudnessService)
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -862,16 +841,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
                                      originalSlot
                                  )
                              },
-                             launchBoxDao = launchBoxDao,
                              animationSettings = animationSettings,
                              musicRepository = gameMusicRepository,
-                             onKhMusicSelect = { song, url, onProgress ->
-                                 onMusicResultSelectedKh(
-                                     song,
-                                     url,
-                                     onProgress
-                                 )
-                             },
                              currentGameVolume = currentGameVolume,
                              onVolumeChanged = { volume -> onGameVolumeSaved(volume) },
                              setManualFileForSlot = { uri, type, game, system, slot, onComplete -> setManualFileForSlot(uri, type, game, system, slot, onComplete)}
@@ -990,7 +961,6 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         if(creds.sgdbKey != null && creds.sgdbKey.isNotEmpty()) {
             steamGridScraper = SGDBScraper(creds.sgdbKey)
         }
-        val launchBoxScraper = LaunchBoxScraper(launchBoxDao)
 
         if(creds.igdbId != null && creds.igdbSecret != null && creds.igdbId.isNotEmpty() && creds.igdbSecret.isNotEmpty()) {
             val token = TwitchAuth.getTwitchAccessToken(creds.igdbId, creds.igdbSecret)
@@ -1002,9 +972,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
         if(this::artRepository.isInitialized) {
             artRepository.setScraper(steamGridScraper, ScraperType.SGDB)
             artRepository.setScraper(igdbScraper, ScraperType.IGDB)
-            artRepository.setScraper(launchBoxScraper, ScraperType.LaunchBox)
         } else {
-            artRepository = ArtRepository(steamGridScraper, igdbScraper, launchBoxScraper)
+            artRepository = ArtRepository(steamGridScraper, igdbScraper)
         }
 
         if(steamGridScraper != null && igdbScraper != null) {
@@ -4081,21 +4050,6 @@ Access this help anytime from the widget menu!
         lifecycleScope.launch {
             Log.d("CoroutineDebug", "Downloading selected: ${selected.name}")
             gameMusicRepository.manualSelection(gameFilenameSanitized, systemName, selected.url, onProgress)
-            val found = musicManager.onManualSelect(s.gameName ?: "", gameFilenameSanitized, systemName, state)
-            if(found) {
-                Toast.makeText(this@MainActivity, "Saved music!", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun onMusicResultSelectedKh(selected: KhSong, url: String, onProgress: (Float) -> Unit) {
-        val s = state as? AppState.GameBrowsing ?: return
-        val systemName = s.systemName
-        val gameFilenameSanitized = extractGameFilenameWithoutExtension(sanitizeGameFilename(s.gameFilename))
-
-        lifecycleScope.launch {
-            Log.d("CoroutineDebug", "Downloading selected: ${selected.title}")
-            gameMusicRepository.manualKhSelection(gameFilenameSanitized, systemName, url, onProgress)
             val found = musicManager.onManualSelect(s.gameName ?: "", gameFilenameSanitized, systemName, state)
             if(found) {
                 Toast.makeText(this@MainActivity, "Saved music!", Toast.LENGTH_SHORT).show()
