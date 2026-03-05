@@ -6,6 +6,7 @@ import com.esde.companion.art.ArtScraper
 import com.esde.companion.art.GameSearchResult
 import com.esde.companion.art.MediaSearchResult
 import com.esde.companion.art.MediaCategory
+import com.esde.companion.art.ScraperResult
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
@@ -22,17 +23,28 @@ class SGDBScraper (apiKey: String) : ArtScraper {
         .build()
         .create(SteamGridDBService::class.java)
 
-    override suspend fun searchGame(query: String): List<GameSearchResult> {
-        try {
+    override suspend fun searchGame(query: String): ScraperResult {
+        return try {
             val response = service.searchGame(query)
-            return if (response.success) {
-                response.data.map {
+            if (response.success) {
+                ScraperResult.Success(response.data.map {
                     GameSearchResult(it.id, it.name, sourceName)
-                }
-            } else emptyList()
+                })
+            } else {
+                ScraperResult.Error("Search failed — check your API credentials")
+            }
+        } catch (e: java.net.UnknownHostException) {
+            ScraperResult.Error("No internet connection")
+        } catch (e: java.net.SocketTimeoutException) {
+            ScraperResult.Error("Connection timed out")
+        } catch (e: retrofit2.HttpException) {
+            when (e.code()) {
+                401, 403 -> ScraperResult.Error("Invalid API credentials")
+                else -> ScraperResult.Error("Server error (${e.code()})")
+            }
         } catch (e: Exception) {
             Log.e("SteamGrid", "Failed SGDB search", e)
-            return emptyList()
+            ScraperResult.Error("Something went wrong")
         }
     }
 

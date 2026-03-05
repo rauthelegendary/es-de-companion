@@ -8,6 +8,7 @@ import android.provider.MediaStore
 import android.util.Half.toFloat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,17 +25,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.QuestionMark
@@ -66,12 +71,14 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -80,6 +87,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.esde.companion.AnimationSettings
 import com.esde.companion.PageEditorItem
+import com.esde.companion.PageTransition
 import com.esde.companion.WidgetPage
 import com.esde.companion.ui.AnimationStyle
 import com.esde.companion.ui.ContentType
@@ -87,6 +95,10 @@ import com.esde.companion.ui.PageAnimation
 import com.esde.companion.ui.PageContentType
 import com.esde.companion.ui.ScaleType
 import com.esde.companion.ui.contextmenu.pagemanager.PageManagerScreen
+import org.burnoutcrew.reorderable.ReorderableItem
+import org.burnoutcrew.reorderable.detectReorder
+import org.burnoutcrew.reorderable.rememberReorderableLazyListState
+import org.burnoutcrew.reorderable.reorderable
 import org.schabi.newpipe.extractor.timeago.patterns.it
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -113,6 +125,17 @@ fun WidgetMenuContent(
     var sliderValue by remember(currentGameVolume) { mutableFloatStateOf(currentGameVolume.toFloat()) }
     val context = LocalContext.current
     var showPageColorPicker by remember { mutableStateOf(false) }
+
+    val transitions = remember(draftPage.transitions) {
+        mutableStateListOf<PageTransition>().also { it.addAll(draftPage.transitions) }
+    }
+
+    val reorderState = rememberReorderableLazyListState(
+        onMove = { from, to ->
+            transitions.apply { add(to.index, removeAt(from.index)) }
+            draftPage = draftPage.copy(transitions = transitions.toMutableList())
+        }
+    )
 
     val pageImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -338,34 +361,60 @@ fun WidgetMenuContent(
                         MenuToggle("Automatic transition", draftPage.transitionToPage) {
                             draftPage = draftPage.copy(transitionToPage = it)
                         }
-                        if(draftPage.transitionToPage) {
-                            PagePicker(
-                                currentPageIndex = currentPageIndex,
-                                pages = pages,
-                                selectedPage = pages.find { it.id == draftPage.transitionTargetPageId },
-                                onPageSelected = {
-                                    draftPage = draftPage.copy(transitionTargetPageId = it.id)
-                                }
-                            )
+                    if (draftPage.transitionToPage) {
+                        LazyColumn(
+                            state = reorderState.listState,
+                            modifier = Modifier
+                                .heightIn(max = 400.dp)
+                                .reorderable(reorderState),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(transitions, key = { it.id }) { transition ->
+                                ReorderableItem(reorderState, key = transition.id) { isDragging ->
+                                    val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp)
+                                    val index = transitions.indexOf(transition)
 
-                            MenuToggle(
-                                "Transition after video played",
-                                draftPage.transitionToPageAfterVideo
-                            ) {
-                                draftPage = draftPage.copy(transitionToPageAfterVideo = it)
+                                    TransitionEntry(
+                                        index = index,
+                                        transition = transition,
+                                        currentPageIndex = currentPageIndex,
+                                        pages = pages,
+                                        dragModifier = Modifier.detectReorder(reorderState),
+                                        onUpdate = { updated ->
+                                            transitions[index] = updated
+                                            draftPage =
+                                                draftPage.copy(transitions = transitions.toMutableList())
+                                        },
+                                        onDelete = {
+                                            transitions.removeAt(index)
+                                            draftPage =
+                                                draftPage.copy(transitions = transitions.toMutableList())
+                                        }
+                                    )
+                                }
                             }
-                            MenuSlider(
-                                "Transition delay",
-                                draftPage.transitionDelay.toFloat(),
-                                2f,
-                                30f,
-                                "s"
-                            ) {
-                                draftPage = draftPage.copy(transitionDelay = it.toInt())
+                            if (transitions.size < 8) {
+                                item {
+                                    OutlinedButton(
+                                        onClick = {
+                                            transitions.add(PageTransition())
+                                            draftPage =
+                                                draftPage.copy(transitions = transitions.toMutableList())
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Add Transition")
+                                    }
+                                }
                             }
                         }
-
-
+                    }
                 }
             }
 
@@ -978,7 +1027,9 @@ fun PageHeaderSection(
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if(!locked) {
-                ActionButton(label = "Add page", onClick = actions.onAddPage)
+                if(pages.size < 20) {
+                    ActionButton(label = "Add page", onClick = actions.onAddPage)
+                }
 
                 if (currentPageIndex != 0) {
                     ActionButton(
@@ -1099,6 +1150,88 @@ private fun <T> AnimationSelectionRow(
                         maxLines = 1
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun TransitionEntry(
+    index: Int,
+    transition: PageTransition,
+    currentPageIndex: Int,
+    pages: List<WidgetPage>,
+    dragModifier: Modifier = Modifier,
+    onUpdate: (PageTransition) -> Unit,
+    onDelete: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.DragHandle,
+                        contentDescription = "Drag to reorder",
+                        modifier = dragModifier
+                            .size(20.dp)
+                            .padding(end = 4.dp),
+                        tint = Color.Gray
+                    )
+                    Text("Transition ${index + 1}", style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(20.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    PagePicker(
+                        currentPageIndex = currentPageIndex,
+                        pages = pages,
+                        selectedPage = pages.find { it.id == transition.targetPageId },
+                        onPageSelected = { onUpdate(transition.copy(targetPageId = it.id)) }
+                    )
+                }
+                Text("${transition.delay}s", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            }
+
+            Slider(
+                value = transition.delay.toFloat(),
+                onValueChange = { onUpdate(transition.copy(delay = it.toInt())) },
+                valueRange = 2f..30f,
+                modifier = Modifier.height(24.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("After video", style = MaterialTheme.typography.bodySmall, color = Color.White)
+                Switch(
+                    checked = transition.afterVideo,
+                    onCheckedChange = { onUpdate(transition.copy(afterVideo = it)) },
+                    modifier = Modifier.scale(0.75f)
+                )
             }
         }
     }

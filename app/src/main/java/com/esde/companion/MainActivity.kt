@@ -908,11 +908,8 @@ class MainActivity : AppCompatActivity(), ImageLoaderFactory {
             videoCover = findViewById(R.id.videoCover),
             dimmerView = findViewById(R.id.dimmingOverlay),
             musicStop = ::releaseMusicPlayer,
-            widgetHide = ::hideWidgets,
             pathResolver = widgetPathResolver,
             widgetContainer = widgetContainer,
-            rootContainer = rootLayout,
-            menuView = menuComposeView,
             animationSettings = animationSettings,
             imageManager = imageManager,
             mediaManager = mediaManager
@@ -2809,15 +2806,10 @@ Access this help anytime from the widget menu!
                 processPage = currentPage
             }
 
-            //if we have an instant transition, skip loading the current page if possible
-            if(widgetsLocked && !transitionInvalid && processPage.transitionToPage && processPage.transitionDelay == 0 && !processPage.transitionToPageAfterVideo) {
-                startPageTransition(processPage)
-                return@launch
-            }
-
             val pageMediaFile = widgetPathResolver.resolvePage(processPage, state)
-            backgroundBinder.apply(processPage, state, pageMediaFile.content, widgetsLocked,
-                { startPageTransition(processPage) }, forcedRefresh)
+            val transition = if(processPage.transitionToPage) findFirstValidTransition(processPage.transitions) else null
+            backgroundBinder.apply(processPage, state, pageMediaFile.content, widgetsLocked,transition = transition,
+                { startPageTransition(transition?.targetPageId) }, forcedRefresh)
 
             if (processPage.displayWidgets) {
                 val resolved = widgetPathResolver.resolve(
@@ -3048,14 +3040,24 @@ Access this help anytime from the widget menu!
         return false
     }
 
-    private suspend fun flipToPage(id: String, fromTransition: Boolean = false): Boolean {
-        return flipToPage(currentWidgetManager().getPageById(id), fromTransition = fromTransition)
+    fun startPageTransition(targetPageId: String?) {
+        if(widgetsLocked && targetPageId != null && targetPageId.isNotEmpty()) {
+            lifecycleScope.launch {
+                flipToPage(currentWidgetManager().getPageById(targetPageId), fromTransition = true)
+            }
+        }
     }
 
-    fun startPageTransition(from: WidgetPage) {
-        lifecycleScope.launch {
-            flipToPage(from.transitionTargetPageId, fromTransition = true)
+    suspend fun findFirstValidTransition(transitions: List<PageTransition>): PageTransition? {
+        transitions.forEach { transition ->
+            val targetPage = currentWidgetManager().getPageById(transition.targetPageId)
+            if(targetPage != null) {
+                if(isPageValid(targetPage)) {
+                    return transition
+                }
+            }
         }
+        return null
     }
 
     fun cancelAutoTransition() {

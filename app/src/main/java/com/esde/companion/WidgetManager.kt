@@ -102,18 +102,16 @@ class WidgetManager(
 
     fun removeCurrentPage() {
         if (pages.size <= 1) {
-            // Don't delete the last page, just clear its widgets
             pages[0].widgets.clear()
         } else {
             val removedId = pages[currentPageIndex].id
             pages.removeAt(currentPageIndex)
-            // Adjust index so we don't point out of bounds
             if (currentPageIndex >= pages.size) {
                 currentPageIndex = pages.size - 1
             }
             pages.forEach { page ->
-                if (page.transitionTargetPageId == removedId) {
-                    page.transitionTargetPageId = ""
+                page.transitions.removeAll { it.targetPageId == removedId }
+                if (page.transitions.isEmpty()) {
                     page.transitionToPage = false
                 }
             }

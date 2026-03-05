@@ -55,14 +55,11 @@ class BackgroundBinder(
     private val imageView: ImageView,
     private val videoView: PlayerView,
     private val widgetContainer: ViewGroup,
-    private val rootContainer: ViewGroup,
     private val videoCover: View,
     private val dimmerView: View,
     private var videoDelayHandler: Handler = Handler(Looper.getMainLooper()),
     private var musicStop: () -> Unit,
-    private var widgetHide: () -> Unit,
     private val pathResolver: WidgetPathResolver,
-    private val menuView: ComposeView,
     private val animationSettings: AnimationSettings,
     private val imageManager: ImageManager,
     private val mediaManager: MediaManager
@@ -85,9 +82,9 @@ class BackgroundBinder(
     private var widgetsLocked = false
     private var manualMuteInversion = false
     private var previousMediaFile: Any? = null
-
     private var transitionJob: Job? = null
-    private var pendingTransitionCallback: (() -> Unit)? = null
+    private var pendingTransition: PageTransition? = null
+    private var videoLoopListener: Player.Listener? = null
 
     private val audioAttributes = AudioAttributes.Builder()
         .setUsage(C.USAGE_MEDIA)
@@ -107,7 +104,14 @@ class BackgroundBinder(
         }
     }
 
-    fun apply(page: WidgetPage, newState: AppState, mediaFile: Any?, widgetsLocked: Boolean, onTransitionReady: (() -> Unit)? = null, forcedRefresh: Boolean = false) {
+    fun apply(page: WidgetPage,
+              newState: AppState,
+              mediaFile: Any?,
+              widgetsLocked: Boolean,
+              transition: PageTransition? = null,
+              onTransitionReady: (() -> Unit)? = null,
+              forcedRefresh: Boolean = false
+    ) {
         val systemName = newState.getCurrentSystemName()
         val gameName = newState.getCurrentGameFilename()
 
@@ -162,8 +166,8 @@ class BackgroundBinder(
             }
         }
 
-        if(onTransitionReady != null && page.transitionToPage && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)) {
-            scheduleTransition(page, isVideo, onTransitionReady)
+        if(onTransitionReady != null && transition != null && page.transitionToPage && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)) {
+            scheduleTransition(isVideo, transition, onTransitionReady)
         }
     }
 
@@ -274,7 +278,7 @@ class BackgroundBinder(
             stopVideoPlayer()
             if (player == null) buildVideoPlayer()
 
-            val transitionToPageAfterVideo = currentPage?.transitionToPage == true && currentPage?.transitionToPageAfterVideo == true && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)
+            val transitionToPageAfterVideo = currentPage?.transitionToPage == true && pendingTransition?.afterVideo == true && (state is AppState.GameBrowsing || state is AppState.SystemBrowsing)
 
             imageView.visibility = View.GONE
             var mediaItem: MediaItem? = null
@@ -323,25 +327,9 @@ class BackgroundBinder(
                 player?.apply {
                     setMediaItem(mediaItem)
                     volume = 0f
-                    repeatMode = if (transitionToPageAfterVideo) {
-                        Player.REPEAT_MODE_OFF
-                    } else {
-                        Player.REPEAT_MODE_ONE
-                    }
+                    repeatMode = Player.REPEAT_MODE_ONE
                     prepare()
                     playWhenReady = true
-                }
-
-                if (transitionToPageAfterVideo) {
-                    player?.addListener(object : Player.Listener {
-                        override fun onPlaybackStateChanged(state: Int) {
-                            if (state == Player.STATE_ENDED) {
-                                pendingTransitionCallback?.invoke()
-                                pendingTransitionCallback = null
-                                player?.removeListener(this)
-                            }
-                        }
-                    })
                 }
 
                 updateVolume()
@@ -374,23 +362,28 @@ class BackgroundBinder(
         }
     }
 
-    private fun scheduleTransition(page: WidgetPage, isVideo: Boolean, callback: () -> Unit) {
+    private fun scheduleTransition(isVideo: Boolean, transition: PageTransition, onTransitionReady: (() -> Unit)) {
         cancelTransition()
-        pendingTransitionCallback = callback
+        pendingTransition = transition
 
-        if ((!isVideo || !page.transitionToPageAfterVideo) && page.transitionDelay >= 0) {
+        if (!isVideo || !transition.afterVideo) {
             transitionJob = lifecycleOwner.lifecycleScope.launch {
-                delay(page.transitionDelay * 1000L)
-                callback()
-                pendingTransitionCallback = null
+                delay(transition.delay * 1000L)
+                onTransitionReady()
+                pendingTransition = null
             }
+        } else {
+            armTransitionOnLoop(onTransitionReady)
         }
     }
+
 
     fun cancelTransition() {
         transitionJob?.cancel()
         transitionJob = null
-        pendingTransitionCallback = null
+        pendingTransition = null
+        videoLoopListener?.let { player?.removeListener(it) }
+        videoLoopListener = null
     }
 
     private fun updateVolume() {
@@ -418,6 +411,7 @@ class BackgroundBinder(
      * Release video player
      */
     fun releasePlayer() {
+        cancelTransition()
         player?.let { p ->
             try {
                 p.stop()
@@ -495,6 +489,29 @@ class BackgroundBinder(
         } catch (e: Exception) {
             // existing retry logic
         }
+    }
+
+    private fun armTransitionOnLoop(onTransitionReady: () -> Unit) {
+        videoLoopListener?.let { player?.removeListener(it) }
+        val armedAt = System.currentTimeMillis()
+
+        videoLoopListener = object : Player.Listener {
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                    if (System.currentTimeMillis() - armedAt < 2000) {
+                        return
+                    }
+                    player?.removeListener(this)
+                    videoLoopListener = null
+                    onTransitionReady()
+                }
+            }
+        }
+        player?.addListener(videoLoopListener!!)
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) {

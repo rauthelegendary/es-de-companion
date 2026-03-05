@@ -2,7 +2,7 @@ package com.esde.companion.art
 
 interface ArtScraper {
     val sourceName: String
-    suspend fun searchGame(query: String): List<GameSearchResult>
+    suspend fun searchGame(query: String): ScraperResult
     // 1. New: Ask the scraper what categories are available for a specific game
     suspend fun getAvailableMediaTypes(gameId: String): List<MediaCategory>
 
@@ -30,3 +30,8 @@ data class MediaSearchResult(
     val thumb: String,
     val score: Int = 0,
 )
+
+sealed class ScraperResult {
+    data class Success(val results: List<GameSearchResult>) : ScraperResult()
+    data class Error(val message: String) : ScraperResult()
+}

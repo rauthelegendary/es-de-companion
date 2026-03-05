@@ -8,23 +8,23 @@ import com.esde.companion.art.ArtScraper
 import com.esde.companion.art.GameSearchResult
 import com.esde.companion.art.MediaSearchResult
 import com.esde.companion.art.MediaCategory
+import com.esde.companion.art.ScraperResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class IgdbArtScraper() : ArtScraper {
     override val sourceName: String = "IGDB"
 
-    override suspend fun searchGame(query: String): List<GameSearchResult> = withContext(Dispatchers.IO) {
+    override suspend fun searchGame(query: String): ScraperResult = withContext(Dispatchers.IO) {
         val cleanQuery = query.trim()
-        if (cleanQuery.isEmpty()) return@withContext emptyList()
-        Log.d("IGDB_AUTH_CHECK", "Attempting search for: $query using Wrapper instance: ${IGDBWrapper.hashCode()}")
+        if (cleanQuery.isEmpty()) return@withContext ScraperResult.Success(emptyList())
         try {
             val apiQuery = APICalypse()
                 .search(cleanQuery)
                 .fields("id, name, cover.image_id")
                 .limit(10)
 
-            IGDBWrapper.games(apiQuery).map { game ->
+            val results = IGDBWrapper.games(apiQuery).map { game ->
                 GameSearchResult(
                     gameId = game.id.toString(),
                     title = game.name,
@@ -32,12 +32,18 @@ class IgdbArtScraper() : ArtScraper {
                     thumbnail = game.cover?.let { "https://images.igdb.com/igdb/image/upload/t_thumb/${it.imageId}.jpg" }
                 )
             }
-        } catch (e: Exception) {
-            android.util.Log.e("IGDB_SCRAPE", "Search failed for query: $query", e)
-            if (e is com.api.igdb.exceptions.RequestException) {
-                Log.e("IGDB_ERROR", "HTTP Status: ${e.statusCode}")
+            ScraperResult.Success(results)
+        } catch (e: com.api.igdb.exceptions.RequestException) {
+            Log.e("IGDB_ERROR", "HTTP Status: ${e.statusCode}")
+            when (e.statusCode) {
+                401, 403 -> ScraperResult.Error("Invalid IGDB credentials")
+                else -> ScraperResult.Error("IGDB server error (${e.statusCode})")
             }
-            emptyList()
+        } catch (e: java.net.UnknownHostException) {
+            ScraperResult.Error("No internet connection")
+        } catch (e: Exception) {
+            Log.e("IGDB_SCRAPE", "Search failed for query: $query", e)
+            ScraperResult.Error("Search failed")
         }
     }
 
