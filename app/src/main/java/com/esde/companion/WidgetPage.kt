@@ -29,13 +29,11 @@ data class WidgetPage(
     var isRequired: Boolean = false,
     var displayWidgetsOverVideo: Boolean = true,
     var backgroundFallbackType: PageContentType = PageContentType.FANART,
-    var transitionTargetPageId: String = "",
     var transitionToPage: Boolean = false,
-    var transitionToPageAfterVideo: Boolean = false,
-    var transitionDelay: Int = 2,
     var isDefault: Boolean = false,
     var scaleType: ScaleType = ScaleType.CROP,
-    var transitionOnly: Boolean = false
+    var transitionOnly: Boolean = false,
+    var transitions: MutableList<PageTransition> = mutableListOf()
 )
 
 fun WidgetPage.hasSameVisualSettings(other: WidgetPage, isVideo: Boolean = false): Boolean {
@@ -75,3 +73,11 @@ fun WidgetPage.resetValuesForType() {
         solidColor = null
     }
 }
+
+@Serializable
+data class PageTransition(
+    val id: String = UUID.randomUUID().toString(),
+    val targetPageId: String = "",
+    val afterVideo: Boolean = false,
+    val delay: Int = 2
+)

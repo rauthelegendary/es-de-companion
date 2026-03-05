@@ -196,36 +196,24 @@ class MediaManager(private val prefsManager: PreferencesManager) {
     }
 
     fun getLogsPath(): String {
-        // Always use fixed internal storage location for logs
-        // This ensures FileObserver works reliably (doesn't work well on SD card)
         val path = "/storage/emulated/0/ES-DE Companion/logs"
         android.util.Log.d("MainActivity", "Logs path: $path")
         return path
     }
 
     private fun extractSubfolderPath(fullPath: String): String? {
-        // Get everything before the filename
         val beforeFilename = fullPath.substringBeforeLast("/", "")
 
         if (beforeFilename.isEmpty()) {
             return null
         }
-
-        // Check if this is an absolute path (starts with /storage/)
         if (beforeFilename.startsWith("/storage/")) {
-            // Extract just the subfolder structure after the ROM system folder
-            // Path format: /storage/XXXX/ROMs/{system}/{subfolders}/filename
-            // Find the system folder by looking for known ROM folder patterns
             val romsFolderIndex = beforeFilename.indexOf("/ROMs/")
             if (romsFolderIndex == -1) {
-                // Not a standard ROMs folder structure - treat whole path as subfolder
                 return beforeFilename
             }
-            // Get everything after /ROMs/{system}/
             val afterRoms = beforeFilename.substring(romsFolderIndex + "/ROMs/".length)
-            // Skip the system name (first segment after /ROMs/)
             val afterSystem = afterRoms.substringAfter("/", "")
-            // Return the subfolder path, or null if there's nothing after the system
             return if (afterSystem.isNotEmpty()) afterSystem else null
         }
         // Relative path - return as-is
@@ -236,12 +224,14 @@ class MediaManager(private val prefsManager: PreferencesManager) {
         type: ContentType,
         systemName: String,
         gameFilename: String,
-        slot: MediaSlot = MediaSlot.Default
+        slot: MediaSlot = MediaSlot.Default,
+        existingFile: File? = null
     ): File {
         val folderName = getFolderName(type)
         val dir = getDir(systemName, folderName, slot)
         val nameWithoutExt = MediaFileHelper.extractGameFilenameWithoutExtension(sanitizeGameFilename(gameFilename))
-        val extension = if (type == ContentType.VIDEO) "mp4" else "png"
+        val extension = existingFile?.extension
+            ?: if (type == ContentType.VIDEO) "mp4" else "png"
         return File(dir, "$nameWithoutExt${slot.suffix}.$extension")
     }
 

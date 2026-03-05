@@ -35,6 +35,7 @@ import com.esde.companion.art.GameSearchResult
 import com.esde.companion.art.LaunchBox.LaunchBoxDao
 import com.esde.companion.art.MediaCategory
 import com.esde.companion.art.MediaSearchResult
+import com.esde.companion.art.ScraperResult
 import com.esde.companion.ost.YoutubeMediaService
 import com.esde.companion.ui.ContentType
 import kotlinx.coroutines.launch
@@ -57,11 +58,13 @@ fun ScraperMenuContent(
     var selectedScraper by remember { mutableStateOf(repository.getAvailableScraperTypes().firstOrNull()) }
     var searchQuery by remember { mutableStateOf(initialSearchQuery) }
     var selectedCategoryKey by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var searchState by remember { mutableStateOf<SearchState>(SearchState.Idle) }
+
 
     var searchResults by remember { mutableStateOf<List<GameSearchResult>>(emptyList()) }
     var availableCategories by remember { mutableStateOf<List<MediaCategory>>(emptyList()) }
     var galleryImages by remember { mutableStateOf<List<MediaSearchResult>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
     var selectedGameId by remember { mutableStateOf("") }
     var selectedImage by remember { mutableStateOf<MediaSearchResult?>(null) }
     var isVideo by remember {mutableStateOf<Boolean>(false)}
@@ -112,21 +115,33 @@ fun ScraperMenuContent(
                 //search for possible games based on name
                 ScraperStep.SEARCH -> {
                     Column(modifier = Modifier.fillMaxSize()) {
+                        if (searchState is SearchState.Error) {
+                            Text(
+                                text = (searchState as SearchState.Error).message,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                            )
+                        }
                         Box(modifier = Modifier.weight(1f)) {
                             SearchStepContent(
                                 query = searchQuery,
                                 onQueryChange = { searchQuery = it },
-                                isLoading = isLoading,
+                                isLoading = searchState is SearchState.Loading,
                                 onSearchExecute = {
                                     scope.launch {
-                                        isLoading = true
+                                        searchState = SearchState.Loading
                                         val scraper = repository.getScraper(selectedScraper!!)
-                                        searchResults =
-                                            scraper?.searchGame(searchQuery) ?: emptyList()
-                                        isLoading = false
+                                        searchState = when (val result = scraper?.searchGame(searchQuery)) {
+                                            is ScraperResult.Success -> SearchState.Success(result.results)
+                                            is ScraperResult.Error -> SearchState.Error(result.message)
+                                            null -> SearchState.Error("Scraper is not available - please check the API credentials or connection")
+                                        }
                                     }
                                 },
-                                results = searchResults,
+                                results = if (searchState is SearchState.Success)
+                                    (searchState as SearchState.Success).results
+                                else emptyList(),
                                 onGameSelected = { gameId ->
                                     selectedGameId = gameId
                                     currentStep = ScraperStep.TYPES
@@ -229,4 +244,11 @@ fun ScraperMenuContent(
             }
         }
     }
+}
+
+sealed class SearchState {
+    object Idle : SearchState()
+    object Loading : SearchState()
+    data class Success(val results: List<GameSearchResult>) : SearchState()
+    data class Error(val message: String) : SearchState()
 }

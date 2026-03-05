@@ -29,28 +29,28 @@ class MediaService (
         }
     }
 
-    /**
-     * Swaps media assets between two slots
-     */
     suspend fun swapMedia(game: String, type: ContentType, system: String, sourceSlot: Widget.MediaSlot, targetSlot: Widget.MediaSlot) {
-        val sourceFile = mediaManager.findMediaFileDefault(type, system, game, sourceSlot) ?: mediaManager.getPotentialFile(type, system, game, sourceSlot)
-        val targetFile = mediaManager.findMediaFileDefault(type, system, game, targetSlot) ?: mediaManager.getPotentialFile(type, system, game, targetSlot)
+        val sourceFile = mediaManager.findMediaFileDefault(type, system, game, sourceSlot)
+        val targetFile = mediaManager.findMediaFileDefault(type, system, game, targetSlot)
 
-        swapPhysicalFiles(sourceFile, targetFile)
+        val sourcePotential = sourceFile
+            ?: mediaManager.getPotentialFile(type, system, game, sourceSlot, existingFile = targetFile)
+        val targetPotential = targetFile
+            ?: mediaManager.getPotentialFile(type, system, game, targetSlot, existingFile = sourceFile)
 
-        val sourceCrop = sourceFile?.let {
-            File(
-                it.parent,
-                "${it.nameWithoutExtension}_cropped.png"
-            )
-        }
-        val targetCrop = targetFile?.let {
-            File(
-                it.parent,
-                "${it.nameWithoutExtension}_cropped.png"
-            )
-        }
-        swapPhysicalFiles(sourceCrop, targetCrop)
+        val finalSource = if (sourceFile != null && targetFile != null && sourceFile.extension != targetFile.extension) {
+            File(sourceFile.parent, "${sourceFile.nameWithoutExtension}.${targetFile.extension}")
+        } else sourcePotential
+
+        val finalTarget = if (sourceFile != null && targetFile != null && sourceFile.extension != targetFile.extension) {
+            File(targetFile.parent, "${targetFile.nameWithoutExtension}.${sourceFile.extension}")
+        } else targetPotential
+
+        swapPhysicalFiles(sourcePotential, targetPotential, finalSource, finalTarget)
+
+        val sourceCrop = sourcePotential?.let { File(it.parent, "${it.nameWithoutExtension}_cropped.png") }
+        val targetCrop = targetPotential?.let { File(it.parent, "${it.nameWithoutExtension}_cropped.png") }
+        swapPhysicalFiles(sourceCrop, targetCrop, sourceCrop, targetCrop)
 
         val currentOverride = mediaOverrideRepository.getOverride(game, system, type)
         if (currentOverride?.altSlot == sourceSlot) {
@@ -60,14 +60,15 @@ class MediaService (
         }
     }
 
-    private fun swapPhysicalFiles(f1: File?, f2: File?) {
-        val temp = File(f1?.parent, "swap_temp_${System.currentTimeMillis()}")
-
+    private fun swapPhysicalFiles(f1: File?, f2: File?, f1Target: File? = f1, f2Target: File? = f2) {
         val f1Exists = f1?.exists() == true
         val f2Exists = f2?.exists() == true
+        if (!f1Exists && !f2Exists) return
+
+        val temp = File(f1?.parent, "swap_temp_${System.currentTimeMillis()}")
 
         if (f1Exists) f1?.renameTo(temp)
-        if (f2Exists) f2?.renameTo(f1!!)
-        if (f1Exists) temp.renameTo(f2!!)
+        if (f2Exists) f2?.renameTo(f1Target!!)
+        if (f1Exists) temp.renameTo(f2Target!!)
     }
 }
