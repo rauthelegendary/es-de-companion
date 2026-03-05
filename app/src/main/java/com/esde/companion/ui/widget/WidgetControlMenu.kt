@@ -45,6 +45,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.extractor.text.webvtt.WebvttCssStyle
 import com.esde.companion.WidgetMode
 import com.esde.companion.ui.contextmenu.WidgetUiState
 
@@ -96,7 +97,7 @@ fun WidgetControlMenu(
                     Row(
                         modifier = Modifier
                             .padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if ((uiState.mode == WidgetMode.MOVING || uiState.mode == WidgetMode.RESIZING)) {
@@ -135,7 +136,7 @@ fun WidgetControlMenu(
 
                             Box(Modifier.width(1.dp).height(24.dp).background(Color(0xFF444444)))
 
-                            MenuButton(Icons.Default.Lock, "Save & Close", { onClose() })
+                            MenuButton(Icons.Default.Lock, "Save", { onClose() })
                         }
                     }
                 }

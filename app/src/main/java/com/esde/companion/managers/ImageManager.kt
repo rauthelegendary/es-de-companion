@@ -5,6 +5,7 @@ import android.graphics.Matrix
 import android.graphics.drawable.Animatable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.icu.util.ULocale.getBaseName
 import android.view.View
 import android.widget.ImageView
 import coil.imageLoader
@@ -47,7 +48,8 @@ class ImageManager(
         system: String = "",
         game: String = "",
         isSystemLogo: Boolean = false,
-        scaleType: ScaleType? = null
+        scaleType: ScaleType? = null,
+        disableCache: Boolean = false
     ) {
         activeRequests[imageView]?.dispose()
         activeRequests.remove(imageView)
@@ -77,7 +79,7 @@ class ImageManager(
             attempts.add(getTextDrawable(system, game))
         }
 
-        executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType)
+        executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType, disableCache)
     }
 
     private fun executeLoadChain(
@@ -87,7 +89,8 @@ class ImageManager(
         panZoom: Boolean,
         useGlint: Boolean,
         playAnimation: Boolean,
-        scaleType: ScaleType?
+        scaleType: ScaleType?,
+        disableCache: Boolean
     ) {
         val current = attempts.removeFirstOrNull()
         if(current == null) {
@@ -95,7 +98,7 @@ class ImageManager(
                 imageView.alpha = 0f
                 return
             } else {
-                executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType)
+                executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType, disableCache)
                 return
             }
         }
@@ -115,12 +118,16 @@ class ImageManager(
                     .allowHardware(true)
                     .precision(Precision.EXACT)
                     .apply {
-                        val isPotentialAnim = when (current) {
-                            is File -> CoilUtils.isPotentialAnimation(current)
-                            is String -> CoilUtils.isPotentialAnimation(context, current)
-                            else -> false
+                        if(disableCache) {
+                            memoryCachePolicy(CachePolicy.READ_ONLY)
+                        } else {
+                            val isPotentialAnim = when (current) {
+                                is File -> CoilUtils.isPotentialAnimation(current)
+                                is String -> CoilUtils.isPotentialAnimation(context, current)
+                                else -> false
+                            }
+                            if (isPotentialAnim) memoryCachePolicy(CachePolicy.READ_ONLY)
                         }
-                        if (isPotentialAnim) memoryCachePolicy(CachePolicy.READ_ONLY)
                     }
                     .target(
                         onStart = { placeholder ->
@@ -138,7 +145,7 @@ class ImageManager(
                                 result, isBackground, panZoom, useGlint, playAnimation)
                         },
                         onError = { error ->
-                            executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType)
+                            executeLoadChain(imageView, attempts, isBackground, panZoom, useGlint, playAnimation, scaleType, disableCache)
                         }
                     )
                     .build()
