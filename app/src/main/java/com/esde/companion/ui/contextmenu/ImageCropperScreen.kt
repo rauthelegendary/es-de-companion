@@ -85,7 +85,7 @@ fun ImageCropperScreen(
                 FilterChip(
                     selected = !is169,
                     onClick = { is169 = false },
-                    label = { Text("31:27 (Ayn Thor Bottom screen)") }
+                    label = { Text("31:27 (Bottom screen)") }
                 )
             }
 

@@ -79,10 +79,17 @@ class GlintView @JvmOverloads constructor(
         animator.cancel()
         viewScope.cancel()
         viewScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-        if (width > 0 && height > 0) {
-            scheduleShadowBuild(drawable)
+        post {
+            if (width > 0 && height > 0) {
+                scheduleShadowBuild(drawable)
+            }
         }
         startGlintLoop()
+    }
+
+    override fun setImageMatrix(matrix: Matrix?) {
+        super.setImageMatrix(matrix)
+        scheduleShadowBuild(drawable)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldW: Int, oldH: Int) {

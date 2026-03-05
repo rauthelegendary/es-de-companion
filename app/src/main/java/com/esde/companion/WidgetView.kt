@@ -1,18 +1,12 @@
 package com.esde.companion
 
-import android.R
-import android.R.attr.height
-import android.R.attr.path
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.Animatable
-import android.graphics.drawable.Drawable
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -20,15 +14,10 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.View.TEXT_ALIGNMENT_CENTER
-import android.view.View.TEXT_ALIGNMENT_TEXT_END
-import android.view.View.TEXT_ALIGNMENT_TEXT_START
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.RelativeLayout
 import android.widget.TextView
-import androidx.compose.ui.unit.dp
-import androidx.core.os.HandlerCompat.postDelayed
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -38,10 +27,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import be.tarsos.dsp.beatroot.Peaks.post
 import coil.dispose
 import com.esde.companion.data.Widget.MediaSlot
-import com.esde.companion.animators.GlintDrawable
 import com.esde.companion.data.Widget
 import com.esde.companion.managers.ImageManager
 import com.esde.companion.managers.MediaManager
@@ -317,12 +304,12 @@ class WidgetView(
 
     private fun drawResizeHandles(canvas: Canvas) {
         val handleLength = 60f
-        val handleThickness = 16f
+        val handleThickness = 20f
 
         val handlePaintThick = Paint().apply {
             style = Paint.Style.STROKE
             strokeWidth = handleThickness
-            color = 0xFFFFFFFF.toInt()
+            color = 0xFF4CAF50.toInt()
             strokeCap = Paint.Cap.ROUND
         }
 
@@ -518,7 +505,8 @@ class WidgetView(
             system = system,
             game = game,
             textFallback = widget.contentType == ContentType.MARQUEE || widget.contentType == ContentType.SYSTEM_LOGO,
-            isSystemLogo = widget.contentType == ContentType.SYSTEM_LOGO
+            isSystemLogo = widget.contentType == ContentType.SYSTEM_LOGO,
+            disableCache = viewToUse == glintView
         )
         viewToUse.visibility = VISIBLE
     }
@@ -857,9 +845,6 @@ class WidgetView(
     }
 
     private fun resetImage() {
-        (imageView.drawable as? GlintDrawable)?.let { glint ->
-            glint.stop()
-        }
         (imageView.drawable as? Animatable)?.stop()
         imageView.setImageDrawable(null)
         imageView.dispose()

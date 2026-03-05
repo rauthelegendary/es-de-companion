@@ -60,9 +60,6 @@ fun ScraperMenuContent(
     var selectedCategoryKey by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var searchState by remember { mutableStateOf<SearchState>(SearchState.Idle) }
-
-
-    var searchResults by remember { mutableStateOf<List<GameSearchResult>>(emptyList()) }
     var availableCategories by remember { mutableStateOf<List<MediaCategory>>(emptyList()) }
     var galleryImages by remember { mutableStateOf<List<MediaSearchResult>>(emptyList()) }
     var selectedGameId by remember { mutableStateOf("") }
@@ -87,8 +84,8 @@ fun ScraperMenuContent(
                         .weight(1f)
                         .clickable {
                             selectedScraper = type
-                            // Reset search results when switching scrapers to avoid confusion
-                            searchResults = emptyList()
+                            //reset search results when switching scrapers to avoid confusion
+                            searchState = SearchState.Idle
                             currentStep = ScraperStep.SEARCH
                         }
                         .background(if (selectedScraper == type) Color(0xFF444444) else Color.Transparent)
