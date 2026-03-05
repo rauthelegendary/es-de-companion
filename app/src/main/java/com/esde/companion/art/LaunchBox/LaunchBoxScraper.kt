@@ -4,7 +4,9 @@ import com.esde.companion.art.ArtScraper
 import com.esde.companion.art.GameSearchResult
 import com.esde.companion.art.MediaCategory
 import com.esde.companion.art.MediaSearchResult
+import com.esde.companion.art.ScraperResult
 import com.esde.companion.ui.ContentType
+
 
 class LaunchBoxScraper(
     private val dao: LaunchBoxDao
@@ -12,16 +14,17 @@ class LaunchBoxScraper(
     override val sourceName = "LaunchBox"
     private val BASE_URL = ""
 
-    override suspend fun searchGame(query: String): List<GameSearchResult> {
+
+    override suspend fun searchGame(query: String): ScraperResult {
         val dbResults = dao.searchGames("%${query.replace(" ", "%")}%")
-        return dbResults.map {
+        return ScraperResult.Success(dbResults.map {
             GameSearchResult(
                 gameId = it.databaseId,
                 title = it.name,
                 platform = it.platform,
                 source = sourceName
             )
-        }
+        })
     }
 
     override suspend fun getAvailableMediaTypes(gameId: String): List<MediaCategory> {

@@ -3,10 +3,8 @@ package com.esde.companion.art
 interface ArtScraper {
     val sourceName: String
     suspend fun searchGame(query: String): ScraperResult
-    // 1. New: Ask the scraper what categories are available for a specific game
     suspend fun getAvailableMediaTypes(gameId: String): List<MediaCategory>
 
-    // 2. Updated: Fetch images based on a category ID/Key
     suspend fun fetchImages(gameId: String, categoryKey: String, pageNumber: Int?): List<MediaSearchResult>
 }
 
